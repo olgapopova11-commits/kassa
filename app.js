@@ -182,13 +182,18 @@ async function boot(){
   }
   S.store = ls.get('kassa_store', null) || (me.store_ids||[])[0] || (S.stores[0]||{}).id;
   if(!S.stores.some(s=>s.id===S.store)) S.store = (S.stores[0]||{}).id;
+  { const { data } = await sb.rpc('get_tab_access'); S.tabAccess = data || {}; }
   renderShell(); await loadCatalog(); render(); flushQueue(); subscribeReqs();
 }
 
 /* ---------- каркас ---------- */
 function renderShell(){
   const tabs = [['pos','Продажа'],['shifts','Смены'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты']];
-  if(isBoss()) { tabs.splice(1,0,['analytics','Аналитика']); tabs.push(['nom','Номенклатура']); tabs.push(['site','Сайт']); tabs.push(['emps','Сотрудники']); }
+  if(isBoss()) { tabs.splice(1,0,['analytics','Аналитика']); tabs.push(['bonus','Бонусные карты']); tabs.push(['nom','Номенклатура']); tabs.push(['site','Сайт']); tabs.push(['emps','Сотрудники']); }
+  // настройка владельца: какие вкладки видит каждая роль
+  const acc = (S.tabAccess||{})[S.me.role];
+  if(S.me.role !== 'owner' && Array.isArray(acc)){ const keep = tabs.filter(([v]) => acc.includes(v)); tabs.splice(0, tabs.length, ...keep); }
+  if(tabs.length && !tabs.some(([v]) => v===S.view)) S.view = tabs[0][0];
   if(isViewer()){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pos' && v!=='emps')); if(!S.view || S.view==='pos' || S.view==='emps') S.view = 'analytics'; }
 
   $('#app').innerHTML = `<header id="hdr"></header><main id="main"></main>
@@ -212,7 +217,7 @@ function render(){
   document.body.classList.toggle('readonly', !canEdit(S.store));
   document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === S.view));
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -1090,6 +1095,75 @@ async function siteSet(key, pid, status){
 }
 
 /* ---------- сотрудники ---------- */
+/* ---------- бонусные карты ---------- */
+const BK = { brand:'sunshine', q:'', filter:'bonus', sort:'balance', off:0, stats:null, list:null, cur:null, card:null };
+const KIND = { earn:'Начисление за покупку', spend:'Списание в чеке', birthday:'День рождения', import:'Перенос из Sagi', manual:'Ручная корректировка', burn:'Сгорание', return:'Возврат' };
+async function loadBonus(){
+  BK.list = null;
+  const [st, ls_] = await Promise.all([ sb.rpc('bonus_stats', { p_brand:BK.brand }), sb.rpc('bonus_clients', { p_brand:BK.brand, p_q:BK.q, p_filter:BK.filter, p_sort:BK.sort, p_offset:BK.off, p_limit:50 }) ]);
+  if(st.error) toast(errText(st.error)); if(ls_.error) toast(errText(ls_.error));
+  BK.stats = st.data || {}; BK.list = ls_.data || { rows:[], total:0 };
+}
+async function openBonusClient(id){ BK.cur = id; BK.card = null; render(); const { data, error } = await sb.rpc('bonus_client', { p_customer:id, p_brand:BK.brand }); if(error) toast(errText(error)); BK.card = data; render(); }
+const dshort = d => d ? new Date(d).toLocaleDateString('ru-RU') : '—';
+function renderBonus(){
+  const T = BK.stats || {}, L = BK.list, C = BK.card, ro = isViewer();
+  const n = v => Math.round(+v||0).toLocaleString('ru-RU');
+  $('#main').innerHTML = `<h2>Бонусные карты</h2>
+  <div class="filters"><div class="seg">${[['sunshine','Sunshine'],['moon','MOON']].map(([k,v])=>`<button data-bkbrand="${k}" aria-pressed="${BK.brand===k}">${v}</button>`).join('')}</div>
+    <span class="meta" style="align-self:center">Бонусы у брендов раздельные, база клиентов общая.</span></div>
+  <div class="pays" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr))">
+    ${[['Клиентов',n(T.clients)],['С бонусами',n(T.with_bonus)],['Бонусов на счетах',n(T.balance)],['Ждут активации',n(T.pending)],['Сгорят за 30 дней',n(T.burn30)],['Начислено за 30 дней',n(T.accrued30)],['Списано за 30 дней',n(T.spent30)],['Новых за 30 дней',n(T.new30)],['Дни рождения в базе',n(T.birthdays)+(T.bday_week?` · ${T.bday_week} на этой неделе`:'')]]
+      .map(([k,v])=>`<div class="card"><div class="label">${k}</div><div class="total num" style="font-size:20px">${v}</div></div>`).join('')}
+  </div>
+  <div class="grid2" style="margin-top:12px"><div>
+    <div class="filters"><input id="bk-q" placeholder="Телефон или имя" value="${esc(BK.q)}" style="flex:1;min-width:160px" inputmode="search">
+      <select id="bk-filter">${[['bonus','С бонусами'],['all','Все клиенты'],['nobonus','Без бонусов'],['birthday','ДР в ближайшие 7 дней'],['nobday','Без даты рождения']].map(([k,v])=>`<option value="${k}" ${BK.filter===k?'selected':''}>${v}</option>`).join('')}</select>
+      <select id="bk-sort">${[['balance','По бонусам'],['purchases','По числу покупок'],['total','По сумме покупок'],['last','По последней покупке'],['name','По имени']].map(([k,v])=>`<option value="${k}" ${BK.sort===k?'selected':''}>${v}</option>`).join('')}</select></div>
+    ${!L?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${n(L.total)}</p>
+    <div class="list">${L.rows.map(c=>`<button class="prod" style="grid-template-columns:minmax(0,1fr) auto;${BK.cur===c.id?'background:var(--soft)':''}" data-bkopen="${c.id}"><span><b>${esc(c.name||'Без имени')}</b><br>
+      <span class="meta num">${esc(c.phone)} · покупок ${c.purchases||0} на ${fmt(c.total||0)}${c.last_at?' · последняя '+dshort(c.last_at):''}${c.birthday?' · ДР '+new Date(c.birthday).toLocaleDateString('ru-RU',{day:'numeric',month:'long'}):''}</span>
+      ${c.next_burn?`<br><span class="meta">ближайшее сгорание ${dshort(c.next_burn)}</span>`:''}</span><span class="price num">${n(c.balance)} б.</span></button>`).join('') || '<div class="empty">Никого не найдено</div>'}</div>
+    ${BK.off||L.rows.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-bkpage="-1" ${BK.off?'':'disabled'}>Назад</button><span class="meta">${BK.off+1}–${BK.off+L.rows.length}</span><button class="btn" data-bkpage="1" ${L.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`}
+  </div><div>
+    ${!BK.cur?'<div class="card empty">Выберите клиента слева</div>':!C?'<div class="card empty">Загружаем…</div>':(()=>{ const k=C.client||{}; return `<div class="card stack">
+      <div class="row"><h2 style="margin:0">${esc(k.name||'Без имени')}</h2><span class="chip">${{new:'новый',regular:'постоянный',imported:'из Sagi'}[k.status]||k.status||''}</span></div>
+      <div class="meta num">${esc(k.phone)} · покупок ${k.purchases||0} на ${fmt(k.total||0)}${k.last_at?' · последняя '+dshort(k.last_at):''}</div>
+      <div class="total num">${n(k.available)} бонусов доступно</div>
+      ${ro?'':`<div class="row" style="flex-wrap:wrap;justify-content:flex-start"><input id="bk-name" value="${esc(k.name||'')}" placeholder="Имя" style="flex:1;min-width:140px">
+        <label class="meta">День рождения <input id="bk-bd" type="date" value="${esc(k.birthday||'')}"></label><button class="btn small" id="bk-save">Сохранить</button></div>
+      <div class="cust stack"><span class="label">Корректировка бонусов</span>
+        <div class="row" style="flex-wrap:wrap;justify-content:flex-start"><input id="bk-amt" type="number" placeholder="+500 или −500" style="width:140px" inputmode="numeric">
+        <input id="bk-ttl" type="number" value="91" min="1" style="width:80px" title="Срок действия начисления, дней"><span class="meta">дней</span>
+        <input id="bk-reason" placeholder="Причина *" style="flex:1;min-width:140px"><button class="btn small primary" id="bk-adj">Провести</button></div>
+        <span class="meta">Плюс — начислить (действует указанное число дней), минус — списать.</span></div>`}
+      <h2 style="margin:8px 0 0">История бонусов</h2>
+      <div class="scroll"><table><thead><tr><th>Дата</th><th>Операция</th><th>Сумма</th><th>Остаток</th><th>Срок</th></tr></thead><tbody>
+      ${(C.history||[]).map(h=>`<tr><td class="num">${dshort(h.at)}</td><td>${esc(KIND[h.kind]||h.kind)}${h.reason&&h.reason!==KIND[h.kind]?`<br><span class="meta">${esc(h.reason)}</span>`:''}${h.by?`<br><span class="meta">${esc(h.by)}${h.store?' · '+esc(storeName(h.store)):''}</span>`:''}</td>
+        <td class="num" style="color:${h.amount<0?'var(--bad)':'var(--ok)'}">${h.amount>0?'+':''}${n(h.amount)}</td><td class="num">${h.amount>0?n(h.remaining):''}</td>
+        <td class="meta">${h.amount>0?(new Date(h.available_at)>new Date()?'с '+dshort(h.available_at)+'<br>':'')+(h.expires_at?'до '+dshort(h.expires_at):''):''}</td></tr>`).join('') || '<tr><td colspan="5" class="meta">Операций нет</td></tr>'}</tbody></table></div>
+      <h2 style="margin:8px 0 0">Покупки в ${BK.brand==='moon'?'MOON':'Sunshine'}</h2>
+      <div class="scroll"><table><tbody>${(C.sales||[]).map(x=>`<tr><td class="num">${dshort(x.at)}</td><td>${x.kind==='return'?'Возврат':'Чек'} ${x.number?'№'+x.number:''}</td><td>${esc(storeName(x.store))}</td><td class="num">${fmt(x.total)}</td></tr>`).join('') || '<tr><td class="meta">Покупок в новой кассе пока нет (история Sagi — только итоги)</td></tr>'}</tbody></table></div>
+    </div>`; })()}
+  </div></div>`;
+}
+
+/* ---------- доступ к вкладкам по ролям ---------- */
+const ALL_TABS = [['pos','Продажа'],['analytics','Аналитика'],['shifts','Смены'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты'],['bonus','Бонусные карты'],['nom','Номенклатура'],['site','Сайт'],['emps','Сотрудники']];
+const BOSS_ONLY = ['analytics','bonus','nom','site','emps'];
+function defaultTabs(role){ const boss = ['manager','viewer'].includes(role);
+  return ALL_TABS.map(([v])=>v).filter(v => (boss || !BOSS_ONLY.includes(v)) && !(role==='viewer' && (v==='pos'||v==='emps'))); }
+function accessHtml(){
+  if(S.me.role!=='owner') return '';
+  const roles = ['manager','consultant','purchaser','viewer'], A = S.tabAccess || {};
+  const has = (r,v) => Array.isArray(A[r]) ? A[r].includes(v) : defaultTabs(r).includes(v);
+  return `<div class="card stack" style="margin-top:16px"><b>Какие вкладки видит каждая роль</b>
+    <p class="meta" style="margin:0">Владелец видит всё. Галочка — вкладка видна. Данные защищены и в базе: например, консультант не увидит выручку и закупочные цены, даже если открыть ему «Аналитику» — нужны и права роли.</p>
+    <div class="scroll"><table><thead><tr><th>Вкладка</th>${roles.map(r=>`<th>${ROLE[r]}</th>`).join('')}</tr></thead><tbody>
+    ${ALL_TABS.map(([v,t])=>`<tr><td>${t}</td>${roles.map(r=>`<td><input type="checkbox" data-acc="${r}:${v}" ${has(r,v)?'checked':''} aria-label="${ROLE[r]}: ${t}"></td>`).join('')}</tr>`).join('')}</tbody></table></div>
+    <div class="row"><button class="btn small" id="acc-reset">Вернуть по умолчанию</button><span class="meta">Изменения сохраняются сразу; сотрудник увидит их после обновления страницы.</span></div></div>`;
+}
+
 async function loadEmps(){ const { data } = await sb.from('employees').select('*').order('created_at'); S.emps = data || []; }
 function renderEmps(){
   $('#main').innerHTML = `<h2>Сотрудники</h2>
@@ -1104,7 +1178,7 @@ function renderEmps(){
       <td><select data-erole="${e.id}">${Object.entries(ROLE).map(([k,v])=>`<option value="${k}" ${e.role===k?'selected':''}>${v}</option>`).join('')}</select></td>
       <td>${['owner','viewer'].includes(e.role)?'<span class="meta">все магазины</span>':(e.role==='manager'?'<div class="meta" style="max-width:240px">Видит все магазины. Отмеченные — подтверждает перемещения в них из другого города:</div>':'')+S.allStores.map(s=>{ const ids=e.store_ids||(e.home_store_id?[e.home_store_id]:[]);
         return `<label class="meta" style="display:block;white-space:nowrap"><input type="checkbox" data-estores="${e.id}:${s.id}" ${ids.includes(s.id)?'checked':''}> ${esc(BRAND[s.brand]+' · '+s.address)}</label>`; }).join('')}</td>
-      <td><label><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''}> включён</label></td></tr>`).join('')}</tbody></table></div>`;
+      <td><label><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''}> включён</label></td></tr>`).join('')}</tbody></table></div>${accessHtml()}`;
 }
 async function updEmp(id, patch){ const { error } = await sb.from('employees').update(patch).eq('id', id); if(error) toast(errText(error)); else toast('Сохранено'); }
 
@@ -1166,6 +1240,14 @@ document.addEventListener('click', async e => {
   else if(d.nmlink||d.nmunlink){ const key=d.nmlink||d.nmunlink, [site,uid]=key.split(':');
     const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product: d.nmlink?S.nm.ed.id:null, p_status: d.nmlink?'confirmed':'rejected' });
     if(error) toast(errText(error)); else { toast(d.nmlink?'Связано с сайтом':'Отвязано'); S.nm.sq=''; S.nm.sfound=[]; await loadNom(); const fr=S.nm.data.rows.find(r=>r.id===S.nm.ed.id); if(fr) nmOpen(fr); else render(); } }
+  else if(d.bkbrand){ BK.brand=d.bkbrand; BK.off=0; BK.cur=null; BK.card=null; render(); await loadBonus(); render(); }
+  else if(d.bkopen){ await openBonusClient(d.bkopen); }
+  else if(d.bkpage){ BK.off=Math.max(0,BK.off+50*(+d.bkpage)); render(); await loadBonus(); render(); }
+  else if(t.id==='bk-save'){ const { error } = await sb.rpc('customer_edit', { p_customer:BK.cur, p_name:$('#bk-name').value, p_birthday:$('#bk-bd').value||null }); if(error) toast(errText(error)); else { toast('Сохранено'); await openBonusClient(BK.cur); } }
+  else if(t.id==='bk-adj'){ const amt=+$('#bk-amt').value; t.disabled=true;
+    const { error } = await sb.rpc('bonus_adjust', { p_customer:BK.cur, p_brand:BK.brand, p_amount:amt, p_reason:$('#bk-reason').value, p_ttl_days:+$('#bk-ttl').value||91 });
+    if(error){ toast(errText(error)); t.disabled=false; } else { toast('Бонусы скорректированы'); await openBonusClient(BK.cur); loadBonus().then(render); } }
+  else if(t.id==='acc-reset'){ const { error } = await sb.rpc('set_tab_access', { p:{} }); if(error) toast(errText(error)); else { S.tabAccess={}; toast('Доступы по умолчанию'); render(); } }
   else if(t.id==='ne-add'){ const ids=[...document.querySelectorAll('.ne-store:checked')].map(x=>+x.value);
     const { error } = await sb.rpc('employee_add', { p_phone:$('#ne-phone').value, p_name:$('#ne-name').value, p_role:$('#ne-role').value, p_store_ids:ids });
     if(error) toast(errText(error)); else { toast('Сотрудник добавлен'); await loadEmps(); render(); } }
@@ -1213,6 +1295,10 @@ document.addEventListener('change', async e => {
   if(d.erole) updEmp(d.erole, { role:t.value });
   if(d.ephone){ const p = normPhone(t.value); if(t.value.trim() && !p) return toast('Телефон: 10 цифр после +7'); if(p && S.emps.some(x=>x.id!==d.ephone && x.phone===p)) return toast('Этот телефон уже у другого сотрудника'); t.value = p||''; const e2 = S.emps.find(x=>x.id===d.ephone); if(e2) e2.phone = p; updEmp(d.ephone, { phone: p }); }
   if(d.stf){ (S.stockF ||= {})[d.stf]=t.value; await loadStockView(); render(); }
+  if(d.acc){ const [r,v]=d.acc.split(':'); const A={...(S.tabAccess||{})}; const cur=new Set(Array.isArray(A[r])?A[r]:defaultTabs(r)); t.checked?cur.add(v):cur.delete(v);
+    A[r]=ALL_TABS.map(([x])=>x).filter(x=>cur.has(x)); const { error } = await sb.rpc('set_tab_access', { p:A }); if(error){ toast(errText(error)); t.checked=!t.checked; } else { S.tabAccess=A; toast('Сохранено'); } }
+  if(t.id==='bk-filter'){ BK.filter=t.value; BK.off=0; render(); await loadBonus(); render(); }
+  if(t.id==='bk-sort'){ BK.sort=t.value; BK.off=0; render(); await loadBonus(); render(); }
   if(t.id==='cf-store'){ S.cf.store=t.value; await loadCerts(); render(); }
   if(t.id==='nm-cat'){ S.nm.cat=t.value; S.nm.off=0; render(); await loadNom(); render(); }
   if(t.id==='nm-arch'){ S.nm.arch=t.checked; S.nm.off=0; render(); await loadNom(); render(); }
@@ -1232,6 +1318,7 @@ document.addEventListener('input', e => {
   else if(d.pamt){ S.pays[d.pamt] = Math.max(0,+t.value||0); if(d.pamt==='bonus') S.pays.bonus = Math.min(S.pays.bonus, maxBonus()); render(); }
   else if(t.id==='cert-code'){ S.certCode = t.value; }
   else if(t.id==='cert-q'){ S.certQ = t.value; render(); }
+  else if(t.id==='bk-q'){ BK.q=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ BK.off=0; await loadBonus(); render(); }, 400); }
   else if(t.id==='cf-q'){ S.cf.q=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ await loadCerts(); render(); }, 400); }
   else if(t.id==='nm-q'){ S.nm.q=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ S.nm.off=0; await loadNom(); render(); }, 400); }
   else if(d.nf && t.type!=='checkbox' && t.tagName!=='SELECT'){ S.nm.ed[d.nf]=t.value; }
@@ -1263,6 +1350,7 @@ document.addEventListener('click', async e => {
   if(S.view==='stock' && !S.stockRows.length){ await loadStockView(); render(); }
   if(S.view==='site'){ render(); await loadSite(); render(); }
   if(S.view==='nom'){ render(); await loadNom(); render(); }
+  if(S.view==='bonus'){ render(); await loadBonus(); render(); }
   if(S.view==='analytics'){ S.an=null; render(); await loadAnalytics(); render(); }
 });
 
