@@ -124,3 +124,5 @@ body.readonly #main .btn.primary:not([data-trok]):not([data-period]):not([data-s
 .rleg{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11px;margin-top:8px}
 .rleg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:var(--accent)}
 .rleg i.k-weekend{background:#7b5ea7}.rleg i.k-holiday{background:#e2a33b}.rleg i.k-notable{background:#4a9c8c}
+nav.subtabs .store-pick{margin-left:auto;display:flex;align-items:center;gap:6px;flex:0 0 auto}
+nav.subtabs select{border:1px solid var(--line);border-radius:999px;padding:6px 10px;background:var(--surface);color:var(--ink);font-weight:600;max-width:260px}

@@ -210,22 +210,24 @@ const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 function renderNav(){
   const tabs = S.tabs || [], has = v => tabs.some(t => t[0]===v), title = v => (tabs.find(t=>t[0]===v)||[])[1];
   const cur = groupOf(S.view); (S.lastView ||= {})[cur[0]] = S.view;
-  // магазин выбирают только там, где работают с кассой конкретного магазина
-  const ss = $('#store-sel'); if(ss) ss.hidden = !['pos','shifts','cash'].includes(S.view);
   const rq = S.reqCount ? ` (${S.reqCount})` : '';
   const mn = $('#mainnav'); if(mn) mn.innerHTML = GROUPS.filter(g => g[3].some(has)).map(g => `<button role="tab" data-group="${g[0]}" aria-selected="${g===cur}"><span class="ico">${g[1]}</span>${g[2]}${g[0]==='goods'?rq:''}</button>`).join('');
   const av = cur[3].filter(has), sn = $('#subnav');
-  if(sn){ sn.hidden = av.length < 2; sn.innerHTML = av.map(v => `<button role="tab" data-view="${v}" aria-selected="${v===S.view}">${title(v)}${v==='wh'?rq:''}</button>`).join(''); }
+  // магазин выбирают только в разделе «Касса»: чек, смена и расходы относятся к конкретной кассе
+  const kassa = cur[0]==='kassa';
+  if(sn){ sn.hidden = av.length < 2 && !kassa; sn.innerHTML = av.map(v => `<button role="tab" data-view="${v}" aria-selected="${v===S.view}">${title(v)}${v==='wh'?rq:''}</button>`).join('')
+    + (kassa && S.stores && S.stores.length ? `<label class="store-pick"><span class="meta">Магазин</span><select id="store-sel" aria-label="Магазин">${S.stores.map(s=>`<option value="${s.id}" ${s.id===S.store?'selected':''}>${esc(BRAND[s.brand]+' · '+s.city+', '+s.address)}</option>`).join('')}</select></label>` : '');
+    const ss = $('#store-sel'); if(ss) ss.onchange = e => { S.store = +e.target.value; ls.set('kassa_store', S.store); S.cust = null; S.bonusSpend = 0; if(S.phone) lookupCustomer(); renderHeader(); render(); loadPosShift().then(render); if(S.view==='shifts') loadShifts().then(render); if(S.view==='cash') loadCash().then(render); };
+  }
 }
 function renderHeader(){
   const h = $('#hdr'); if(!h) return;
   const q = queue();
   h.innerHTML = `<span class="brand">MOON · Sunshine</span>
-    <select id="store-sel" aria-label="Магазин">${S.stores.map(s=>`<option value="${s.id}" ${s.id===S.store?'selected':''}>${esc(BRAND[s.brand]+' · '+s.city+', '+s.address)}</option>`).join('')}</select>
     <span class="who"><span class="net ${navigator.onLine?'':'off'}">${navigator.onLine?'онлайн':'нет интернета'}</span>
     ${q.length?`<span class="chip warn">в очереди: ${q.length}</span>`:''}
     <span>${esc(S.me.full_name)} · ${ROLE[S.me.role]}</span>${!canEdit(S.store)?`<span class="chip warn" title="${isViewer()?'Можно смотреть всё, изменения недоступны':'Этот магазин в другом городе: можно смотреть, менять нельзя'}">только просмотр</span>`:''}${S.me.telegram?'':'<button id="tg-link" title="Получать уведомления и входить через Telegram">Привязать Telegram</button>'}<button id="logout">Выйти</button></span>`;
-  $('#store-sel').onchange = e => { S.store = +e.target.value; ls.set('kassa_store', S.store); S.cust = null; S.bonusSpend = 0; if(S.phone) lookupCustomer(); renderHeader(); render(); loadPosShift().then(render); if(S.view==='shifts') loadShifts().then(render); if(S.view==='cash') loadCash().then(render); };
+  if(false) $('#store-sel').onchange = e => { S.store = +e.target.value; ls.set('kassa_store', S.store); S.cust = null; S.bonusSpend = 0; if(S.phone) lookupCustomer(); renderHeader(); render(); loadPosShift().then(render); if(S.view==='shifts') loadShifts().then(render); if(S.view==='cash') loadCash().then(render); };
   $('#logout').onclick = async () => { await sb.auth.signOut(); location.reload(); };
   if($('#tg-link')) $('#tg-link').onclick = () => tgLogin('link');
 }
