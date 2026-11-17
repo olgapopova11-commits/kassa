@@ -405,7 +405,7 @@ const WH = {
   receipt:   { t:'Приёмка', boss:true, hint:'Товар от поставщика. Закупочная цена обновится, после проведения можно напечатать этикетки.' },
   capitalize:{ t:'Оприходование', boss:true, hint:'Излишки и найденный товар без поставщика.' },
   writeoff:  { t:'Списание', boss:true, hint:'Брак, потеря, подарок. Причина обязательна.' },
-  transfer:  { t:'Перемещение', boss:false, hint:'Товар списывается в магазине-отправителе сразу, а в магазине-получателе — когда там нажмут «Принять».' },
+  transfer:  { t:'Перемещение', boss:false, hint:'Создаёт перемещение менеджер. Товар списывается в магазине-отправителе сразу, а в магазине-получателе — когда там нажмут «Принять».' },
   audit:     { t:'Ревизия', boss:false, hint:'Сканируйте товар на полке — каждое сканирование +1. Продажи во время ревизии учитываются. Закрывает менеджер.' },
 };
 function whModes(){ return Object.entries(WH).filter(([k,v]) => !v.boss || isBoss()); }
@@ -430,6 +430,7 @@ function renderWh(){
   const head = `<div class="filters">${whModes().map(([k,v])=>`<button class="btn small ${k===m?'primary':''}" data-wmode="${k}">${v.t}</button>`).join('')}</div>
     <p class="meta">${WH[m].hint}</p>`;
   if(m==='audit') return renderAudit(head);
+  if(m==='transfer' && !isBoss()){ $('#main').innerHTML = `<h2>Склад</h2>${head}${renderTransfers()}`; return; }
   const storeSel = (id, val) => `<select id="${id}">${S.stores.map(st=>`<option value="${st.id}" ${st.id===val?'selected':''}>${esc(BRAND[st.brand]+' · '+st.city+', '+st.address)}</option>`).join('')}</select>`;
   const total = d.items.reduce((a,i)=>a+i.qty,0);
   $('#main').innerHTML = `<h2>Склад</h2>${head}<div class="grid2"><div class="card stack">
