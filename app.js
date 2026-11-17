@@ -934,7 +934,8 @@ function renderShifts(){
         <button class="btn primary" id="sh-open">Открыть смену</button></div>
         ${S.prevClosing!=null?`<p class="meta" style="margin:0">На закрытии прошлой смены в кассе было <b>${fmt(S.prevClosing)}</b>. Пересчитайте наличные — сумма должна совпасть.</p>`:''}`}</div>`;
   else cur = `<div class="card stack"><div class="row" style="flex-wrap:wrap;gap:8px"><div><b>${st}</b> · <span class="chip ok">смена №${sh.number} открыта</span>
-        <div class="meta">с ${tm(sh.opened_at)}${sh.opened_by_name?' · открыл(а) '+esc(sh.opened_by_name):''}</div></div><button class="btn small" id="sh-refresh">Обновить цифры</button></div>
+        <div class="meta">с ${tm(sh.opened_at)}${sh.opened_by_name?' · открыл(а) '+esc(sh.opened_by_name):''}</div>
+        ${(()=>{ const end=new Date(new Date(sh.opened_at).getTime()+864e5), left=(end-Date.now())/36e5; return `<div class="meta" ${left<4?'style="color:var(--bad)"':''}>Смена не может длиться больше 24 часов — закройте её до ${tm(end)}, иначе она закроется автоматически без пересчёта наличных.</div>`; })()}</div><button class="btn small" id="sh-refresh">Обновить цифры</button></div>
       ${shiftReportHtml(sh.summary, sh.opening_cash, null)}
       ${ro ? '' : `<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;border-top:1px solid var(--line);padding-top:10px">
         <label class="meta">Наличные в кассе фактически, ₸ <input id="sh-close-cash" type="number" min="0" inputmode="numeric" placeholder="${Math.round(sh.summary.cashExpected)}" style="width:150px"></label>
@@ -1153,8 +1154,8 @@ const CS = { dir:'out', cat:'', amount:'', comment:'', collector:'', photo:null,
 async function loadCash(){
   if(!CS.cats){ const { data } = await sb.from('cash_categories').select('direction,name,sort').order('sort'); CS.cats = data || []; }
   const to = new Date(), from = new Date(); from.setHours(0,0,0,0); from.setDate(from.getDate()-(CS.days-1));
-  const [lst] = await Promise.all([ sb.rpc('cash_moves_list', { p_stores: isBoss() ? selStores() : [S.store], p_from: from.toISOString(), p_to: to.toISOString() }), loadPosShift() ]);
-  if(lst.error) toast(errText(lst.error)); CS.list = lst.data || [];
+  const [lst, bal] = await Promise.all([ sb.rpc('cash_moves_list', { p_stores: isBoss() ? selStores() : [S.store], p_from: from.toISOString(), p_to: to.toISOString() }), sb.rpc('cash_balances'), loadPosShift() ]);
+  if(lst.error) toast(errText(lst.error)); CS.list = lst.data || []; CS.bal = bal.data || [];
 }
 async function cashPhoto(file){
   if(!file) return; CS.busy = true; render();
@@ -1178,7 +1179,17 @@ function renderCash(){
   const ro = isViewer(), open = S.posShift && S.posShift[S.store], inc = CS.cat.trim().toLowerCase()==='инкассация';
   const cats = (CS.cats||[]).filter(c=>c.direction===CS.dir);
   const ST = { ok:'', pending:'<span class="chip warn">ждёт подтверждения</span>', confirmed:'<span class="chip ok">подтверждено</span>', rejected:'<span class="chip zero">не подтверждено</span>' };
-  $('#main').innerHTML = `<h2>Расходы и внесения</h2>
+  const bal = (CS.bal||[]).filter(b => isBoss() ? selStores().includes(b.store) : b.store===S.store);
+  const balTotal = bal.reduce((a,b)=>a+(+b.cash||0),0);
+  $('#main').innerHTML = `<h2>Наличные в кассах</h2>
+  ${!CS.bal?'<div class="empty">Загружаем…</div>':`<div class="kpis" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:14px">
+    ${bal.map(b=>`<div class="card" style="padding:12px"><div class="meta">${esc(storeName(b.store))}</div>
+      <div style="font-size:20px;font-weight:700" class="num">${b.cash==null?'—':fmt(b.cash)}</div>
+      <div class="meta">${b.open?'смена открыта с '+tm(b.at):b.at?'смена закрыта '+tm(b.at)+' · сумма на закрытии':'смен ещё не было'}${b.by?' · '+esc(b.by):''}</div>
+      ${+b.today_out?`<div class="meta">расходы сегодня: ${fmt(b.today_out)}</div>`:''}${+b.pending_inc?`<div class="meta" style="color:var(--bad)">инкассация ждёт подтверждения: ${fmt(b.pending_inc)}</div>`:''}</div>`).join('')}
+    ${bal.length>1?`<div class="card" style="padding:12px"><div class="meta">Итого по выбранным</div><div style="font-size:20px;font-weight:700" class="num">${fmt(balTotal)}</div></div>`:''}
+  </div>`}
+  <h2>Расходы и внесения</h2>
   <div class="grid2"><div>
    ${ro?'':open===false?`<div class="card row" style="flex-wrap:wrap;border-color:var(--bad)"><span>Смена не открыта — расходы записываются в открытую смену.</span><button class="btn primary" id="go-shift">Открыть смену</button></div>`:`<div class="card stack">
     <div class="seg" style="display:inline-flex;align-self:flex-start"><button data-csdir="out" aria-pressed="${CS.dir==='out'}">➖ Расход из кассы</button><button data-csdir="in" aria-pressed="${CS.dir==='in'}">➕ Внесение в кассу</button></div>
