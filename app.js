@@ -6,7 +6,7 @@ const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true,
 
 const POS_PAY = ['cash','card','certificate'];
 const PAY = { cash:'Наличные', card:'Карта', kaspi_qr:'Kaspi QR', transfer:'Перевод', invoice:'По счёту', bonus:'Бонусы', certificate:'Сертификат' };
-const ROLE = { owner:'Владелец', manager:'Менеджер', consultant:'Консультант', purchaser:'Закуп', viewer:'Управленец Астаны' };
+const ROLE = { owner:'Владелец', manager:'Менеджер', consultant:'Консультант', purchaser:'Закуп', viewer:'Управленец Астаны', accountant:'Бухгалтер' };
 const BRAND = { moon:'MOON', sunshine:'Sunshine' };
 
 const S = {
@@ -23,8 +23,8 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt = n => Math.round(Number(n)||0).toLocaleString('ru-RU').replace(/ |,/g,' ') + ' ₸';
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c=='x'?r:(r&3|8)).toString(16)}));
-const isBoss = () => S.me && ['owner','manager','viewer'].includes(S.me.role);  // видит всё; viewer — без изменений
-const isViewer = () => S.me && S.me.role === 'viewer';
+const isBoss = () => S.me && ['owner','manager','viewer','accountant'].includes(S.me.role);  // видит всё; viewer — без изменений
+const isViewer = () => S.me && ['viewer','accountant'].includes(S.me.role);
 // может ли текущий пользователь менять данные магазина (менеджер — только свой город)
 const canEdit = st => { const m = S.me; if(!m) return false; if(m.role==='owner') return true; if(m.role==='viewer') return false;
   if(m.role==='manager') return !m.store_ids || !m.store_ids.length || m.store_ids.includes(+st); return (m.store_ids||[]).includes(+st); };
@@ -51,12 +51,28 @@ async function onSelChange(){
   if(S.view==='shifts') await loadShifts();
   if(S.view==='cash') await loadCash();
   if(S.view==='pay') await loadPay();
+  if(S.view==='profit') await loadProfit();
   render();
 }
 function normPhone(v){ let d=String(v||'').replace(/\D/g,''); if(d.length===11&&(d[0]==='7'||d[0]==='8')) d=d.slice(1); if(d.length===10) return '+7'+d; return null; }
 function toast(t){ const el=document.createElement('div'); el.className='toast'; el.textContent=t; document.body.append(el); setTimeout(()=>el.remove(),3200); }
 const ls = { get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } }, set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)) }catch(e){} } };
 const thumbUrl = u => u.replace('static.tildacdn.pro/','thumb.tildacdn.pro/').replace(/\/([^/]+)$/,'/-/resize/120x/$1');
+// увеличенное фото при наведении на миниатюру (на телефоне — по касанию и удержанию)
+(() => {
+  let box;
+  const show = (img, x, y) => {
+    if(!box){ box = document.createElement('div'); box.id = 'zoom-pop'; box.style.cssText = 'position:fixed;z-index:50;pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:4px;box-shadow:0 10px 30px rgba(0,0,0,.25);display:none'; box.innerHTML = '<img style="display:block;width:300px;height:300px;object-fit:contain;border-radius:8px">'; document.body.appendChild(box); }
+    const im = box.firstChild, src = img.dataset.full || img.src; if(im.getAttribute('src') !== src) im.src = src;
+    const W = 312, H = 312, left = x + 20 + W > innerWidth ? Math.max(8, x - W - 20) : x + 20, top = Math.min(Math.max(8, y - H/2), innerHeight - H - 8);
+    box.style.left = left + 'px'; box.style.top = top + 'px'; box.style.display = 'block';
+  };
+  const hide = () => { if(box) box.style.display = 'none'; };
+  document.addEventListener('mouseover', e => { const im = e.target.closest && e.target.closest('img.thumb'); if(im) show(im, e.clientX, e.clientY); });
+  document.addEventListener('mousemove', e => { const im = e.target.closest && e.target.closest('img.thumb'); if(im) show(im, e.clientX, e.clientY); else hide(); });
+  document.addEventListener('touchstart', e => { const im = e.target.closest && e.target.closest('img.thumb'); if(im){ const t = e.touches[0]; show(im, t.clientX, t.clientY); } else hide(); }, { passive:true });
+  document.addEventListener('scroll', hide, true);
+})();
 const thumb = p => p.photo_url ? `<img class="thumb" src="${esc(thumbUrl(p.photo_url))}" data-full="${esc(p.photo_url)}" alt="" loading="lazy" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : '<span class="thumb"></span>';
 function errText(e){ return (e && (e.message || e.error_description)) || String(e); }
 const isNetErr = e => !navigator.onLine || /Failed to fetch|NetworkError|Load failed|network/i.test(errText(e));
@@ -198,8 +214,9 @@ function renderShell(){
   const acc = (S.tabAccess||{})[S.me.role];
   if(S.me.role !== 'owner' && Array.isArray(acc)){ const keep = tabs.filter(([v]) => acc.includes(v)); tabs.splice(0, tabs.length, ...keep); }
   tabs.push(['pay', isBoss() ? 'Зарплата' : 'Моя зарплата']);
+  if(['owner','viewer'].includes(S.me.role)) tabs.push(['profit','Рентабельность']);
   if(tabs.length && !tabs.some(([v]) => v===S.view)) S.view = tabs[0][0];
-  if(isViewer()){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pos' && v!=='emps')); if(!S.view || S.view==='pos' || S.view==='emps') S.view = 'analytics'; }
+  if(isViewer()){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pos' && (v!=='emps' || S.me.role==='accountant'))); if(!S.view || S.view==='pos' || (S.view==='emps' && S.me.role!=='accountant')) S.view = 'analytics'; }
 
   S.tabs = tabs;
   $('#app').innerHTML = `<header id="hdr"></header><nav class="subtabs" id="subnav" role="tablist"></nav><main id="main"></main>
@@ -208,7 +225,7 @@ function renderShell(){
 }
 // вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
 const GROUPS = [['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['stock','wh','nom','site']],
-  ['clients','💳','Клиенты',['bonus','certs']],['analytics','📈','Аналитика',['analytics']],['team','👥','Сотрудники',['emps','pay']]];
+  ['clients','💳','Клиенты',['bonus','certs']],['analytics','📈','Аналитика',['analytics','profit']],['team','👥','Сотрудники',['emps','pay']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 function renderNav(){
   const tabs = S.tabs || [], has = v => tabs.some(t => t[0]===v), title = v => (tabs.find(t=>t[0]===v)||[])[1];
@@ -238,7 +255,7 @@ function render(){
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -945,6 +962,7 @@ function shiftReportHtml(r, opening, closing){
     ${closing!=null ? row('Фактически', fmt(closing)) + row('Расхождение', diffHtml(closing - r.cashExpected)) : ''}
     <tr><td colspan="2" class="meta" style="padding-top:10px">Карта / Kaspi QR (терминал)</td></tr>
     ${row('По системе', fmt(r.cardNet||0))}${r.closingCard!=null ? row('По терминалу', fmt(r.closingCard)) + row('Расхождение', diffHtml(r.closingCard - (r.cardNet||0))) : ''}
+    ${r.fiscal!=null ? `<tr><td colspan="2" class="meta" style="padding-top:10px">Сверка с фискальной кассой (ОФД)</td></tr>${row('Продажи в Silver (с сертификатами)', fmt((+r.revenue||0)+(+r.certSold||0)))}${row('По фискальной кассе', fmt(r.fiscal))}${row('Расхождение', diffHtml(r.fiscal - ((+r.revenue||0)+(+r.certSold||0))))}` : ''}
   </tbody></table>
   ${(r.moves||[]).length?`<table style="margin-top:8px"><tbody><tr><td colspan="2" class="meta">Расходы и внесения</td></tr>${r.moves.map(m=>row(esc(m.cat)+(m.collector?' <span class="meta">· '+esc(m.collector)+'</span>':'')+(m.comment?'<br><span class="meta">'+esc(m.comment)+'</span>':'')+(m.status==='pending'?' <span class="chip warn">ждёт подтверждения</span>':m.status==='rejected'?' <span class="chip zero">не подтверждено</span>':''), (m.dir==='in'?'+':'−')+fmt(m.amount))).join('')}</tbody></table>`:''}
   ${(r.byEmployee||[]).length>1 || ((r.byEmployee||[])[0]||{}).name!=='—' ? `<table style="margin-top:8px"><tbody><tr><td colspan="2" class="meta">По продавцам</td></tr>${r.byEmployee.map(e=>row(esc(e.name)+' <span class="meta">· '+e.checks+' чек.</span>', fmt(e.revenue))).join('')}</tbody></table>` : ''}
@@ -960,6 +978,7 @@ function shiftText(sh, r){
   if(sh.closing_cash!=null) L.push(pad('Фактически', fmt(sh.closing_cash)), pad('Расхождение', fmt(sh.closing_cash - r.cashExpected)));
   L.push('-'.repeat(w), pad('Карта/QR по системе', fmt(r.cardNet||0)));
   if(r.closingCard!=null) L.push(pad('По терминалу', fmt(r.closingCard)), pad('Расхождение', fmt(r.closingCard - (r.cardNet||0))));
+  if(r.fiscal!=null) L.push('-'.repeat(w), pad('Фискальная касса', fmt(r.fiscal)), pad('Расхождение с Silver', fmt(r.fiscal - ((+r.revenue||0)+(+r.certSold||0)))));
   (r.moves||[]).forEach(m => L.push(pad((m.dir==='in'?'+ ':'- ')+m.cat, fmt(m.amount))));
   if(sh.note) L.push('', 'Комментарий: '+sh.note);
   return L.join('\n');
@@ -981,6 +1000,7 @@ function renderShifts(){
       ${ro ? '' : `<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;border-top:1px solid var(--line);padding-top:10px">
         <label class="meta">Наличные в кассе фактически, ₸ <input id="sh-close-cash" type="number" min="0" inputmode="numeric" placeholder="${Math.round(sh.summary.cashExpected)}" style="width:150px"></label>
         <label class="meta">По терминалу (карта + Kaspi QR), ₸ <input id="sh-close-card" type="number" min="0" inputmode="numeric" placeholder="${Math.round(sh.summary.cardNet||0)}" style="width:150px"></label>
+        <label class="meta">Продажи по фискальной кассе за смену, ₸ <input id="sh-close-fiscal" type="number" min="0" inputmode="numeric" placeholder="общая сумма" style="width:150px"></label>
         <input id="sh-note" placeholder="Комментарий (необязательно)" style="flex:1;min-width:180px">
         <button class="btn" id="sh-handover" title="Закрыть смену с отчётом и передать кассу следующему сотруднику">Пересменка</button>
         <button class="btn primary" id="sh-close">Закрыть смену</button></div>
@@ -1016,7 +1036,8 @@ document.addEventListener('click', async e => {
   else if(t.id==='sh-close' || t.id==='sh-handover'){ const hand = t.id==='sh-handover';
     const v = $('#sh-close-cash').value; if(v===''){ toast('Пересчитайте наличные в кассе и введите сумму'); $('#sh-close-cash').focus(); return; }
     const vc = $('#sh-close-card').value; if(vc===''){ toast('Введите сумму по терминалу из отчёта терминала'); $('#sh-close-card').focus(); return; }
-    t.disabled = true; const { error } = await sb.rpc('shift_close', { p_shift:S.shift.id, p_cash:+v, p_note:$('#sh-note').value, p_card:+vc });
+    const vf = $('#sh-close-fiscal').value; if(vf===''){ toast('Введите общую сумму продаж из фискальной кассы'); $('#sh-close-fiscal').focus(); return; }
+    t.disabled = true; const { error } = await sb.rpc('shift_close', { p_shift:S.shift.id, p_cash:+v, p_note:$('#sh-note').value, p_card:+vc, p_fiscal:+vf });
     if(error){ toast(errText(error)); t.disabled = false; return; }
     const id = S.shift.id; await loadShifts(); render(); const x = S.shifts.find(z=>z.id===id);
     if(hand){
@@ -1380,7 +1401,56 @@ function renderBonus(){
   </div></div>`;
 }
 
+/* ---------- рентабельность ---------- */
+const PF = { per:'month', from:'', to:'', data:null, costs:null, add:{ store:'', month:new Date().toISOString().slice(0,7), cat:'Аренда', amount:'', note:'' } };
+const PF_CATS = ['Аренда','Коммунальные','Налоги','Интернет и связь','Охрана','Реклама','Банк и эквайринг','Другое'];
+function pfRange(){
+  const d = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Almaty'})), iso = x => x.toLocaleDateString('sv-SE');
+  const y = d.getFullYear(), m = d.getMonth();
+  if(PF.per==='month') return [iso(new Date(y,m,1)), iso(d)];
+  if(PF.per==='prev') return [iso(new Date(y,m-1,1)), iso(new Date(y,m,0))];
+  if(PF.per==='q') return [iso(new Date(y,m-2,1)), iso(d)];
+  if(PF.per==='year') return [iso(new Date(y,0,1)), iso(d)];
+  return [PF.from || iso(new Date(y,m,1)), PF.to || iso(d)];
+}
+async function loadProfit(){
+  const [f,t] = pfRange(); PF.data = null;
+  const [p, c] = await Promise.all([ sb.rpc('profitability', { p_from:f, p_to:t, p_stores: selStores() }), sb.rpc('store_costs_list', { p_from:f, p_to:t }) ]);
+  if(p.error) toast(errText(p.error)); PF.data = p.data || []; PF.costs = c.data || [];
+}
+function renderProfit(){
+  const D = PF.data, [f,t] = pfRange(), sum = o => Object.values(o||{}).reduce((a,v)=>a+ +v,0);
+  const rows = (D||[]).map(r => { const gross = r.revenue - r.cogs, cash = sum(r.cash), fixed = sum(r.fixed), net = gross - r.wages - cash - fixed;
+    return { ...r, gross, cashT:cash, fixedT:fixed, net, margin: r.revenue ? net/r.revenue*100 : 0 }; });
+  const T = rows.reduce((a,r)=>{ for(const k of ['revenue','cogs','gross','wages','cashT','fixedT','net','purchases']) a[k]=(a[k]||0)+r[k]; return a; }, {});
+  T.margin = T.revenue ? T.net/T.revenue*100 : 0;
+  const cell = (v, neg) => `<td class="num" ${neg&&v<0?'style="color:var(--bad)"':''}>${fmt(v)}</td>`;
+  const lines = [['Выручка','revenue'],['Себестоимость проданного','cogs',-1],['Валовая прибыль','gross'],['Зарплата (по табелю)','wages',-1],['Расходы из кассы','cashT',-1],['Аренда и постоянные расходы','fixedT',-1],['Чистая прибыль','net'],['Рентабельность','margin']];
+  const per = [['month','Этот месяц'],['prev','Прошлый месяц'],['q','3 месяца'],['year','С начала года'],['custom','Свой период']];
+  $('#main').innerHTML = `<h2>Рентабельность магазинов</h2>${storeFilterHtml()}
+  <div class="filters">${per.map(([k,v])=>`<button class="btn small ${PF.per===k?'primary':''}" data-pfper="${k}">${v}</button>`).join('')}
+    ${PF.per==='custom'?`<input type="date" id="pf-from" value="${f}"><input type="date" id="pf-to" value="${t}">`:''}<span class="meta" style="align-self:center">${new Date(f).toLocaleDateString('ru-RU')} — ${new Date(t).toLocaleDateString('ru-RU')}</span></div>
+  ${!D?'<div class="empty">Считаем…</div>':`<div class="scroll"><table><thead><tr><th></th>${rows.map(r=>`<th>${esc(storeName(r.store))}</th>`).join('')}${rows.length>1?'<th>Итого</th>':''}</tr></thead><tbody>
+    ${lines.map(([t,k,sign])=>`<tr ${['gross','net'].includes(k)?'style="font-weight:700"':''}><td>${t}</td>${rows.map(r=>k==='margin'?`<td class="num" style="font-weight:700;color:${r.margin<0?'var(--bad)':'var(--ok)'}">${r.margin.toFixed(1)}%</td>`:cell(sign?-r[k]:r[k], k==='net')).join('')}${rows.length>1?(k==='margin'?`<td class="num" style="font-weight:700">${T.margin.toFixed(1)}%</td>`:cell(sign?-T[k]:T[k], k==='net')):''}</tr>`).join('')}
+    <tr><td class="meta">Закуп по приёмке (справочно)</td>${rows.map(r=>`<td class="num meta">${fmt(r.purchases)}</td>`).join('')}${rows.length>1?`<td class="num meta">${fmt(T.purchases)}</td>`:''}</tr>
+  </tbody></table></div>
+  <details style="margin:8px 0"><summary class="meta">Расшифровка расходов по магазинам</summary>
+    ${rows.map(r=>`<div class="meta" style="margin:6px 0"><b>${esc(storeName(r.store))}:</b> ${[...Object.entries(r.cash).map(([k,v])=>k+' (касса) '+fmt(v)), ...Object.entries(r.fixed).map(([k,v])=>k+' '+fmt(v))].join(' · ') || 'расходов нет'}</div>`).join('')}</details>
+  <p class="meta">Себестоимость — по закупочной цене проданных товаров. Зарплата — начислено по табелю (без бонусов и штрафов). Из расходов кассы не учитываются инкассация, зарплата и закуп — они считаются отдельно. Постоянные расходы за неполный месяц берутся пропорционально дням.</p>`}
+  <div class="grid2" style="margin-top:14px"><div class="card stack"><b>Добавить постоянный расход</b>
+    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
+      <select id="pf-store">${S.allStores.map(st=>`<option value="${st.id}" ${String(PF.add.store)===String(st.id)?'selected':''}>${esc(storeName(st.id))}</option>`).join('')}</select>
+      <input type="month" id="pf-month" value="${PF.add.month}">
+      <select id="pf-cat">${PF_CATS.map(c=>`<option ${PF.add.cat===c?'selected':''}>${c}</option>`).join('')}</select>
+      <input id="pf-amount" type="number" min="1" inputmode="numeric" placeholder="сумма за месяц, ₸" value="${esc(PF.add.amount)}" style="width:160px">
+      <input id="pf-note" placeholder="комментарий" value="${esc(PF.add.note)}" style="flex:1;min-width:120px">
+      <button class="btn primary" id="pf-add">Добавить</button></div>
+    <span class="meta">Аренду и другие ежемесячные расходы вносите на каждый месяц. Расходы из журнала кассы («Расходы») подтягиваются сами.</span></div>
+  <div><b>Постоянные расходы за период</b>${(PF.costs||[]).length?`<table><tbody>${PF.costs.map(c=>`<tr><td class="num">${new Date(c.month).toLocaleDateString('ru-RU',{month:'short',year:'numeric'})}</td><td>${esc(storeName(c.store))}</td><td>${esc(c.category)}${c.note?'<br><span class="meta">'+esc(c.note)+'</span>':''}</td><td class="num">${fmt(c.amount)}</td><td><button class="btn small" data-pfdel="${c.id}">✕</button></td></tr>`).join('')}</tbody></table>`:'<div class="meta">Пока ничего не внесено</div>'}</div></div>`;
+}
+
 /* ---------- зарплата ---------- */
+const PYF = { official:false };
 const PY = { month: new Date().toISOString().slice(0,7), data:null, open:null, store:null, day:new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'}), sheet:null, add:{ emp:'', hours:'', kind:'sale' } };
 async function loadPay(){
   const [y,m] = PY.month.split('-').map(Number), from = `${PY.month}-01`, to = new Date(Date.UTC(y, m, 0)).toISOString().slice(0,10);
@@ -1423,18 +1493,20 @@ function paySum(e){
   return { A, by, plus, minus, due, paid, rest: due - paid };
 }
 function renderPay(){
-  const D = PY.data, tabel = S.me && ['owner','manager'].includes(S.me.role) && !isViewer();
+  const D0 = PY.data, D = D0 && PYF.official ? D0.filter(e=>e.official) : D0, tabel = S.me && ['owner','manager'].includes(S.me.role) && !isViewer();
   const total = (D||[]).reduce((a,e)=>a+e.total,0);
   const stEmps = (S.emps||[]).filter(e => e.active && (!e.store_ids || !e.store_ids.length || e.store_ids.includes(+PY.store)));
   $('#main').innerHTML = `<div class="row"><h2>${isBoss()?'Зарплата':'Моя зарплата'}</h2><label class="meta">Месяц <input type="month" id="py-month" value="${PY.month}"></label></div>
   ${isBoss()?storeFilterHtml():''}
+  ${isBoss()?`<div class="filters"><label class="chip ${PYF.official?'ok':''}" style="cursor:pointer;padding:4px 10px"><input type="checkbox" id="py-official" ${PYF.official?'checked':''} style="margin-right:4px">только официально трудоустроенные</label>
+    ${D?`<span class="meta" style="align-self:center">На карту ${PYF.official?'официальным':'всем'} за месяц: <b>${fmt(D.reduce((a,e)=>a+paySum(e).by('card'),0))}</b></span>`:''}</div>`:''}
   <p class="meta">Предварительный расчёт по продажам в кассе и табелю часов. Правила: ${['Курмангазы, Толе би, Гагарина — 12/10% по часам','MOON Курмангазы — 5%','Астана — 6% Sunshine, 3% MOON'].join(' · ')}.</p>
   <div class="grid2"><div>
-   ${!D?'<div class="empty">Считаем…</div>':!D.length?'<div class="empty">За этот месяц нет часов в табеле</div>':`<div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Часы</th><th>Начислено</th><th>Бонусы / удержания</th><th>К выплате</th><th>Выплачено</th><th>Остаток</th></tr></thead><tbody>
-     ${D.map(e=>{ const P = paySum(e), open = PY.open===e.employee || D.length===1; return `<tr><td><button class="btn small" data-pyopen="${e.employee}" style="border:0;background:none;padding:0;font-weight:600">${open?'▾':'▸'} ${esc(e.name)}</button></td><td class="num">${e.hours}</td><td class="num">${fmt(e.total)}</td>
-       <td class="num">${P.plus?'+'+fmt(P.plus):''}${P.plus&&P.minus?'<br>':''}${P.minus?'<span style="color:var(--bad)">−'+fmt(P.minus)+'</span>':''}</td><td class="num"><b>${fmt(P.due)}</b></td><td class="num">${P.paid?fmt(P.paid):''}</td>
+   ${!D?'<div class="empty">Считаем…</div>':!D.length?'<div class="empty">За этот месяц нет часов в табеле</div>':`<div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Часы</th><th>Начислено</th><th>Бонусы / удержания</th><th>К выплате</th><th>Выплачено наличными</th><th>На карту</th><th>Остаток</th></tr></thead><tbody>
+     ${D.map(e=>{ const P = paySum(e), open = PY.open===e.employee || D.length===1; return `<tr><td><button class="btn small" data-pyopen="${e.employee}" style="border:0;background:none;padding:0;font-weight:600">${open?'▾':'▸'} ${esc(e.name)}</button>${e.official?' <span class="chip ok" title="Официально трудоустроен">офиц.</span>':''}</td><td class="num">${e.hours}</td><td class="num">${fmt(e.total)}</td>
+       <td class="num">${P.plus?'+'+fmt(P.plus):''}${P.plus&&P.minus?'<br>':''}${P.minus?'<span style="color:var(--bad)">−'+fmt(P.minus)+'</span>':''}</td><td class="num"><b>${fmt(P.due)}</b></td><td class="num">${P.paid-P.by('card')?fmt(P.paid-P.by('card')):''}</td><td class="num">${P.by('card')?fmt(P.by('card')):''}</td>
        <td class="num" style="color:${P.rest<0?'var(--bad)':P.rest>0?'inherit':'var(--ok)'}"><b>${P.rest<0?'переплата '+fmt(-P.rest):fmt(P.rest)}</b></td></tr>
-       ${open?`<tr><td colspan="7" style="padding:0 0 10px">
+       ${open?`<tr><td colspan="8" style="padding:0 0 10px">
          ${e.days.length?`<table style="margin:0 0 6px"><tbody>${e.days.map(payLine).join('')}</tbody></table>`:''}
          <div class="cust stack" style="gap:6px"><b>Расчёт</b>
            <div class="row"><span>Начислено по продажам</span><span class="num">${fmt(e.total)}</span></div>
@@ -1446,9 +1518,9 @@ function renderPay(){
              <input id="pa-amt-${e.employee}" class="small" type="number" min="1" inputmode="numeric" placeholder="сумма" style="width:110px">
              <input id="pa-note-${e.employee}" placeholder="комментарий" style="flex:1;min-width:120px">
              <button class="btn small primary" data-paadd="${e.employee}">Добавить</button>
-             ${P.rest>0?`<button class="btn small" data-papayall="${e.employee}" data-rest="${Math.round(P.rest)}">Выплатить остаток ${fmt(P.rest)}</button>`:''}</div>`:''}
+             ${P.rest>0?`<button class="btn small" data-papayall="${e.employee}" data-rest="${Math.round(P.rest)}" data-kind="paid">Остаток ${fmt(P.rest)} наличными</button><button class="btn small" data-papayall="${e.employee}" data-rest="${Math.round(P.rest)}" data-kind="card">Остаток ${fmt(P.rest)} на карту</button>`:''}</div>`:''}
          </div></td></tr>`:''}`; }).join('')}
-     ${D.length>1?(()=>{ const T = D.map(paySum).reduce((a,p)=>({due:a.due+p.due, paid:a.paid+p.paid, rest:a.rest+p.rest}),{due:0,paid:0,rest:0}); return `<tr><td><b>Итого</b></td><td></td><td class="num"><b>${fmt(total)}</b></td><td></td><td class="num"><b>${fmt(T.due)}</b></td><td class="num">${fmt(T.paid)}</td><td class="num"><b>${fmt(T.rest)}</b></td></tr>`; })():''}</tbody></table></div>`}
+     ${D.length>1?(()=>{ const T = D.map(paySum).reduce((a,p)=>({due:a.due+p.due, cash:a.cash+p.paid-p.by('card'), card:a.card+p.by('card'), rest:a.rest+p.rest}),{due:0,cash:0,card:0,rest:0}); return `<tr><td><b>Итого</b></td><td></td><td class="num"><b>${fmt(total)}</b></td><td></td><td class="num"><b>${fmt(T.due)}</b></td><td class="num">${fmt(T.cash)}</td><td class="num">${fmt(T.card)}</td><td class="num"><b>${fmt(T.rest)}</b></td></tr>`; })():''}</tbody></table></div>`}
   </div><div>
    ${tabel?`<div class="card stack"><b>Табель часов</b>
      <div class="row" style="flex-wrap:wrap;justify-content:flex-start"><select id="py-store">${S.stores.map(s=>`<option value="${s.id}" ${+PY.store===s.id?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select><input type="date" id="py-day" value="${PY.day}"></div>
@@ -1468,12 +1540,12 @@ function renderPay(){
 /* ---------- доступ к вкладкам по ролям ---------- */
 const ALL_TABS = [['pos','Продажа'],['analytics','Аналитика'],['shifts','Смены'],['cash','Расходы'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты'],['bonus','Бонусные карты'],['nom','Номенклатура'],['site','Сайт'],['emps','Сотрудники']];
 const BOSS_ONLY = ['analytics','bonus','nom','site','emps'];
-function defaultTabs(role){ const boss = ['manager','viewer'].includes(role);
-  return ALL_TABS.map(([v])=>v).filter(v => (boss || !BOSS_ONLY.includes(v)) && !(role==='viewer' && (v==='pos'||v==='emps'))); }
+function defaultTabs(role){ const boss = ['manager','viewer','accountant'].includes(role);
+  return ALL_TABS.map(([v])=>v).filter(v => (boss || !BOSS_ONLY.includes(v)) && !(['viewer','accountant'].includes(role) && v==='pos') && !(role==='viewer' && v==='emps')); }
 function canEditTab(v){ if(!S.me || S.me.role==='owner') return true; const E=(S.tabEdit||{})[S.me.role]; return Array.isArray(E) ? E.includes(v) : true; }
 function accessHtml(){
   if(S.me.role!=='owner') return '';
-  const roles = ['manager','consultant','purchaser','viewer'], A = S.tabAccess || {};
+  const roles = ['manager','consultant','purchaser','viewer','accountant'], A = S.tabAccess || {};
   const has = (r,v) => Array.isArray(A[r]) ? A[r].includes(v) : defaultTabs(r).includes(v);
   const E = S.tabEdit || {}, can = (r,v) => has(r,v) && r!=='viewer' && (Array.isArray(E[r]) ? E[r].includes(v) : true);
   return `<div class="card stack" style="margin-top:16px"><b>Какие вкладки видит и может менять каждая роль</b>
@@ -1498,7 +1570,7 @@ function renderEmps(){
       <td><select data-erole="${e.id}">${Object.entries(ROLE).map(([k,v])=>`<option value="${k}" ${e.role===k?'selected':''}>${v}</option>`).join('')}</select></td>
       <td>${['owner','viewer'].includes(e.role)?'<span class="meta">все магазины</span>':(e.role==='manager'?'<div class="meta" style="max-width:240px">Видит все магазины. Отмеченные — подтверждает перемещения в них из другого города:</div>':'')+S.allStores.map(s=>{ const ids=e.store_ids||(e.home_store_id?[e.home_store_id]:[]);
         return `<label class="meta" style="display:block;white-space:nowrap"><input type="checkbox" data-estores="${e.id}:${s.id}" ${ids.includes(s.id)?'checked':''}> ${esc(BRAND[s.brand]+' · '+s.address)}</label>`; }).join('')}</td>
-      <td><label><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''}> включён</label></td></tr>`).join('')}</tbody></table></div>${accessHtml()}`;
+      <td><label><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''}> включён</label><br><label title="Официально трудоустроен — для бухгалтера"><input type="checkbox" data-eoff="${e.id}" ${e.official?'checked':''}> официально</label></td></tr>`).join('')}</tbody></table></div>${accessHtml()}`;
 }
 async function updEmp(id, patch){ const { error } = await sb.from('employees').update(patch).eq('id', id); if(error) toast(errText(error)); else toast('Сохранено'); }
 
@@ -1549,6 +1621,7 @@ document.addEventListener('click', async e => {
   else if(d.ck){ document.querySelectorAll('#ck-kind button').forEach(b=>b.setAttribute('aria-pressed', b===t)); }
   else if(t.id==='c-sell') sellCert();
   else if(d.eact){ updEmp(d.eact, { active:t.checked }); }
+  else if(d.eoff){ updEmp(d.eoff, { official:t.checked }); }
   else if(d.estores){ const [eid, sid] = d.estores.split(':'); const e = S.emps.find(x=>x.id===eid); if(e){ const cur = new Set(e.store_ids||(e.home_store_id?[e.home_store_id]:[])); t.checked ? cur.add(+sid) : cur.delete(+sid); e.store_ids=[...cur].sort((a,b)=>a-b); updEmp(eid, { store_ids: e.store_ids }); } }
   else if(d.sgroup){ const g=d.sgroup; S.sel = S.stores.filter(st => g==='all' || st.brand===g || st.city===g).map(st=>st.id); onSelChange(); }
   else if(d.sone){ const id=+d.sone; selStores(); S.sel = t.checked ? [...new Set([...S.sel, id])] : S.sel.filter(x=>x!==id); if(!S.sel.length) S.sel=[id]; onSelChange(); }
@@ -1561,11 +1634,16 @@ document.addEventListener('click', async e => {
     const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product: d.nmlink?S.nm.ed.id:null, p_status: d.nmlink?'confirmed':'rejected' });
     if(error) toast(errText(error)); else { toast(d.nmlink?'Связано с сайтом':'Отвязано'); S.nm.sq=''; S.nm.sfound=[]; await loadNom(); const fr=S.nm.data.rows.find(r=>r.id===S.nm.ed.id); if(fr) nmOpen(fr); else render(); } }
   else if(d.wook||d.wono){ t.disabled=true; const { data, error } = await sb.rpc('decide_writeoff', { p_id:d.wook||d.wono, p_approve:!!d.wook, p_note:null }); if(error){ toast(errText(error)); t.disabled=false; return; } toast(data); await loadWhSide(); render(); }
+  else if(d.pfper){ PF.per=d.pfper; await loadProfit(); render(); }
+  else if(t.id==='pf-add'){ const a = PF.add; a.store = a.store || (S.allStores[0]||{}).id; if(!(+a.amount>0)) return toast('Укажите сумму');
+    const { error } = await sb.rpc('store_cost_add', { p_store:+a.store, p_month:a.month+'-01', p_category:a.cat, p_amount:+a.amount, p_note:a.note });
+    if(error) return toast(errText(error)); toast('Расход добавлен'); a.amount=''; a.note=''; await loadProfit(); render(); }
+  else if(d.pfdel){ const { error } = await sb.rpc('store_cost_del', { p_id:d.pfdel }); if(error) return toast(errText(error)); await loadProfit(); render(); }
   else if(d.trg){ S.trG=d.trg; S.trend=null; render(); loadTrends(); }
   else if(d.paadd){ const id=d.paadd, amt=+($('#pa-amt-'+id)||{}).value; if(!(amt>0)) return toast('Укажите сумму');
     const { error } = await sb.rpc('pay_adj_add', { p_employee:id, p_month:PY.month+'-01', p_kind:$('#pa-kind-'+id).value, p_amount:amt, p_note:$('#pa-note-'+id).value });
     if(error) return toast(errText(error)); toast('Добавлено'); PY.open=id; await loadPay(); render(); }
-  else if(d.papayall){ const { error } = await sb.rpc('pay_adj_add', { p_employee:d.papayall, p_month:PY.month+'-01', p_kind:'paid', p_amount:+d.rest, p_note:'остаток' });
+  else if(d.papayall){ const { error } = await sb.rpc('pay_adj_add', { p_employee:d.papayall, p_month:PY.month+'-01', p_kind:d.kind||'paid', p_amount:+d.rest, p_note:'остаток' });
     if(error) return toast(errText(error)); toast('Отмечено как выплачено'); PY.open=d.papayall; await loadPay(); render(); }
   else if(d.padel){ const { error } = await sb.rpc('pay_adj_del', { p_id:d.padel }); if(error) return toast(errText(error)); await loadPay(); render(); }
   else if(d.pyopen){ PY.open = PY.open===d.pyopen ? null : d.pyopen; render(); }
@@ -1645,6 +1723,9 @@ document.addEventListener('change', async e => {
     A[r]=ALL_TABS.map(([x])=>x).filter(x=>cur.has(x)); const { error } = await sb.rpc('set_tab_access', { p:A }); if(error){ toast(errText(error)); t.checked=!t.checked; } else { S.tabAccess=A; toast('Сохранено'); } }
   if(t.id==='cs-photo'){ cashPhoto(t.files[0]); }
   if(t.id==='sg-import' && t.files[0]){ sagiImport(t.files[0]); }
+  if(t.id==='pf-from'){ PF.from=t.value; await loadProfit(); render(); } if(t.id==='pf-to'){ PF.to=t.value; await loadProfit(); render(); }
+  if(t.id==='pf-store'){ PF.add.store=t.value; } if(t.id==='pf-month'){ PF.add.month=t.value; } if(t.id==='pf-cat'){ PF.add.cat=t.value; }
+  if(t.id==='py-official'){ PYF.official = t.checked; render(); }
   if(t.id==='py-month'){ PY.month = t.value || PY.month; PY.open=null; await loadPay(); render(); }
   if(t.id==='py-store'){ PY.store = +t.value; await loadPay(); render(); }
   if(t.id==='py-day'){ PY.day = t.value; await loadPay(); render(); }
@@ -1673,6 +1754,7 @@ document.addEventListener('input', e => {
   else if(t.id==='cert-q'){ S.certQ = t.value; render(); }
   else if(t.id==='cs-cat'){ CS.cat=t.value; }
   else if(t.id==='py-hours'){ PY.add.hours=t.value; }
+  else if(t.id==='pf-amount'){ PF.add.amount=t.value; } else if(t.id==='pf-note'){ PF.add.note=t.value; }
   else if(t.id==='cs-amount'){ CS.amount=t.value; } else if(t.id==='cs-comment'){ CS.comment=t.value; } else if(t.id==='cs-collector'){ CS.collector=t.value; }
   else if(t.id==='bk-q'){ BK.q=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ BK.off=0; await loadBonus(); render(); }, 400); }
   else if(t.id==='cf-q'){ S.cf.q=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ await loadCerts(); render(); }, 400); }
@@ -1707,6 +1789,7 @@ document.addEventListener('click', async e => {
   if(S.view==='certs'){ await loadCerts(); render(); }
   if(S.view==='emps'){ await loadEmps(); render(); }
   if(S.view==='pay'){ render(); await loadPay(); render(); }
+  if(S.view==='profit'){ render(); await loadProfit(); render(); }
   if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); }
   if(S.view==='stock' && !S.stockRows.length){ await loadStockView(); render(); }
   if(S.view==='site'){ render(); await loadSite(); render(); }
