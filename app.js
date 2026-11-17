@@ -103,20 +103,20 @@ setInterval(flushQueue, 60000);
 
 /* ---------- каталог (кэш на устройстве для быстрого поиска и офлайна) ---------- */
 async function loadCatalog(force){
-  const cached = ls.get('kassa_catalog3', null);
+  const cached = ls.get('kassa_catalog4', null);
   if(cached && !force){ S.catalog = cached.items; S.catalogAt = cached.at; }
   if(!navigator.onLine) return;
   if(cached && !force && Date.now() - cached.at < 6*3600e3) return;
   const items = []; let from = 0;
   while(true){
-    const { data, error } = await sb.from('products').select('id,barcode,sku,name,price,archived,photo_url').eq('archived', false).order('name').range(from, from+999);
+    const { data, error } = await sb.from('products').select('id,barcode,sku,name,price,archived,photo_url,category_id').eq('archived', false).order('name').range(from, from+999);
     if(error) { toast('Каталог не загрузился: '+errText(error)); return; }
-    data.forEach(p => items.push([p.id, p.barcode, p.sku||'', p.name, Number(p.price), p.photo_url||'']));
+    data.forEach(p => items.push([p.id, p.barcode, p.sku||'', p.name, Number(p.price), p.photo_url||'', p.category_id||null]));
     if(data.length < 1000) break; from += 1000;
   }
-  S.catalog = items; S.catalogAt = Date.now(); ls.set('kassa_catalog3', {at:S.catalogAt, items});
+  S.catalog = items; S.catalogAt = Date.now(); ls.set('kassa_catalog4', {at:S.catalogAt, items});
 }
-const prodObj = a => ({ id:a[0], barcode:a[1], sku:a[2], name:a[3], price:a[4], photo_url:a[5]||null });
+const prodObj = a => ({ id:a[0], barcode:a[1], sku:a[2], name:a[3], price:a[4], photo_url:a[5]||null, category_id:a[6]||null });
 function searchCatalog(q){
   q = q.trim().toLowerCase(); if(!q) return [];
   const exact = S.catalog.filter(p => p[1] === q || p[2].toLowerCase() === q);
@@ -210,7 +210,7 @@ async function boot(){
   S.store = ls.get('kassa_store', null) || (me.store_ids||[])[0] || (S.stores[0]||{}).id;
   if(!S.stores.some(s=>s.id===S.store)) S.store = (S.stores[0]||{}).id;
   { const [a, e] = await Promise.all([sb.rpc('get_tab_access'), sb.rpc('get_tab_edit')]); S.tabAccess = a.data || {}; S.tabEdit = e.data || {}; }
-  renderShell(); await loadPosShift(); await loadCatalog(); render(); flushQueue(); subscribeReqs();
+  renderShell(); await loadPosShift(); await loadCatalog(); loadPromos().then(()=>{ if(S.view==='pos') render(); }); render(); flushQueue(); subscribeReqs();
 }
 
 /* ---------- каркас ---------- */
@@ -224,6 +224,9 @@ function renderShell(){
   if(['owner','viewer'].includes(S.me.role)) tabs.push(['profit','Рентабельность']);
   if(['owner','manager','purchaser','viewer','accountant'].includes(S.me.role)) tabs.push(['po','Закуп']);
   if(tabs.length && !tabs.some(([v]) => v===S.view)) S.view = tabs[0][0];
+  tabs.push(['promo','Акции']);
+  if(S.me.role==='owner') tabs.push(['adm','Административный штат']);
+  if(!['owner','viewer','accountant'].includes(S.me.role)) tabs.push(['me','Мой кабинет']);
   if(isViewer()){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pos' && (v!=='emps' || S.me.role==='accountant'))); if(!S.view || S.view==='pos' || (S.view==='emps' && S.me.role!=='accountant')) S.view = 'analytics'; }
 
   S.tabs = tabs;
@@ -233,7 +236,7 @@ function renderShell(){
 }
 // вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
 const GROUPS = [['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['stock','wh','po','nom','site']],
-  ['clients','💳','Клиенты',['bonus','certs']],['analytics','📈','Аналитика',['analytics','profit']],['team','👥','Сотрудники',['emps','pay']]];
+  ['clients','💳','Клиенты',['promo','bonus','certs']],['analytics','📈','Аналитика',['analytics','profit']],['team','👥','Сотрудники',['me','emps','pay','adm']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 function renderNav(){
   const tabs = S.tabs || [], has = v => tabs.some(t => t[0]===v), title = v => (tabs.find(t=>t[0]===v)||[])[1];
@@ -263,7 +266,7 @@ function render(){
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -342,6 +345,7 @@ function renderPos(){
            <div class="meta">${'bonus' in S.pays?'Бонусы списываются, на остаток суммы бонусы тоже начислятся.':'Бонусы начислятся после покупки (активируются через 3 дня).'}</div>`:''}</div>`:''}
      </div>
 
+     ${promoHintHtml(t)}
      <div class="num">
        <div class="row"><span>Без скидок</span><span>${fmt(t.sub)}</span></div>
        ${t.lineDisc+t.chk?`<div class="row"><span>Скидки</span><span>−${fmt(t.lineDisc+t.chk)}</span></div>`:''}
@@ -379,7 +383,7 @@ function certPickerHtml(){
 }
 function addToCart(p){
   const l = S.cart.find(x=>x.pid===p.id);
-  if(l) l.qty++; else S.cart.push({ pid:p.id, name:p.name, barcode:p.barcode, price:p.price, qty:1, disc:0, dt:'pct', dv:0 });
+  if(l) l.qty++; else S.cart.push({ pid:p.id, name:p.name, barcode:p.barcode, price:p.price, cat:p.category_id||null, qty:1, disc:0, dt:'pct', dv:0 });
   syncPays(); render();
   if(!S.stock[p.id] || S.stock[p.id][S.store]==null) loadStock([p.id]).then(()=>{ (S.stock[p.id] ||= {}); if(S.stock[p.id][S.store]==null) S.stock[p.id][S.store]=0; if(S.view==='pos') render(); });
 }
@@ -405,6 +409,7 @@ async function checkout(){
     else { render(); return toast('Чек не проведён: '+errText(error)); }
   } else {
     const r = await sb.from('sales').select('number,bonus_earned').eq('id', data).single(); number = r.data && r.data.number; snapshot.bonus = r.data && r.data.bonus_earned;
+    celebrate(data);
   }
   S.cart=[]; S.disc=0; S.pays={}; S.certCode=''; S.cert=null; S.certQ=''; S.phone=''; S.cust=null; S.custMsg=''; S.q=''; S.found=[];
   render(); showReceipt(snapshot, number, offline);
@@ -1191,9 +1196,9 @@ async function nmSave(){
   if(error) return toast(errText(error));
   toast(e.id ? 'Сохранено' : 'Товар создан, штрихкод '+data.barcode);
   e.id = data.id; e.barcode = data.barcode;
-  const row = [e.id, e.barcode, e.sku||'', e.name, Number(e.price), e.photo_url||''];
+  const row = [e.id, e.barcode, e.sku||'', e.name, Number(e.price), e.photo_url||'', e.category_id||null];
   const i = S.catalog.findIndex(a=>a[0]===e.id); if(i>=0) S.catalog[i]=row; else S.catalog.push(row);
-  try{ ls.set('kassa_catalog3', { at:S.catalogAt, items:S.catalog }); }catch(_){}
+  try{ ls.set('kassa_catalog4', { at:S.catalogAt, items:S.catalog }); }catch(_){}
   await loadNom(); const fresh = S.nm.data.rows.find(r=>r.id===e.id); if(fresh) nmOpen(fresh); else render();
 }
 async function nmPhoto(file){
@@ -1493,12 +1498,12 @@ async function loadProfit(){
 }
 function renderProfit(){
   const D = PF.data, [f,t] = pfRange(), sum = o => Object.values(o||{}).reduce((a,v)=>a+ +v,0);
-  const rows = (D||[]).map(r => { const gross = r.revenue - r.cogs, cash = sum(r.cash), fixed = sum(r.fixed), net = gross - r.wages - cash - fixed;
-    return { ...r, gross, cashT:cash, fixedT:fixed, net, margin: r.revenue ? net/r.revenue*100 : 0 }; });
-  const T = rows.reduce((a,r)=>{ for(const k of ['revenue','cogs','gross','wages','cashT','fixedT','net','purchases']) a[k]=(a[k]||0)+r[k]; return a; }, {});
+  const rows = (D||[]).map(r => { const gross = r.revenue - r.cogs, tax = r.tax ?? Math.round(Math.max(r.revenue,0)*0.03), cash = sum(r.cash), fixed = sum(r.fixed), net = gross - tax - r.wages - cash - fixed;
+    return { ...r, tax, gross, cashT:cash, fixedT:fixed, net, margin: r.revenue ? net/r.revenue*100 : 0 }; });
+  const T = rows.reduce((a,r)=>{ for(const k of ['revenue','cogs','gross','tax','wages','cashT','fixedT','net','purchases']) a[k]=(a[k]||0)+r[k]; return a; }, {});
   T.margin = T.revenue ? T.net/T.revenue*100 : 0;
   const cell = (v, neg) => `<td class="num" ${neg&&v<0?'style="color:var(--bad)"':''}>${fmt(v)}</td>`;
-  const lines = [['Выручка','revenue'],['Себестоимость проданного','cogs',-1],['Валовая прибыль','gross'],['Зарплата (по табелю)','wages',-1],['Расходы из кассы','cashT',-1],['Аренда и постоянные расходы','fixedT',-1],['Чистая прибыль','net'],['Рентабельность','margin']];
+  const lines = [['Выручка','revenue'],['Себестоимость проданного','cogs',-1],['Валовая прибыль','gross'],[`Налог ${(D&&D[0]&&D[0].tax_rate)||3}% с выручки`,'tax',-1],['Зарплата (по табелю)','wages',-1],['Расходы из кассы','cashT',-1],['Аренда и постоянные расходы','fixedT',-1],['Чистая прибыль','net'],['Рентабельность','margin']];
   const per = [['month','Этот месяц'],['prev','Прошлый месяц'],['q','3 месяца'],['year','С начала года'],['custom','Свой период']];
   $('#main').innerHTML = `<h2>Рентабельность магазинов</h2>${storeFilterHtml()}
   <div class="filters">${per.map(([k,v])=>`<button class="btn small ${PF.per===k?'primary':''}" data-pfper="${k}">${v}</button>`).join('')}
@@ -1509,7 +1514,7 @@ function renderProfit(){
   </tbody></table></div>
   <details style="margin:8px 0"><summary class="meta">Расшифровка расходов по магазинам</summary>
     ${rows.map(r=>`<div class="meta" style="margin:6px 0"><b>${esc(storeName(r.store))}:</b> ${[...Object.entries(r.cash).map(([k,v])=>k+' (касса) '+fmt(v)), ...Object.entries(r.fixed).map(([k,v])=>k+' '+fmt(v))].join(' · ') || 'расходов нет'}</div>`).join('')}</details>
-  <p class="meta">Себестоимость — по закупочной цене проданных товаров. Зарплата — начислено по табелю (без бонусов и штрафов). Из расходов кассы не учитываются инкассация, зарплата и закуп — они считаются отдельно. Постоянные расходы за неполный месяц берутся пропорционально дням.</p>`}
+  <p class="meta">Налог — ${(D&&D[0]&&D[0].tax_rate)||3}% с выручки (продажи минус возвраты). Себестоимость — по закупочной цене проданных товаров. Зарплата — начислено по табелю (без бонусов и штрафов). Из расходов кассы не учитываются инкассация, зарплата и закуп — они считаются отдельно. Постоянные расходы за неполный месяц берутся пропорционально дням.</p>`}
   <div class="grid2" style="margin-top:14px"><div class="card stack"><b>Добавить постоянный расход</b>
     <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
       <select id="pf-store">${S.allStores.map(st=>`<option value="${st.id}" ${String(PF.add.store)===String(st.id)?'selected':''}>${esc(storeName(st.id))}</option>`).join('')}</select>
@@ -1880,6 +1885,9 @@ document.addEventListener('click', async e => {
   if(S.view==='pay'){ render(); await loadPay(); render(); }
   if(S.view==='profit'){ render(); await loadProfit(); render(); }
   if(S.view==='po'){ render(); await loadPo(); render(); }
+  if(S.view==='promo'){ render(); await loadPromos(); render(); }
+  if(S.view==='me'){ render(); await loadMe(); render(); }
+  if(S.view==='adm'){ render(); await loadAdm(); render(); }
   if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); }
   if(S.view==='stock' && !S.stockRows.length){ await loadStockView(); render(); }
   if(S.view==='site'){ render(); await loadSite(); render(); }
@@ -1892,3 +1900,176 @@ document.addEventListener('click', async e => {
 sb.auth.onAuthStateChange((ev) => { if(ev==='SIGNED_OUT') renderLogin(); });
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
 boot();
+
+
+/* ---------- акции ---------- */
+const PR = { list:null, cats:null, edit:null };
+const todayAlm = () => new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'});
+async function loadPromos(){
+  const [a, c] = await Promise.all([sb.from('promotions').select('*').order('created_at',{ascending:false}), PR.cats ? null : sb.from('categories').select('id,name').order('name')]);
+  if(a.error){ PR.list = PR.list||[]; return; } PR.list = a.data || []; if(c) PR.cats = c.data || [];
+}
+const promoLive = (p, store) => { const d = todayAlm(); return p.active && (!p.starts || p.starts <= d) && (!p.ends || p.ends >= d) && (!p.stores || !p.stores.length || p.stores.includes(store)); };
+const catName = id => ((PR.cats||[]).find(c=>c.id===id)||{}).name || ('категория '+id);
+function promoBase(p, t){
+  if(!p.category_ids || !p.category_ids.length) return t.total;
+  const k = t.sub ? t.total / Math.max(1, t.sub - t.lineDisc) : 1;
+  return Math.round(S.cart.filter(l => p.category_ids.includes(l.cat)).reduce((a,l)=>a + (l.price*l.qty - (l.disc||0)), 0) * k);
+}
+function promoHintHtml(t){
+  if(!S.cart.length || !PR.list) return '';
+  const L = PR.list.filter(p => promoLive(p, S.store)); if(!L.length) return '';
+  const out = L.map(p => { const b = promoBase(p, t), need = (+p.min_total||0) - b;
+    if(need <= 0 && (b > 0 || !p.min_total)) return `<div class="promo-hit">🎁 <b>${esc(p.title)}</b>${p.gift?' — '+esc(p.gift):''}<br><span class="meta">Условие выполнено — не забудьте предложить клиенту</span></div>`;
+    if(need > 0 && need <= Math.max(+p.min_total*0.6, 5000)) return `<div class="promo-near">✨ До акции «${esc(p.title)}» не хватает <b class="num">${fmt(need)}</b>${p.category_ids&&p.category_ids.length?' в категории '+esc(p.category_ids.map(catName).join(', ')):''}${p.gift?' · '+esc(p.gift):''}</div>`;
+    return ''; }).join('');
+  return out ? `<div class="stack" style="gap:6px">${out}</div>` : '';
+}
+const promoCanEdit = () => S.me && ['owner','manager'].includes(S.me.role);
+function promoCond(p){ return [p.min_total>0?'чек от '+fmt(p.min_total):'любая покупка', p.category_ids&&p.category_ids.length?'в категории '+p.category_ids.map(catName).join(', '):'', p.stores&&p.stores.length?ddSummary(p.stores):'все магазины',
+  p.starts||p.ends?`${p.starts?'с '+new Date(p.starts).toLocaleDateString('ru-RU'):''} ${p.ends?'по '+new Date(p.ends).toLocaleDateString('ru-RU'):''}`.trim():'без срока'].filter(Boolean).join(' · '); }
+function renderPromo(){
+  const L = PR.list, e = PR.edit, ed = promoCanEdit();
+  const live = (L||[]).filter(p => promoLive(p, S.store)), other = (L||[]).filter(p => !live.includes(p));
+  const card = p => `<div class="card stack" style="gap:4px;margin-bottom:8px;${promoLive(p,S.store)?'':'opacity:.65'}"><div class="row"><b>🎁 ${esc(p.title)}</b>${p.active?'':'<span class="chip zero">выключена</span>'}</div>
+    ${p.gift?`<div>Что даём: <b>${esc(p.gift)}</b></div>`:''}<div class="meta">${esc(promoCond(p))}</div>${p.description?`<div>${esc(p.description)}</div>`:''}
+    ${ed?`<div class="row" style="justify-content:flex-start"><button class="btn small" data-predit="${p.id}">Изменить</button><button class="btn small" data-prdel="${p.id}">Удалить</button></div>`:''}</div>`;
+  $('#main').innerHTML = `<div class="row"><h2>Акции</h2>${ed&&!e?'<button class="btn primary" id="pr-new">+ Новая акция</button>':''}</div>
+  <p class="meta">Активные акции подсказываются прямо в чеке на кассе: когда покупка подходит — «🎁 предложите подарок», когда немного не хватает — «до акции не хватает …».</p>
+  <div class="grid2"><div>${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Акций пока нет</div>':`${live.length?`<h3>Действуют сейчас · ${esc(storeName(S.store))}</h3>${live.map(card).join('')}`:'<div class="empty">Сейчас в этом магазине акций нет</div>'}${other.length?`<h3>Другие</h3>${other.map(card).join('')}`:''}`}</div>
+  <div>${e?`<div class="card stack"><b>${e.id?'Изменить акцию':'Новая акция'}</b>
+    <input id="pr-title" placeholder="Название, напр. «Подарок от 30 000»" value="${esc(e.title||'')}">
+    <input id="pr-gift" placeholder="Что даём: пакет-подарок, браслет, скидка 10%…" value="${esc(e.gift||'')}">
+    <textarea id="pr-desc" rows="2" placeholder="Описание для консультантов (необязательно)">${esc(e.description||'')}</textarea>
+    <label class="meta">Сумма чека от, ₸ <input id="pr-min" type="number" min="0" inputmode="numeric" value="${e.min_total||''}" style="width:140px"></label>
+    <div class="meta">Только на товары категорий (если пусто — весь чек):</div>
+    <details class="dd"><summary>${e.cats.length?esc(e.cats.map(catName).join(', ')):'все категории'}</summary><div class="dd-panel">${(PR.cats||[]).map(c=>`<label><input type="checkbox" data-prcat="${c.id}" ${e.cats.includes(c.id)?'checked':''}> ${esc(c.name)}</label>`).join('')}</div></details>
+    <div class="meta">Магазины (если пусто — все):</div>${storesDD(e.stores, id=>`data-prst="${id}"`)}
+    <div class="row" style="justify-content:flex-start;flex-wrap:wrap"><label class="meta">С <input type="date" id="pr-from" value="${e.starts||''}"></label><label class="meta">по <input type="date" id="pr-to" value="${e.ends||''}"></label></div>
+    <label><input type="checkbox" id="pr-active" ${e.active!==false?'checked':''}> акция включена</label>
+    <div class="row"><button class="btn" id="pr-cancel">Отмена</button><button class="btn primary" id="pr-save">Сохранить</button></div></div>`
+    :`<div class="card meta">${ed?'Нажмите «Новая акция», чтобы добавить условия и подарок.':'Акции добавляет менеджер. Подсказки появятся в чеке автоматически.'}</div>`}</div></div>`;
+}
+function prReadForm(){ const e = PR.edit; if(!e) return; const v = id => ($('#'+id)||{}).value;
+  Object.assign(e, { title:v('pr-title'), gift:v('pr-gift'), description:v('pr-desc'), min_total:v('pr-min'), starts:v('pr-from'), ends:v('pr-to'), active:($('#pr-active')||{}).checked }); }
+document.addEventListener('click', async e => {
+  const t = e.target.closest('button'); if(!t || S.view!=='promo') return; const d = t.dataset;
+  if(t.id==='pr-new'){ PR.edit = { cats:[], stores:[], active:true }; render(); }
+  else if(t.id==='pr-cancel'){ PR.edit = null; render(); }
+  else if(d.predit){ const p = PR.list.find(x=>x.id===d.predit); PR.edit = { ...p, cats:[...(p.category_ids||[])], stores:[...(p.stores||[])] }; render(); scrollTo(0,0); }
+  else if(d.prdel){ if(t.dataset.sure!=='1'){ t.dataset.sure='1'; t.textContent='Точно удалить?'; return; } const { error } = await sb.rpc('promo_del', { p_id:d.prdel }); if(error) return toast(errText(error)); toast('Акция удалена'); await loadPromos(); render(); }
+  else if(t.id==='pr-save'){ prReadForm(); const x = PR.edit; if(!(x.title||'').trim()) return toast('Укажите название');
+    t.disabled = true; const { error } = await sb.rpc('promo_save', { p:{ id:x.id||null, title:x.title.trim(), gift:x.gift, description:x.description, min_total:x.min_total, category_ids:x.cats, stores:x.stores, starts:x.starts, ends:x.ends, active:x.active } });
+    if(error){ t.disabled=false; return toast(errText(error)); } toast('Акция сохранена'); PR.edit = null; await loadPromos(); render(); }
+});
+document.addEventListener('change', e => {
+  if(S.view!=='promo' || !PR.edit) return; const t = e.target, d = t.dataset;
+  if(d.prcat||d.prst){ prReadForm(); const arr = d.prcat ? PR.edit.cats : PR.edit.stores, id = +(d.prcat||d.prst); const i = arr.indexOf(id); if(t.checked && i<0) arr.push(id); if(!t.checked && i>=0) arr.splice(i,1);
+    const sum = t.closest('details').querySelector('summary'); sum.textContent = d.prcat ? (arr.length?arr.map(catName).join(', '):'все категории') : ddSummary(arr); }
+});
+
+/* ---------- праздник: лучший чек дня ---------- */
+async function celebrate(saleId){
+  try{
+    const { data } = await sb.rpc('sale_celebrate', { p_sale: saleId }); if(!data) return;
+    const k = 'kassa_rec_'+S.store+'_'+todayAlm(), seen = ls.get(k, {});
+    if(data.record_day && !seen.day){ seen.day = 1; ls.set(k, seen); confetti(260); bigCheer('🔥 Рекорд дня!', `Магазин продал за сегодня ${fmt(data.day_total)} — больше, чем в любой день за 2 месяца. Команда, вы супер!`); }
+    else if(data.best_check){ confetti(160); bigCheer('🏆 Лучший чек дня!', `${fmt(data.total)} — самый большой чек в магазине сегодня. Так держать!`); }
+  }catch(_){}
+}
+function bigCheer(title, text){
+  const el = document.createElement('div'); el.className = 'cheer'; el.innerHTML = `<b>${esc(title)}</b><span>${esc(text)}</span>`;
+  el.onclick = () => el.remove(); document.body.append(el); setTimeout(() => el.remove(), 5500);
+}
+function confetti(n){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const c = document.createElement('canvas'); c.className = 'confetti'; document.body.append(c);
+  const W = c.width = innerWidth, H = c.height = innerHeight, x = c.getContext('2d');
+  const col = ['#f2c94c','#eb5757','#6fcf97','#56ccf2','#bb6bd9','#f2994a','#ffffff'];
+  const P = Array.from({length:n}, () => ({ x: W/2 + (Math.random()-.5)*W*0.3, y: H*0.35, vx:(Math.random()-.5)*14, vy: -Math.random()*14-4, r: Math.random()*6+4, a: Math.random()*6, va:(Math.random()-.5)*.3, c: col[Math.random()*col.length|0] }));
+  let f = 0; (function tick(){ x.clearRect(0,0,W,H); P.forEach(p => { p.vy += .35; p.vx *= .99; p.x += p.vx; p.y += p.vy; p.a += p.va; x.save(); x.translate(p.x,p.y); x.rotate(p.a); x.fillStyle = p.c; x.fillRect(-p.r/2,-p.r/4,p.r,p.r/2); x.restore(); });
+    if(++f < 170) requestAnimationFrame(tick); else c.remove(); })();
+}
+
+/* ---------- мой кабинет (командные продажи в мои смены) ---------- */
+const ME = { month: new Date().toISOString().slice(0,7), data:null, pay:null };
+async function loadMe(){
+  ME.data = null; const from = ME.month+'-01', [y,m] = ME.month.split('-').map(Number), to = new Date(Date.UTC(y, m, 0)).toISOString().slice(0,10);
+  const [c, p, a] = await Promise.all([sb.rpc('my_cabinet', { p_month: from }), sb.rpc('payroll', { p_from:from, p_to:to, p_stores:null }), sb.rpc('pay_adj_list', { p_month: from })]);
+  if(c.error) toast(errText(c.error)); ME.data = c.data || { days:[], prev:{}, records:[] };
+  const mine = (p.data||[]).find(e => e.employee===S.me.id) || { employee:S.me.id, total:0, hours:0, days:[] };
+  const A = (a.data||[]).filter(x => x.employee===S.me.id), by = k => A.filter(x=>x.kind===k).reduce((s,x)=>s+ +x.amount,0);
+  const plus = by('bonus')+by('audit')+by('carry_in'), minus = by('fine')+by('overpay'), due = mine.total + plus - minus, paid = by('advance')+by('paid')+by('card');
+  ME.pay = { total:mine.total, A, plus, minus, due, paid, rest: due - paid, card: by('card') };
+}
+function renderMe(){
+  const D = ME.data, P = ME.pay;
+  const sum = (D&&D.days||[]).reduce((a,d)=>({ total:a.total+ +d.total, checks:a.checks+ +d.checks, hours:a.hours+ +d.hours }), { total:0, checks:0, hours:0 });
+  const pv = (D&&D.prev)||{}, avg = sum.checks ? sum.total/sum.checks : 0, pavg = pv.checks ? pv.total/pv.checks : 0;
+  const perShift = D&&D.days.length ? sum.total/D.days.length : 0, pPerShift = pv.days ? pv.total/pv.days : 0;
+  const delta = (a,b) => b ? `<span class="meta" style="color:${a>=b?'var(--ok)':'var(--bad)'}">${a>=b?'▲':'▼'} ${Math.abs(Math.round((a/b-1)*100))}% к прошлому месяцу</span>` : '<span class="meta">в прошлом месяце смен не было</span>';
+  const tile = (t,v,sub) => `<div class="card stack" style="gap:2px"><span class="meta">${t}</span><b class="num" style="font-size:22px">${v}</b>${sub||''}</div>`;
+  const dd = d => new Date(d+'T00:00').toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',weekday:'short'});
+  $('#main').innerHTML = `<div class="row"><h2>Мой кабинет · ${esc(S.me.full_name)}</h2><label class="meta">Месяц <input type="month" id="me-month" value="${ME.month}"></label></div>
+  <p class="meta">У нас командная работа, поэтому здесь — продажи всего магазина в те дни, когда вы были на смене.</p>
+  ${!D?'<div class="empty">Считаем…</div>':`<div class="kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px">
+    ${tile('Смен в этом месяце', D.days.length, `<span class="meta">${sum.hours} ч</span>`)}
+    ${tile('Продажи команды в мои смены', fmt(sum.total), delta(perShift, pPerShift).replace('к прошлому','за смену к прошлому'))}
+    ${tile('Средний чек в мои смены', fmt(avg), delta(avg, pavg))}
+    ${P?tile('Моя зарплата: остаток к выплате', fmt(Math.max(P.rest,0)), `<span class="meta">начислено ${fmt(P.due)} · выплачено ${fmt(P.paid)}</span>`):''}
+  </div>
+  <div class="grid2"><div>
+    <h3>Мои смены</h3>${D.days.length?`<div class="scroll"><table><thead><tr><th>День</th><th>Магазин</th><th>Часы</th><th>Продажи</th><th>Чеков</th><th>Лучший чек</th></tr></thead><tbody>
+      ${D.days.map(d=>`<tr><td class="num">${dd(d.day)}</td><td>${esc(storeName(d.store_id))}${d.team?'<br><span class="meta">с вами: '+esc(d.team)+'</span>':''}</td><td class="num">${+d.hours}</td><td class="num"><b>${fmt(d.total)}</b></td><td class="num">${d.checks}</td><td class="num">${fmt(d.best)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">В этом месяце смен в табеле нет</div>'}
+  </div><div class="stack">
+    ${P?`<div class="card stack" style="gap:6px"><b>Моя зарплата за месяц</b>
+      <div class="row"><span>Начислено по продажам</span><span class="num">${fmt(P.total)}</span></div>
+      ${P.A.map(a=>`<div class="row"><span>${PADJ[a.kind][0]}${a.note?' <span class="meta">— '+esc(a.note)+'</span>':''}</span><span class="num">${PADJ[a.kind][1]>0?'+':'−'}${fmt(a.amount)}</span></div>`).join('')}
+      <div class="row" style="border-top:1px solid var(--line);padding-top:6px"><b>${P.rest<0?'Переплата':'Остаток к выплате'}</b><b class="num">${fmt(Math.abs(P.rest))}</b></div>
+      ${P.card?`<div class="meta">из них на карту: ${fmt(P.card)}</div>`:''}
+      <button class="btn small" id="me-pay" style="align-self:flex-start">Подробный расчёт по дням →</button></div>`:''}
+    <div class="card stack" style="gap:6px"><b>🏆 Рекорды магазинов за месяц</b>
+      ${(D.records||[]).filter(r=>r.best_check||r.best_day).map(r=>`<div><b>${esc(storeName(r.store_id))}</b><br><span class="meta">лучший чек ${fmt(r.best_check)} · лучший день ${fmt(r.best_day)}</span></div>`).join('') || '<span class="meta">Пока нет продаж</span>'}
+      <span class="meta">Побейте рекорд — на кассе будет салют 🎉</span></div>
+  </div></div>`}`;
+}
+document.addEventListener('click', async e => { if(S.view==='me' && e.target.id==='me-pay'){ S.view='pay'; PY.month = ME.month; render(); await loadPay(); render(); } });
+document.addEventListener('change', async e => { if(S.view==='me' && e.target.id==='me-month'){ ME.month = e.target.value || ME.month; render(); await loadMe(); render(); } });
+
+
+/* ---------- административный штат (видит только владелец) ---------- */
+const AD = { month: new Date().toISOString().slice(0,7), list:null };
+const AD_F = [['salary','Оклад'],['bonus','Премия'],['deduction','Удержание'],['paid_cash','Выплачено наличными'],['paid_card','На карту']];
+async function loadAdm(){ AD.list = null; const { data, error } = await sb.rpc('admin_pay_list', { p_month: AD.month+'-01' }); if(error) toast(errText(error)); AD.list = data || []; }
+const adCalc = a => { const due = +a.salary + +a.bonus - +a.deduction, paid = +a.paid_cash + +a.paid_card; return { due, paid, rest: due - paid }; };
+function renderAdm(){
+  if(S.me.role!=='owner'){ $('#main').innerHTML = '<div class="empty">Нет доступа</div>'; return; }
+  const L = AD.list, T = (L||[]).reduce((t,a)=>{ const c = adCalc(a); AD_F.forEach(([k])=>t[k]=(t[k]||0)+ +a[k]); t.due=(t.due||0)+c.due; t.rest=(t.rest||0)+c.rest; return t; }, {});
+  const inp = (a,k) => `<input class="small" type="number" min="0" inputmode="numeric" value="${+a[k]||''}" data-adf="${a.id}:${k}" style="width:105px">`;
+  $('#main').innerHTML = `<div class="row"><h2>Административный штат</h2><label class="meta">Месяц <input type="month" id="ad-month" value="${AD.month}"></label></div>
+  <p class="meta">🔒 Эту вкладку видите только вы. Бухгалтер, менеджеры, СММ и другие сотрудники на окладе — не зависят от продаж магазинов. Суммы сохраняются сразу при вводе.</p>
+  ${!L?'<div class="empty">Загружаем…</div>':`<div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Должность</th>${AD_F.map(([,t])=>`<th>${t}</th>`).join('')}<th>К выплате</th><th>Остаток</th><th></th></tr></thead><tbody>
+    ${L.map(a=>{ const c = adCalc(a); return `<tr><td><input value="${esc(a.name)}" data-adf="${a.id}:name" style="min-width:130px"><br><label class="meta"><input type="checkbox" data-adf="${a.id}:official" ${a.official?'checked':''}> официально</label></td>
+      <td><input value="${esc(a.position||'')}" data-adf="${a.id}:position" placeholder="должность" style="min-width:110px"></td>${AD_F.map(([k])=>`<td>${inp(a,k)}</td>`).join('')}
+      <td class="num"><b>${fmt(c.due)}</b></td><td class="num" style="color:${c.rest<0?'var(--bad)':c.rest>0?'inherit':'var(--ok)'}"><b>${c.rest<0?'переплата '+fmt(-c.rest):fmt(c.rest)}</b></td>
+      <td><button class="btn small" data-addel="${a.id}" title="Удалить">✕</button></td></tr>`; }).join('') || `<tr><td colspan="10" class="meta">В этом месяце пока никого нет${''}</td></tr>`}
+    ${L.length>1?`<tr><td><b>Итого</b></td><td></td>${AD_F.map(([k])=>`<td class="num">${fmt(T[k])}</td>`).join('')}<td class="num"><b>${fmt(T.due)}</b></td><td class="num"><b>${fmt(T.rest)}</b></td><td></td></tr>`:''}</tbody></table></div>`}
+  <div class="card stack" style="margin-top:14px"><b>Добавить сотрудника</b>
+    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px"><input id="ad-name" placeholder="Имя, напр. Кира"><input id="ad-pos" placeholder="Должность: бухгалтер, менеджер, СММ…"><input id="ad-sal" type="number" min="0" inputmode="numeric" placeholder="оклад, ₸" style="width:130px">
+      <button class="btn primary" id="ad-add">Добавить</button><button class="btn" id="ad-copy" title="Перенести людей и оклады с прошлого месяца">Перенести с прошлого месяца</button></div></div>`;
+}
+document.addEventListener('click', async e => {
+  if(S.view!=='adm') return; const t = e.target.closest('button'); if(!t) return;
+  if(t.id==='ad-add'){ const name = $('#ad-name').value.trim(); if(!name) return toast('Укажите имя');
+    const { error } = await sb.rpc('admin_pay_save', { p:{ month:AD.month+'-01', name, position:$('#ad-pos').value.trim(), salary:$('#ad-sal').value } }); if(error) return toast(errText(error)); await loadAdm(); render(); }
+  else if(t.id==='ad-copy'){ const { data, error } = await sb.rpc('admin_pay_copy', { p_month:AD.month+'-01' }); if(error) return toast(errText(error)); toast(data ? 'Перенесено: '+data : 'Нечего переносить'); await loadAdm(); render(); }
+  else if(t.dataset.addel){ if(t.dataset.sure!=='1'){ t.dataset.sure='1'; t.textContent='Удалить?'; return; } const { error } = await sb.rpc('admin_pay_del', { p_id:t.dataset.addel }); if(error) return toast(errText(error)); await loadAdm(); render(); }
+});
+document.addEventListener('change', async e => {
+  if(S.view!=='adm') return; const t = e.target;
+  if(t.id==='ad-month'){ AD.month = t.value || AD.month; render(); await loadAdm(); render(); return; }
+  if(!t.dataset.adf) return; const [id, k] = t.dataset.adf.split(':'), a = (AD.list||[]).find(x=>x.id===id); if(!a) return;
+  a[k] = t.type==='checkbox' ? t.checked : t.value;
+  const { error } = await sb.rpc('admin_pay_save', { p:{ ...a } }); if(error){ toast(errText(error)); return; }
+  render();
+});
