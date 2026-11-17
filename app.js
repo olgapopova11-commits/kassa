@@ -48,6 +48,8 @@ async function onSelChange(){
 function normPhone(v){ let d=String(v||'').replace(/\D/g,''); if(d.length===11&&(d[0]==='7'||d[0]==='8')) d=d.slice(1); if(d.length===10) return '+7'+d; return null; }
 function toast(t){ const el=document.createElement('div'); el.className='toast'; el.textContent=t; document.body.append(el); setTimeout(()=>el.remove(),3200); }
 const ls = { get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } }, set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)) }catch(e){} } };
+const thumbUrl = u => u.replace('static.tildacdn.pro/','thumb.tildacdn.pro/').replace(/\/([^/]+)$/,'/-/resize/120x/$1');
+const thumb = p => p.photo_url ? `<img class="thumb" src="${esc(thumbUrl(p.photo_url))}" data-full="${esc(p.photo_url)}" alt="" loading="lazy" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : '<span class="thumb"></span>';
 function errText(e){ return (e && (e.message || e.error_description)) || String(e); }
 const isNetErr = e => !navigator.onLine || /Failed to fetch|NetworkError|Load failed|network/i.test(errText(e));
 
@@ -70,18 +72,18 @@ setInterval(flushQueue, 60000);
 
 /* ---------- каталог (кэш на устройстве для быстрого поиска и офлайна) ---------- */
 async function loadCatalog(force){
-  const cached = ls.get('kassa_catalog', null);
+  const cached = ls.get('kassa_catalog2', null);
   if(cached && !force){ S.catalog = cached.items; S.catalogAt = cached.at; }
   if(!navigator.onLine) return;
   if(cached && !force && Date.now() - cached.at < 6*3600e3) return;
   const items = []; let from = 0;
   while(true){
-    const { data, error } = await sb.from('products').select('id,barcode,sku,name,price,archived').eq('archived', false).order('name').range(from, from+999);
+    const { data, error } = await sb.from('products').select('id,barcode,sku,name,price,archived,photo_url').eq('archived', false).order('name').range(from, from+999);
     if(error) { toast('Каталог не загрузился: '+errText(error)); return; }
     data.forEach(p => items.push([p.id, p.barcode, p.sku||'', p.name, Number(p.price)]));
     if(data.length < 1000) break; from += 1000;
   }
-  S.catalog = items; S.catalogAt = Date.now(); ls.set('kassa_catalog', {at:S.catalogAt, items});
+  S.catalog = items; S.catalogAt = Date.now(); ls.set('kassa_catalog2', {at:S.catalogAt, items});
 }
 const prodObj = a => ({ id:a[0], barcode:a[1], sku:a[2], name:a[3], price:a[4] });
 function searchCatalog(q){
@@ -210,7 +212,7 @@ function renderPos(){
      <div class="row"><h2>Товары</h2><span class="meta">${S.catalog.length.toLocaleString('ru-RU')} в каталоге</span></div>
      <div class="row"><input id="q" style="flex:1" placeholder="Штрихкод, артикул или название" value="${esc(S.q)}" autocomplete="off"><button class="btn" id="q-add">Добавить</button></div>
      <div class="list">${S.found.length ? S.found.map(p=>{ const s = S.stock[p.id]||{}; const here = s[S.store] ?? null;
-        return `<button class="prod" data-add="${p.id}"><span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}${p.sku?' · '+esc(p.sku):''}</span><br>
+        return `<button class="prod" data-add="${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}${p.sku?' · '+esc(p.sku):''}</span><br>
           ${here===null?'<span class="chip">остаток…</span>':`<span class="chip ${here>0?'ok':'zero'}">здесь: ${here}</span>`}
           ${Object.entries(s).filter(([k,v])=>+k!==S.store&&v>0).slice(0,4).map(([k,v])=>`<span class="chip">${esc((S.stores.find(x=>x.id==k)||{}).address||k)}: ${v}</span>`).join('')}</span>
           <span class="price num">${fmt(p.price)}</span></button>`}).join('') : `<div class="empty">${S.q?'Ничего не найдено':'Отсканируйте штрихкод или введите название'}</div>`}</div>
@@ -422,7 +424,7 @@ async function loadAudit(){
 }
 function docSearchHtml(ph){
   return `<div class="row"><input id="dq" style="flex:1" placeholder="${ph||'Скан штрихкода или название'}" value="${esc(S.dq)}" autocomplete="off"><button class="btn" id="dq-add">Добавить</button></div>
-    ${S.dfound.length?`<div class="list">${S.dfound.slice(0,10).map(p=>`<button class="prod" data-dadd="${p.id}"><span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}</span></span><span class="price num">${fmt(p.price)}</span></button>`).join('')}</div>`:''}`;
+    ${S.dfound.length?`<div class="list">${S.dfound.slice(0,10).map(p=>`<button class="prod" data-dadd="${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}</span></span><span class="price num">${fmt(p.price)}</span></button>`).join('')}</div>`:''}`;
 }
 function renderWh(){
   if(!S.wmode) S.wmode = whModes()[0][0];
