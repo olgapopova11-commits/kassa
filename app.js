@@ -982,7 +982,9 @@ function renderShifts(){
         <label class="meta">Наличные в кассе фактически, ₸ <input id="sh-close-cash" type="number" min="0" inputmode="numeric" placeholder="${Math.round(sh.summary.cashExpected)}" style="width:150px"></label>
         <label class="meta">По терминалу (карта + Kaspi QR), ₸ <input id="sh-close-card" type="number" min="0" inputmode="numeric" placeholder="${Math.round(sh.summary.cardNet||0)}" style="width:150px"></label>
         <input id="sh-note" placeholder="Комментарий (необязательно)" style="flex:1;min-width:180px">
-        <button class="btn primary" id="sh-close">Закрыть смену</button></div>`}</div>`;
+        <button class="btn" id="sh-handover" title="Закрыть смену с отчётом и передать кассу следующему сотруднику">Пересменка</button>
+        <button class="btn primary" id="sh-close">Закрыть смену</button></div>
+        <p class="meta" style="margin:0">Пересменка в течение дня: пересчитайте кассу, нажмите «Пересменка» — смена закроется с отчётом, и следующий сотрудник сразу откроет свою с этой же суммой.</p>`}</div>`;
   const days = [[1,'Сегодня'],[7,'7 дней'],[30,'30 дней']];
   $('#main').innerHTML = `<h2>Смены</h2>${cur}
     <h2 style="margin-top:18px">Закрытые и открытые смены</h2>${isBoss()?storeFilterHtml():''}
@@ -1011,12 +1013,20 @@ document.addEventListener('click', async e => {
     const { error } = await sb.rpc('shift_open', { p_store:S.store, p_cash: +v0, p_note: ($('#sh-open-note')||{}).value||null });
     if(error) toast(errText(error)); else toast('Смена открыта'); await loadShifts(); render(); }
   else if(t.id==='sh-refresh'){ await loadShifts(); render(); }
-  else if(t.id==='sh-close'){
+  else if(t.id==='sh-close' || t.id==='sh-handover'){ const hand = t.id==='sh-handover';
     const v = $('#sh-close-cash').value; if(v===''){ toast('Пересчитайте наличные в кассе и введите сумму'); $('#sh-close-cash').focus(); return; }
     const vc = $('#sh-close-card').value; if(vc===''){ toast('Введите сумму по терминалу из отчёта терминала'); $('#sh-close-card').focus(); return; }
     t.disabled = true; const { error } = await sb.rpc('shift_close', { p_shift:S.shift.id, p_cash:+v, p_note:$('#sh-note').value, p_card:+vc });
     if(error){ toast(errText(error)); t.disabled = false; return; }
-    const id = S.shift.id; await loadShifts(); render(); const x = S.shifts.find(z=>z.id===id); if(x) showShiftReport(x); }
+    const id = S.shift.id; await loadShifts(); render(); const x = S.shifts.find(z=>z.id===id);
+    if(hand){
+      modal(`<h2>Пересменка</h2><p>Смена закрыта, отчёт отправлен в Telegram. В кассе: <b>${fmt(+v)}</b>.</p>
+        <p>Следующий сотрудник пересчитывает кассу и открывает свою смену — сумма на открытии должна совпасть.</p><div class="row" style="flex-wrap:wrap;gap:8px">
+        <button class="btn" data-shrep="${id}">Посмотреть отчёт</button>
+        <button class="btn" id="sh-ho-logout">Выйти — войдёт следующий сотрудник</button>
+        <button class="btn primary" data-close>Открыть смену с этого аккаунта</button></div>`);
+    } else if(x) showShiftReport(x); }
+  else if(t.id==='sh-ho-logout'){ await sb.auth.signOut(); location.reload(); }
   else if(d.shrep){ const x = S.shifts.find(z=>z.id===d.shrep); if(x) showShiftReport(x); }
   else if(d.shdays){ S.shDays = +d.shdays; await loadShifts(); render(); }
 });
@@ -1302,12 +1312,38 @@ async function loadBonus(){
 }
 async function openBonusClient(id){ BK.cur = id; BK.card = null; render(); const { data, error } = await sb.rpc('bonus_client', { p_customer:id, p_brand:BK.brand }); if(error) toast(errText(error)); BK.card = data; render(); }
 const dshort = d => d ? new Date(d).toLocaleDateString('ru-RU') : '—';
+function loadScriptOnce(src){ return new Promise((ok,no)=>{ if(document.querySelector(`script[src="${src}"]`)) return ok(); const el=document.createElement('script'); el.src=src; el.onload=ok; el.onerror=no; document.head.appendChild(el); }); }
+async function sagiImport(file){
+  const brand = BK.brand; BK.imp = 'Читаем файл…'; render();
+  try{
+    await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+    const wb = XLSX.read(await file.arrayBuffer(), { type:'array' });
+    const A = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, raw:false });
+    const h = (A[0]||[]).map(x=>String(x||'').toLowerCase()), col = re => h.findIndex(x=>re.test(x));
+    const iN=col(/имя/), iP=col(/телефон/), iC=col(/транзак/), iT=col(/сумма/), iL=col(/последн/), iB=col(/бонус/);
+    if(iP<0) throw new Error('В файле нет колонки «Номер телефона» — это точно выгрузка клиентов из Sagi?');
+    const rows = [];
+    for(const r of A.slice(1)){ const d = String(r[iP]||'').replace(/\D/g,''); if(d.length<10) continue;
+      rows.push([d.slice(-10), String(r[iN]||'').trim(), +String(r[iC]||0).replace(/[^\d.]/g,'')||0, +String(r[iT]||0).replace(/[^\d.]/g,'')||0, String(r[iL]||'').slice(0,16), +String(r[iB]||0).replace(/[^\d.]/g,'')||0]); }
+    let tot = { new_customers:0, brand_rows:0, bonus_rows:0 };
+    for(let i=0;i<rows.length;i+=4000){
+      BK.imp = `Загружаем ${Math.min(i+4000, rows.length)} из ${rows.length}…`; render();
+      const { data, error } = await sb.rpc('sagi_import', { p_brand: brand, p_rows: rows.slice(i, i+4000) });
+      if(error) throw error; for(const k in tot) tot[k] += +(data[k]||0);
+    }
+    BK.imp = `Готово: в файле ${rows.length} клиентов. Новых клиентов в базе: ${tot.new_customers}, добавлено в ${brand==='moon'?'MOON':'Sunshine'}: ${tot.brand_rows}, перенесено бонусов: ${tot.bonus_rows}. Повторная загрузка того же файла ничего не задвоит.`;
+    BK.stats = null; await loadBonus();
+  }catch(e){ BK.imp = 'Ошибка импорта: ' + errText(e); }
+  render();
+}
 function renderBonus(){
   const T = BK.stats || {}, L = BK.list, C = BK.card, ro = isViewer();
   const n = v => Math.round(+v||0).toLocaleString('ru-RU');
   $('#main').innerHTML = `<h2>Бонусные карты</h2>
   <div class="filters"><div class="seg">${[['sunshine','Sunshine'],['moon','MOON']].map(([k,v])=>`<button data-bkbrand="${k}" aria-pressed="${BK.brand===k}">${v}</button>`).join('')}</div>
-    <span class="meta" style="align-self:center">Бонусы у брендов раздельные, база клиентов общая.</span></div>
+    <span class="meta" style="align-self:center">Бонусы у брендов раздельные, база клиентов общая.</span>
+    ${S.me.role==='owner'?`<label class="btn small" style="margin-left:auto;cursor:pointer">⬆ Импорт клиентов из Sagi (${BK.brand==='moon'?'MOON':'Sunshine'})<input type="file" id="sg-import" accept=".xlsx" hidden></label>`:''}</div>
+  ${BK.imp?`<div class="card meta" style="margin-bottom:10px">${esc(BK.imp)}</div>`:''}
   <div class="pays" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr))">
     ${[['Клиентов',n(T.clients)],['С бонусами',n(T.with_bonus)],['Бонусов на счетах',n(T.balance)],['Ждут активации',n(T.pending)],['Сгорят за 30 дней',n(T.burn30)],['Начислено за 30 дней',n(T.accrued30)],['Списано за 30 дней',n(T.spent30)],['Новых за 30 дней',n(T.new30)],['Дни рождения в базе',n(T.birthdays)+(T.bday_week?` · ${T.bday_week} на этой неделе`:'')]]
       .map(([k,v])=>`<div class="card"><div class="label">${k}</div><div class="total num" style="font-size:20px">${v}</div></div>`).join('')}
@@ -1608,6 +1644,7 @@ document.addEventListener('change', async e => {
   if(d.acc){ const [r,v]=d.acc.split(':'); const A={...(S.tabAccess||{})}; const cur=new Set(Array.isArray(A[r])?A[r]:defaultTabs(r)); t.checked?cur.add(v):cur.delete(v);
     A[r]=ALL_TABS.map(([x])=>x).filter(x=>cur.has(x)); const { error } = await sb.rpc('set_tab_access', { p:A }); if(error){ toast(errText(error)); t.checked=!t.checked; } else { S.tabAccess=A; toast('Сохранено'); } }
   if(t.id==='cs-photo'){ cashPhoto(t.files[0]); }
+  if(t.id==='sg-import' && t.files[0]){ sagiImport(t.files[0]); }
   if(t.id==='py-month'){ PY.month = t.value || PY.month; PY.open=null; await loadPay(); render(); }
   if(t.id==='py-store'){ PY.store = +t.value; await loadPay(); render(); }
   if(t.id==='py-day'){ PY.day = t.value; await loadPay(); render(); }
