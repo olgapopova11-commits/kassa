@@ -180,7 +180,7 @@ async function boot(){
     $('#app').innerHTML = `<div class="login card"><h2>Магазин не назначен</h2><p>${esc(me.full_name)}, менеджер должен открыть вам доступ к магазину.</p><button class="btn" id="out">Выйти</button></div>`;
     $('#out').onclick = async()=>{ await sb.auth.signOut(); renderLogin(); }; return;
   }
-  S.store = ls.get('kassa_store', null) || me.home_store_id || (S.stores[0]||{}).id;
+  S.store = ls.get('kassa_store', null) || (me.store_ids||[])[0] || (S.stores[0]||{}).id;
   if(!S.stores.some(s=>s.id===S.store)) S.store = (S.stores[0]||{}).id;
   renderShell(); await loadCatalog(); render(); flushQueue(); subscribeReqs();
 }
@@ -731,6 +731,37 @@ function deltaHtml(cur, prev, dir, prevText){
 }
 function renderAnalytics(){ return S.anMode==='stock' ? renderStockAn() : renderSalesAn(); }
 const anModeHtml = () => `<div class="seg" style="display:inline-flex;margin-bottom:10px"><button data-anmode="sales" aria-pressed="${S.anMode==='sales'}">Продажи</button><button data-anmode="stock" aria-pressed="${S.anMode==='stock'}">Остатки</button></div>`;
+/* праздники и выходные Казахстана (2026 — по производственному календарю с изменениями от 29.06.2026) */
+const KZ_EXACT = {
+  2026: { '01-01':'Новый год','01-02':'Новый год','01-07':'Православное Рождество','03-08':'Международный женский день','03-09':'Выходной за 8 Марта',
+    '03-15':'День Конституции','03-21':'Наурыз мейрамы','03-22':'Наурыз мейрамы','03-23':'Наурыз мейрамы','03-24':'Выходной за Наурыз','03-25':'Выходной за Наурыз',
+    '05-01':'День единства народа Казахстана','05-07':'День защитника Отечества','05-09':'День Победы','05-11':'Выходной за 9 Мая','05-27':'Курбан айт',
+    '07-06':'День столицы','10-25':'День Республики','10-26':'Выходной за День Республики','12-16':'День Независимости' } };
+const KZ_KURBAN = { 2024:'06-16', 2025:'06-06', 2027:'05-16', 2028:'05-05' };
+const KZ_NOTABLE = { '02-14':'День влюблённых','09-01':'1 сентября — День знаний','12-31':'Канун Нового года' };
+const kzCache = {};
+function kzYear(y){
+  if(kzCache[y]) return kzCache[y];
+  if(KZ_EXACT[y]) return kzCache[y] = KZ_EXACT[y];
+  // другие годы: основные праздники + перенос с выходного на ближайший будний (кроме Рождества и Курбан айта)
+  const base = { '01-01':'Новый год','01-02':'Новый год','03-08':'Международный женский день','03-21':'Наурыз мейрамы','03-22':'Наурыз мейрамы','03-23':'Наурыз мейрамы',
+    '05-01':'День единства народа Казахстана','05-07':'День защитника Отечества','05-09':'День Победы','07-06':'День столицы','10-25':'День Республики','12-16':'День Независимости' };
+  base[y < 2026 ? '08-30' : '03-15'] = 'День Конституции';
+  const m = { ...base, '01-07':'Православное Рождество' }; if(KZ_KURBAN[y]) m[KZ_KURBAN[y]] = 'Курбан айт';
+  const key = d => String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  for(const k of Object.keys(base).sort()){
+    const d = new Date(y, +k.slice(0,2)-1, +k.slice(3)); if(d.getDay()!==0 && d.getDay()!==6) continue;
+    const n = new Date(d); do { n.setDate(n.getDate()+1); } while(n.getDay()===0 || n.getDay()===6 || m[key(n)]);
+    m[key(n)] = 'Выходной за: ' + base[k];
+  }
+  return kzCache[y] = m;
+}
+function kzDay(iso){ // 'YYYY-MM-DD' → { kind: 'holiday'|'weekend'|'notable'|'', name }
+  const y = +iso.slice(0,4), md = iso.slice(5,10), dow = new Date(iso+'T00:00:00').getDay();
+  const h = kzYear(y)[md]; if(h) return { kind:'holiday', name:h };
+  if(KZ_NOTABLE[md]) return { kind: dow===0||dow===6 ? 'weekend' : 'notable', name:KZ_NOTABLE[md] };
+  return { kind: dow===0||dow===6 ? 'weekend' : '', name:'' };
+}
 /* график выручки: группировка по дням / неделям / месяцам, подписи дат */
 const MON = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
 const shortNum = v => v>=1e6 ? (v/1e6).toFixed(v>=1e7?0:1).replace('.',',')+' млн' : v>=1e3 ? Math.round(v/1e3)+' тыс' : String(Math.round(v));
@@ -744,7 +775,9 @@ function revenueChart(days){
     else if(mode==='week'){ const m=new Date(dt); m.setDate(dt.getDate()-((dt.getDay()+6)%7)); const e=new Date(m); e.setDate(m.getDate()+6);
       k=m.toISOString().slice(0,10); lab=m.getDate()+' '+MON[m.getMonth()]; tip=`${m.getDate()} ${MON[m.getMonth()]} – ${e.getDate()} ${MON[e.getMonth()]}`; }
     else { k=d.slice(0,7); lab=MON[dt.getMonth()]+(dt.getMonth()===0?' '+String(dt.getFullYear()).slice(2):''); tip=dt.toLocaleDateString('ru-RU',{month:'long',year:'numeric'}); }
-    const o = b.get(k) || { lab, tip, v:0, n:0 }; o.v += v; o.n++; b.set(k,o);
+    const o = b.get(k) || { lab, tip, v:0, n:0, kind:'', names:[] }; o.v += v; o.n++;
+    const kd = kzDay(d); if(mode==='day') o.kind = kd.kind; if(kd.name && kd.kind!=='' ) { const nm = (mode==='day'?'':dt.getDate()+' '+MON[dt.getMonth()]+' — ')+kd.name; if(!o.names.includes(nm)) o.names.push(nm); }
+    b.set(k,o);
   }
   const bars = [...b.values()], max = Math.max(1, ...bars.map(x=>x.v)), avg = bars.reduce((a,x)=>a+x.v,0)/bars.length;
   const every = Math.max(1, Math.ceil(bars.length/12));
@@ -756,13 +789,14 @@ function revenueChart(days){
       <div style="flex:1;min-width:0">
         <div style="position:relative;display:flex;align-items:flex-end;gap:${bars.length>40?2:4}px;height:150px;border-bottom:1px solid var(--line,#ddd)">
           <div title="Среднее: ${fmt(avg)}" style="position:absolute;left:0;right:0;bottom:${Math.round(avg/max*150)}px;border-top:1px dashed currentColor;opacity:.25"></div>
-          ${bars.map((x,i)=>`<div class="rcol ${i<bars.length/3?'l':i>=bars.length*2/3?'r':''}"><div class="rbar" style="height:${Math.max(2,Math.round(x.v/max*150))}px"><span class="rtip">${esc(x.tip)}<b>${fmt(x.v)}</b></span></div></div>`).join('')}
+          ${bars.map((x,i)=>`<div class="rcol ${i<bars.length/3?'l':i>=bars.length*2/3?'r':''}"><div class="rbar ${x.kind?'k-'+x.kind:''}" style="height:${Math.max(2,Math.round(x.v/max*150))}px"><span class="rtip">${esc(x.tip)}${x.names.length?`<i>${x.names.map(esc).join('<br>')}</i>`:''}<b>${fmt(x.v)}</b></span></div></div>`).join('')}
         </div>
         <div style="display:flex;gap:${bars.length>40?2:4}px;margin-top:4px">
           ${bars.map((x,i)=>`<div class="meta" style="flex:1 1 0;min-width:0;font-size:10px;text-align:center;white-space:nowrap;overflow:visible">${i%every===0?esc(x.lab):''}</div>`).join('')}
         </div>
       </div>
     </div>
+    ${mode==='day'?`<div class="rleg meta"><span><i class="k-"></i>будни</span><span><i class="k-weekend"></i>суббота и воскресенье</span><span><i class="k-holiday"></i>праздник / выходной по календарю РК</span><span><i class="k-notable"></i>особый день (14 февраля, 1 сентября, 31 декабря)</span></div>`:''}
     <div class="meta" style="font-size:11px;margin-top:6px">Пунктир — среднее: ${fmt(avg)}${mode!=='day'?` за ${mode==='week'?'неделю':'месяц'}`:' в день'}. Наведите на столбик, чтобы увидеть сумму.</div>
   </div>`;
 }
@@ -1065,10 +1099,9 @@ function renderEmps(){
         <select id="ne-role">${Object.entries(ROLE).filter(([k])=>k!=='owner'||S.me.role==='owner').map(([k,v])=>`<option value="${k}" ${k==='consultant'?'selected':''}>${v}</option>`).join('')}</select></div>
       <div>${S.allStores.map(s=>`<label class="meta" style="margin-right:12px;white-space:nowrap"><input type="checkbox" class="ne-store" value="${s.id}"> ${esc(BRAND[s.brand]+' · '+s.address)}</label>`).join('')}</div>
       <div class="row"><span class="meta">Сотрудник входит кнопкой «Войти через Telegram» и делится этим же номером в боте — пароль не нужен.</span><button class="btn primary" id="ne-add">Добавить</button></div></div>
-    <div class="scroll"><table><thead><tr><th>Имя</th><th>Роль</th><th>Основной магазин</th><th>Доступ к магазинам</th><th>Вход</th></tr></thead><tbody>
+    <div class="scroll"><table><thead><tr><th>Имя</th><th>Роль</th><th>Доступ к магазинам</th><th>Вход</th></tr></thead><tbody>
     ${S.emps.map(e=>`<tr><td>${esc(e.full_name)}<br><input class="small" data-ephone="${e.id}" value="${esc(e.phone||'')}" placeholder="телефон не указан" inputmode="tel" style="width:150px;margin-top:4px"><br><span class="meta">${e.telegram_id?'Telegram ✓':''}${!e.auth_user_id?(e.telegram_id?' · ':'')+'ещё не входил':''}</span></td>
       <td><select data-erole="${e.id}">${Object.entries(ROLE).map(([k,v])=>`<option value="${k}" ${e.role===k?'selected':''}>${v}</option>`).join('')}</select></td>
-      <td><select data-estore="${e.id}"><option value="">—</option>${S.allStores.map(s=>`<option value="${s.id}" ${e.home_store_id===s.id?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select></td>
       <td>${['owner','viewer'].includes(e.role)?'<span class="meta">все магазины</span>':(e.role==='manager'?'<div class="meta" style="max-width:240px">Видит все магазины. Отмеченные — подтверждает перемещения в них из другого города:</div>':'')+S.allStores.map(s=>{ const ids=e.store_ids||(e.home_store_id?[e.home_store_id]:[]);
         return `<label class="meta" style="display:block;white-space:nowrap"><input type="checkbox" data-estores="${e.id}:${s.id}" ${ids.includes(s.id)?'checked':''}> ${esc(BRAND[s.brand]+' · '+s.address)}</label>`; }).join('')}</td>
       <td><label><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''}> включён</label></td></tr>`).join('')}</tbody></table></div>`;
@@ -1178,7 +1211,6 @@ document.addEventListener('click', async e => {
 document.addEventListener('change', async e => {
   const t = e.target, d = t.dataset;
   if(d.erole) updEmp(d.erole, { role:t.value });
-  if(d.estore) updEmp(d.estore, { home_store_id: t.value ? +t.value : null });
   if(d.ephone){ const p = normPhone(t.value); if(t.value.trim() && !p) return toast('Телефон: 10 цифр после +7'); if(p && S.emps.some(x=>x.id!==d.ephone && x.phone===p)) return toast('Этот телефон уже у другого сотрудника'); t.value = p||''; const e2 = S.emps.find(x=>x.id===d.ephone); if(e2) e2.phone = p; updEmp(d.ephone, { phone: p }); }
   if(d.stf){ (S.stockF ||= {})[d.stf]=t.value; await loadStockView(); render(); }
   if(t.id==='cf-store'){ S.cf.store=t.value; await loadCerts(); render(); }
