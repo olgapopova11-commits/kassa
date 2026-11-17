@@ -14,6 +14,7 @@ const S = {
   cart:[], discType:'pct', disc:0, pays:{}, certCode:'',
   phone:'', cust:null, custMsg:'', bonusSpend:0,
   sales:[], salesQ:'', stockQ:'', stockRows:[], certs:[], emps:[], busy:false,
+  sel:null, period:'30', from:'', to:'', an:null,
 };
 
 /* ---------- утилиты ---------- */
@@ -24,6 +25,26 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xx
 const isBoss = () => S.me && ['owner','manager'].includes(S.me.role);
 const store = () => S.stores.find(s => s.id === S.store) || {};
 const storeName = id => { const s = S.stores.find(x=>x.id===id); return s ? `${BRAND[s.brand]} · ${s.address}` : '—'; };
+function selStores(){
+  if(!isBoss()) return [S.store];
+  if(!S.sel) S.sel = ls.get('kassa_sel', null) || S.stores.map(s=>s.id);
+  return S.sel.filter(id => S.stores.some(s=>s.id===id));
+}
+function storeFilterHtml(){
+  if(!isBoss()) return `<div class="meta">${esc(storeName(S.store))}</div>`;
+  const sel = selStores(), all = sel.length === S.stores.length;
+  const groups = [['all','Все'],['moon','Все MOON'],['sunshine','Все Sunshine'],['Алматы','Алматы'],['Астана','Астана']];
+  return `<div class="filters" style="align-items:center">
+    ${groups.map(([k,t])=>`<button class="btn small" data-sgroup="${k}">${t}</button>`).join('')}
+    ${S.stores.map(st=>`<label class="chip ${sel.includes(st.id)?'ok':''}" style="cursor:pointer;padding:4px 10px"><input type="checkbox" data-sone="${st.id}" ${sel.includes(st.id)?'checked':''} style="margin-right:4px">${esc(BRAND[st.brand]+' · '+st.address)}</label>`).join('')}
+    <span class="meta">${all?'выбраны все магазины':'выбрано: '+sel.length}</span></div>`;
+}
+async function onSelChange(){
+  ls.set('kassa_sel', S.sel);
+  if(S.view==='sales') await loadSales();
+  if(S.view==='analytics') await loadAnalytics();
+  render();
+}
 function normPhone(v){ let d=String(v||'').replace(/\D/g,''); if(d.length===11&&(d[0]==='7'||d[0]==='8')) d=d.slice(1); if(d.length===10) return '+7'+d; return null; }
 function toast(t){ const el=document.createElement('div'); el.className='toast'; el.textContent=t; document.body.append(el); setTimeout(()=>el.remove(),3200); }
 const ls = { get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } }, set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)) }catch(e){} } };
@@ -125,7 +146,7 @@ async function boot(){
 /* ---------- каркас ---------- */
 function renderShell(){
   const tabs = [['pos','Продажа'],['sales','Чеки и возвраты'],['stock','Остатки'],['certs','Сертификаты']];
-  if(isBoss()) tabs.push(['emps','Сотрудники']);
+  if(isBoss()) { tabs.splice(1,0,['analytics','Аналитика']); tabs.push(['emps','Сотрудники']); }
   $('#app').innerHTML = `<header id="hdr"></header><main id="main"></main>
     <nav class="tabs" role="tablist">${tabs.map(([v,t])=>`<button role="tab" data-view="${v}">${t}</button>`).join('')}</nav>`;
   document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => { S.view = b.dataset.view; render(); scrollTo(0,0); });
@@ -145,7 +166,7 @@ function renderHeader(){
 function render(){
   document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === S.view));
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, analytics:renderAnalytics })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -290,7 +311,7 @@ function showReceipt(s, number, offline){
 async function loadSales(){
   if(!navigator.onLine) return;
   let q = sb.from('sales').select('id,number,kind,created_at,total,store_id,original_sale_id,is_certificate_sale,note,customers(phone,name),employees(full_name),sale_items(product_id,qty,price,discount,total,products(name,barcode)),sale_payments(method,amount,certificate_code)')
-    .eq('store_id', S.store).order('created_at',{ascending:false}).limit(100);
+    .in('store_id', selStores()).order('created_at',{ascending:false}).limit(200);
   const qq = S.salesQ.trim();
   if(/^\d+$/.test(qq) && qq.length < 8) q = q.eq('number', +qq);
   const { data, error } = await q;
@@ -302,11 +323,11 @@ function returnedQty(saleId){
   const m = {}; S.sales.filter(s=>s.original_sale_id===saleId).forEach(s=>s.sale_items.forEach(i=>m[i.product_id]=(m[i.product_id]||0)+i.qty)); return m;
 }
 function renderSales(){
-  $('#main').innerHTML = `<h2>Чеки и возвраты · ${esc(storeName(S.store))}</h2>
+  $('#main').innerHTML = `<h2>Чеки и возвраты</h2>${storeFilterHtml()}
     <div class="filters"><input id="sq" style="flex:1" placeholder="Номер чека, телефон клиента или товар" value="${esc(S.salesQ)}"><button class="btn" id="sq-go">Найти</button></div>
-    ${S.sales.length?`<div class="scroll"><table><thead><tr><th>№</th><th>Когда</th><th>Товары</th><th>Сумма</th><th>Оплата</th><th>Клиент</th><th></th></tr></thead><tbody>
+    ${S.sales.length?`<div class="scroll"><table><thead><tr><th>№</th><th>Когда</th>${isBoss()?'<th>Магазин</th>':''}<th>Товары</th><th>Сумма</th><th>Оплата</th><th>Клиент</th><th></th></tr></thead><tbody>
     ${S.sales.map(s=>`<tr><td class="num">${s.number}${s.kind==='return'?' <span class="chip zero">возврат</span>':''}</td>
-      <td class="num">${new Date(s.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}<br><span class="meta">${esc(s.employees&&s.employees.full_name||'')}</span></td>
+      <td class="num">${new Date(s.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}<br><span class="meta">${esc(s.employees&&s.employees.full_name||'')}</span></td>${isBoss()?`<td>${esc(storeName(s.store_id))}</td>`:''}
       <td>${s.is_certificate_sale?esc(s.note):s.sale_items.map(i=>esc(i.products?i.products.name:'')+' × '+i.qty).join('<br>')}</td>
       <td class="num">${fmt(s.total)}</td><td>${s.sale_payments.map(p=>PAY[p.method]+(p.certificate_code?' '+esc(p.certificate_code):'')).join(', ')}</td>
       <td>${s.customers?esc(s.customers.phone):'—'}</td>
@@ -420,6 +441,61 @@ async function checkCert(code){
     <button class="btn" data-close>Закрыть</button>`);
 }
 
+/* ---------- аналитика (владелец и менеджер) ---------- */
+function periodRange(){
+  const now = new Date(), d0 = new Date(now); d0.setHours(0,0,0,0);
+  if(S.period==='custom' && S.from) return [new Date(S.from+'T00:00:00'), S.to ? new Date(S.to+'T23:59:59') : now];
+  const days = { today:0, '7':6, '30':29, '90':89, '365':364 }[S.period] ?? 29;
+  const from = new Date(d0); from.setDate(from.getDate()-days); return [from, now];
+}
+async function loadAnalytics(){
+  const [from, to] = periodRange(), ids = selStores();
+  const rows = []; let off = 0;
+  while(true){
+    const { data, error } = await sb.from('sales').select('id,kind,store_id,total,discount_total,created_at,is_certificate_sale,customer_id,sale_items(product_id,qty,total,products(name)),sale_payments(method,amount)')
+      .in('store_id', ids).gte('created_at', from.toISOString()).lte('created_at', to.toISOString()).order('created_at').range(off, off+999);
+    if(error){ toast(errText(error)); break; }
+    rows.push(...data); if(data.length < 1000 || rows.length >= 20000) break; off += 1000;
+  }
+  const A = { revenue:0, checks:0, returns:0, returnsSum:0, discounts:0, certSold:0, items:0, clients:new Set(), byStore:{}, byPay:{}, byProd:{}, byDay:{} };
+  for(const r of rows){
+    const sign = r.kind==='return' ? -1 : 1, st = (A.byStore[r.store_id] ||= { revenue:0, checks:0, returns:0 });
+    if(r.is_certificate_sale){ A.certSold += +r.total; continue; }
+    A.revenue += sign*r.total; st.revenue += sign*r.total;
+    if(r.kind==='return'){ A.returns++; A.returnsSum += +r.total; st.returns++; } else { A.checks++; st.checks++; A.discounts += +r.discount_total; }
+    if(r.customer_id) A.clients.add(r.customer_id);
+    const day = r.created_at.slice(0,10); A.byDay[day] = (A.byDay[day]||0) + sign*r.total;
+    r.sale_payments.forEach(p => { A.byPay[p.method] = (A.byPay[p.method]||0) + sign*p.amount; });
+    r.sale_items.forEach(i => { A.items += sign*i.qty; const p = (A.byProd[i.product_id] ||= { name:i.products?i.products.name:'', qty:0, sum:0 }); p.qty += sign*i.qty; p.sum += sign*i.total; });
+  }
+  S.an = A;
+}
+function renderAnalytics(){
+  const A = S.an;
+  const periods = [['today','Сегодня'],['7','7 дней'],['30','30 дней'],['90','3 месяца'],['365','Год'],['custom','Свой период']];
+  const days = A ? Object.entries(A.byDay).sort() : [], maxDay = Math.max(1, ...days.map(d=>d[1]));
+  $('#main').innerHTML = `<h2>Аналитика</h2>${storeFilterHtml()}
+    <div class="filters">${periods.map(([k,t])=>`<button class="btn small ${S.period===k?'primary':''}" data-period="${k}">${t}</button>`).join('')}
+      ${S.period==='custom'?`<input type="date" id="an-from" value="${S.from}"><input type="date" id="an-to" value="${S.to}"><button class="btn small" id="an-go">Показать</button>`:''}</div>
+    ${!A?'<div class="empty">Загружаем…</div>':`
+    <div class="pays" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr))">
+      ${[['Выручка',fmt(A.revenue)],['Чеков',A.checks],['Средний чек',fmt(A.checks?A.revenue/A.checks:0)],['Продано штук',A.items],['Возвраты',A.returns+' · '+fmt(A.returnsSum)],['Скидки',fmt(A.discounts)],['Клиентов с картой',A.clients.size],['Продано сертификатов',fmt(A.certSold)]]
+        .map(([k,v])=>`<div class="card"><div class="label">${k}</div><div class="total num" style="font-size:20px">${v}</div></div>`).join('')}
+    </div>
+    ${days.length?`<h2 style="margin-top:16px">Выручка по дням</h2><div class="card" style="display:flex;align-items:flex-end;gap:3px;height:140px;overflow-x:auto">
+      ${days.map(([d,v])=>`<div title="${d}: ${fmt(v)}" style="flex:1 0 8px;max-width:28px;background:var(--accent);opacity:.85;height:${Math.max(2,Math.round(v/maxDay*120))}px;border-radius:3px 3px 0 0"></div>`).join('')}</div>`:''}
+    <div class="grid2" style="margin-top:16px"><div>
+      <h2>По магазинам</h2><div class="scroll"><table><thead><tr><th>Магазин</th><th>Выручка</th><th>Чеков</th><th>Средний чек</th><th>Возвратов</th></tr></thead><tbody>
+      ${Object.entries(A.byStore).sort((a,b)=>b[1].revenue-a[1].revenue).map(([id,v])=>`<tr><td>${esc(storeName(+id))}</td><td class="num">${fmt(v.revenue)}</td><td class="num">${v.checks}</td><td class="num">${fmt(v.checks?v.revenue/v.checks:0)}</td><td class="num">${v.returns}</td></tr>`).join('') || '<tr><td colspan="5" class="meta">Продаж за период нет</td></tr>'}</tbody></table></div>
+      <h2 style="margin-top:16px">Способы оплаты</h2><div class="scroll"><table><tbody>
+      ${Object.entries(A.byPay).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${PAY[k]||k}</td><td class="num">${fmt(v)}</td><td class="num meta">${A.revenue?Math.round(v/A.revenue*100):0}%</td></tr>`).join('') || '<tr><td class="meta">—</td></tr>'}</tbody></table></div>
+    </div><div>
+      <h2>Топ товаров</h2><div class="scroll"><table><thead><tr><th>Товар</th><th>Шт.</th><th>Сумма</th></tr></thead><tbody>
+      ${Object.values(A.byProd).sort((a,b)=>b.sum-a.sum).slice(0,20).map(p=>`<tr><td>${esc(p.name)}</td><td class="num">${p.qty}</td><td class="num">${fmt(p.sum)}</td></tr>`).join('') || '<tr><td colspan="3" class="meta">—</td></tr>'}</tbody></table></div>
+    </div></div>
+    <p class="meta">Пока считается по чекам, пробитым в новой кассе. После переноса истории из Wipon здесь будут и прошлые продажи.</p>`}`;
+}
+
 /* ---------- сотрудники ---------- */
 async function loadEmps(){ const { data } = await sb.from('employees').select('*').order('created_at'); S.emps = data || []; }
 function renderEmps(){
@@ -467,6 +543,10 @@ document.addEventListener('click', async e => {
   else if(d.ck){ document.querySelectorAll('#ck-kind button').forEach(b=>b.setAttribute('aria-pressed', b===t)); }
   else if(t.id==='c-sell') sellCert();
   else if(d.eact){ updEmp(d.eact, { active:t.checked }); }
+  else if(d.sgroup){ const g=d.sgroup; S.sel = S.stores.filter(st => g==='all' || st.brand===g || st.city===g).map(st=>st.id); onSelChange(); }
+  else if(d.sone){ const id=+d.sone; selStores(); S.sel = t.checked ? [...new Set([...S.sel, id])] : S.sel.filter(x=>x!==id); if(!S.sel.length) S.sel=[id]; onSelChange(); }
+  else if(d.period){ S.period=d.period; if(d.period!=='custom'){ S.an=null; render(); await loadAnalytics(); } render(); }
+  else if(t.id==='an-go'){ S.from=$('#an-from').value; S.to=$('#an-to').value; S.an=null; render(); await loadAnalytics(); render(); }
 });
 document.addEventListener('change', e => {
   const t = e.target, d = t.dataset;
@@ -497,6 +577,7 @@ document.addEventListener('click', async e => {
   if(S.view==='sales'){ await loadSales(); render(); }
   if(S.view==='certs'){ await loadCerts(); render(); }
   if(S.view==='emps'){ await loadEmps(); render(); }
+  if(S.view==='analytics'){ S.an=null; render(); await loadAnalytics(); render(); }
 });
 
 sb.auth.onAuthStateChange((ev) => { if(ev==='SIGNED_OUT') renderLogin(); });
