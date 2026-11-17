@@ -126,3 +126,11 @@ body.readonly #main .btn.primary:not([data-trok]):not([data-trg]):not([data-csda
 .rleg i.k-weekend{background:#7b5ea7}.rleg i.k-holiday{background:#e2a33b}.rleg i.k-notable{background:#4a9c8c}
 nav.subtabs .store-pick{margin-left:auto;display:flex;align-items:center;gap:6px;flex:0 0 auto}
 nav.subtabs select{border:1px solid var(--line);border-radius:999px;padding:6px 10px;background:var(--surface);color:var(--ink);font-weight:600;max-width:260px}
+details.dd{position:relative;display:inline-block;min-width:200px}
+details.dd>summary{list-style:none;cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:6px 28px 6px 10px;background:var(--surface);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;position:relative;font-size:14px}
+details.dd>summary::-webkit-details-marker{display:none}
+details.dd>summary::after{content:"▾";position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--muted)}
+details.dd[open]>summary{border-color:var(--accent)}
+details.dd .dd-panel{margin-top:4px;min-width:240px;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:6px}
+details.dd .dd-panel label{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;white-space:nowrap;cursor:pointer;font-size:14px}
+details.dd .dd-panel label:hover{background:var(--bg)}

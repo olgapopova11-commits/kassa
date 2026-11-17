@@ -73,6 +73,13 @@ const thumbUrl = u => u.replace('static.tildacdn.pro/','thumb.tildacdn.pro/').re
   document.addEventListener('touchstart', e => { const im = e.target.closest && e.target.closest('img.thumb'); if(im){ const t = e.touches[0]; show(im, t.clientX, t.clientY); } else hide(); }, { passive:true });
   document.addEventListener('scroll', hide, true);
 })();
+// выпадающий список магазинов с галочками
+const shortStore = id => { const s = S.allStores.find(x=>x.id===id); return s ? s.address : '—'; };
+const ddSummary = ids => !ids.length ? 'не выбраны' : ids.length===S.allStores.length ? 'все магазины' : ids.slice(0,2).map(shortStore).join(', ') + (ids.length>2 ? ' +' + (ids.length-2) : '');
+function storesDD(ids, attr){
+  return `<details class="dd"><summary>${esc(ddSummary(ids))}</summary><div class="dd-panel">${S.allStores.map(st=>`<label><input type="checkbox" ${attr(st.id)} ${ids.includes(st.id)?'checked':''}> ${esc(BRAND[st.brand]+' · '+st.address)}</label>`).join('')}</div></details>`;
+}
+document.addEventListener('click', e => { document.querySelectorAll('details.dd[open]').forEach(d => { if(!d.contains(e.target)) d.removeAttribute('open'); }); });
 const thumb = p => p.photo_url ? `<img class="thumb" src="${esc(thumbUrl(p.photo_url))}" data-full="${esc(p.photo_url)}" alt="" loading="lazy" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : '<span class="thumb"></span>';
 function errText(e){ return (e && (e.message || e.error_description)) || String(e); }
 const isNetErr = e => !navigator.onLine || /Failed to fetch|NetworkError|Load failed|network/i.test(errText(e));
@@ -1563,13 +1570,12 @@ function renderEmps(){
       <div class="row" style="flex-wrap:wrap;justify-content:flex-start">
         <input id="ne-phone" placeholder="+7 7__ ___ __ __" inputmode="tel"><input id="ne-name" placeholder="Имя и фамилия" style="flex:1;min-width:160px">
         <select id="ne-role">${Object.entries(ROLE).filter(([k])=>k!=='owner'||S.me.role==='owner').map(([k,v])=>`<option value="${k}" ${k==='consultant'?'selected':''}>${v}</option>`).join('')}</select></div>
-      <div>${S.allStores.map(s=>`<label class="meta" style="margin-right:12px;white-space:nowrap"><input type="checkbox" class="ne-store" value="${s.id}"> ${esc(BRAND[s.brand]+' · '+s.address)}</label>`).join('')}</div>
+      <div><span class="meta">Магазины:</span> ${storesDD([], id=>`class="ne-store" value="${id}"`)}</div>
       <div class="row"><span class="meta">Сотрудник входит кнопкой «Войти через Telegram» и делится этим же номером в боте — пароль не нужен.</span><button class="btn primary" id="ne-add">Добавить</button></div></div>
     <div class="scroll"><table><thead><tr><th>Имя</th><th>Роль</th><th>Доступ к магазинам</th><th>Вход</th></tr></thead><tbody>
     ${S.emps.map(e=>`<tr><td>${esc(e.full_name)}<br><input class="small" data-ephone="${e.id}" value="${esc(e.phone||'')}" placeholder="телефон не указан" inputmode="tel" style="width:150px;margin-top:4px"><br><span class="meta">${e.telegram_id?'Telegram ✓':''}${!e.auth_user_id?(e.telegram_id?' · ':'')+'ещё не входил':''}</span></td>
       <td><select data-erole="${e.id}">${Object.entries(ROLE).map(([k,v])=>`<option value="${k}" ${e.role===k?'selected':''}>${v}</option>`).join('')}</select></td>
-      <td>${['owner','viewer'].includes(e.role)?'<span class="meta">все магазины</span>':(e.role==='manager'?'<div class="meta" style="max-width:240px">Видит все магазины. Отмеченные — подтверждает перемещения в них из другого города:</div>':'')+S.allStores.map(s=>{ const ids=e.store_ids||(e.home_store_id?[e.home_store_id]:[]);
-        return `<label class="meta" style="display:block;white-space:nowrap"><input type="checkbox" data-estores="${e.id}:${s.id}" ${ids.includes(s.id)?'checked':''}> ${esc(BRAND[s.brand]+' · '+s.address)}</label>`; }).join('')}</td>
+      <td>${['owner','viewer'].includes(e.role)?'<span class="meta">все магазины</span>':(e.role==='manager'?'<div class="meta" style="max-width:240px">Видит все; отмеченные — подтверждает перемещения:</div>':'')+(()=>{ const ids=e.store_ids||(e.home_store_id?[e.home_store_id]:[]); return storesDD(ids, id=>`data-estores="${e.id}:${id}"`); })()}</td>
       <td><label><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''}> включён</label><br><label title="Официально трудоустроен — для бухгалтера"><input type="checkbox" data-eoff="${e.id}" ${e.official?'checked':''}> официально</label></td></tr>`).join('')}</tbody></table></div>${accessHtml()}`;
 }
 async function updEmp(id, patch){ const { error } = await sb.from('employees').update(patch).eq('id', id); if(error) toast(errText(error)); else toast('Сохранено'); }
@@ -1622,7 +1628,7 @@ document.addEventListener('click', async e => {
   else if(t.id==='c-sell') sellCert();
   else if(d.eact){ updEmp(d.eact, { active:t.checked }); }
   else if(d.eoff){ updEmp(d.eoff, { official:t.checked }); }
-  else if(d.estores){ const [eid, sid] = d.estores.split(':'); const e = S.emps.find(x=>x.id===eid); if(e){ const cur = new Set(e.store_ids||(e.home_store_id?[e.home_store_id]:[])); t.checked ? cur.add(+sid) : cur.delete(+sid); e.store_ids=[...cur].sort((a,b)=>a-b); updEmp(eid, { store_ids: e.store_ids }); } }
+  else if(d.estores){ const [eid, sid] = d.estores.split(':'); const e = S.emps.find(x=>x.id===eid); if(e){ const cur = new Set(e.store_ids||(e.home_store_id?[e.home_store_id]:[])); t.checked ? cur.add(+sid) : cur.delete(+sid); e.store_ids=[...cur].sort((a,b)=>a-b); updEmp(eid, { store_ids: e.store_ids }); const sm=t.closest('details.dd'); if(sm) sm.querySelector('summary').textContent=ddSummary(e.store_ids); } }
   else if(d.sgroup){ const g=d.sgroup; S.sel = S.stores.filter(st => g==='all' || st.brand===g || st.city===g).map(st=>st.id); onSelChange(); }
   else if(d.sone){ const id=+d.sone; selStores(); S.sel = t.checked ? [...new Set([...S.sel, id])] : S.sel.filter(x=>x!==id); if(!S.sel.length) S.sel=[id]; onSelChange(); }
   else if(t.id==='nm-new'){ nmOpen({}); }
@@ -1725,6 +1731,7 @@ document.addEventListener('change', async e => {
   if(t.id==='sg-import' && t.files[0]){ sagiImport(t.files[0]); }
   if(t.id==='pf-from'){ PF.from=t.value; await loadProfit(); render(); } if(t.id==='pf-to'){ PF.to=t.value; await loadProfit(); render(); }
   if(t.id==='pf-store'){ PF.add.store=t.value; } if(t.id==='pf-month'){ PF.add.month=t.value; } if(t.id==='pf-cat'){ PF.add.cat=t.value; }
+  if(t.classList && t.classList.contains('ne-store')){ const ids=[...document.querySelectorAll('.ne-store:checked')].map(x=>+x.value); const sm=t.closest('details.dd'); if(sm) sm.querySelector('summary').textContent=ddSummary(ids); }
   if(t.id==='py-official'){ PYF.official = t.checked; render(); }
   if(t.id==='py-month'){ PY.month = t.value || PY.month; PY.open=null; await loadPay(); render(); }
   if(t.id==='py-store'){ PY.store = +t.value; await loadPay(); render(); }
