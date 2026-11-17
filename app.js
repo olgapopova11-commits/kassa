@@ -6,7 +6,7 @@ const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true,
 
 const POS_PAY = ['cash','card','certificate'];
 const PAY = { cash:'Наличные', card:'Карта', kaspi_qr:'Kaspi QR', transfer:'Перевод', invoice:'По счёту', bonus:'Бонусы', certificate:'Сертификат' };
-const ROLE = { owner:'Владелец', manager:'Менеджер', consultant:'Консультант', purchaser:'Закуп' };
+const ROLE = { owner:'Владелец', manager:'Менеджер', consultant:'Консультант', purchaser:'Закуп', viewer:'Просмотр' };
 const BRAND = { moon:'MOON', sunshine:'Sunshine' };
 
 const S = {
@@ -23,7 +23,11 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt = n => Math.round(Number(n)||0).toLocaleString('ru-RU').replace(/ |,/g,' ') + ' ₸';
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c=='x'?r:(r&3|8)).toString(16)}));
-const isBoss = () => S.me && ['owner','manager'].includes(S.me.role);
+const isBoss = () => S.me && ['owner','manager','viewer'].includes(S.me.role);  // видит всё; viewer — без изменений
+const isViewer = () => S.me && S.me.role === 'viewer';
+// может ли текущий пользователь менять данные магазина (менеджер — только свой город)
+const canEdit = st => { const m = S.me; if(!m) return false; if(m.role==='owner') return true; if(m.role==='viewer') return false;
+  if(m.role==='manager') return !m.store_ids || !m.store_ids.length || m.store_ids.includes(+st); return (m.store_ids||[]).includes(+st); };
 const store = () => S.allStores.find(s => s.id === S.store) || {};
 const storeName = id => { const s = S.allStores.find(x=>x.id===id); return s ? `${BRAND[s.brand]} · ${s.address}` : '—'; };
 function selStores(){
@@ -44,6 +48,7 @@ async function onSelChange(){
   ls.set('kassa_sel', S.sel);
   if(S.view==='sales') await loadSales();
   if(S.view==='analytics') await loadAnalytics();
+  if(S.view==='shifts') await loadShifts();
   render();
 }
 function normPhone(v){ let d=String(v||'').replace(/\D/g,''); if(d.length===11&&(d[0]==='7'||d[0]==='8')) d=d.slice(1); if(d.length===10) return '+7'+d; return null; }
@@ -170,7 +175,7 @@ async function boot(){
   }
   const st = await sb.from('stores').select('*').eq('active', true).order('id');
   S.allStores = st.data || [];
-  S.stores = ['owner','manager'].includes(me.role) ? S.allStores : S.allStores.filter(s => (me.store_ids||[]).includes(s.id));
+  S.stores = ['owner','manager','viewer'].includes(me.role) ? S.allStores : S.allStores.filter(s => (me.store_ids||[]).includes(s.id));
   if(!S.stores.length){
     $('#app').innerHTML = `<div class="login card"><h2>Магазин не назначен</h2><p>${esc(me.full_name)}, менеджер должен открыть вам доступ к магазину.</p><button class="btn" id="out">Выйти</button></div>`;
     $('#out').onclick = async()=>{ await sb.auth.signOut(); renderLogin(); }; return;
@@ -182,11 +187,13 @@ async function boot(){
 
 /* ---------- каркас ---------- */
 function renderShell(){
-  const tabs = [['pos','Продажа'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты']];
+  const tabs = [['pos','Продажа'],['shifts','Смены'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты']];
   if(isBoss()) { tabs.splice(1,0,['analytics','Аналитика']); tabs.push(['nom','Номенклатура']); tabs.push(['site','Сайт']); tabs.push(['emps','Сотрудники']); }
+  if(isViewer()){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pos' && v!=='emps')); if(!S.view || S.view==='pos' || S.view==='emps') S.view = 'analytics'; }
+
   $('#app').innerHTML = `<header id="hdr"></header><main id="main"></main>
     <nav class="tabs" role="tablist">${tabs.map(([v,t])=>`<button role="tab" data-view="${v}">${t}</button>`).join('')}</nav>`;
-  document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => { S.view = b.dataset.view; render(); scrollTo(0,0); });
+  document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = async () => { S.view = b.dataset.view; render(); scrollTo(0,0); if(S.view==='shifts'){ await loadShifts(); render(); } });
   renderHeader();
 }
 function renderHeader(){
@@ -196,15 +203,16 @@ function renderHeader(){
     <select id="store-sel" aria-label="Магазин">${S.stores.map(s=>`<option value="${s.id}" ${s.id===S.store?'selected':''}>${esc(BRAND[s.brand]+' · '+s.city+', '+s.address)}</option>`).join('')}</select>
     <span class="who"><span class="net ${navigator.onLine?'':'off'}">${navigator.onLine?'онлайн':'нет интернета'}</span>
     ${q.length?`<span class="chip warn">в очереди: ${q.length}</span>`:''}
-    <span>${esc(S.me.full_name)} · ${ROLE[S.me.role]}</span>${S.me.telegram?'':'<button id="tg-link" title="Получать уведомления и входить через Telegram">Привязать Telegram</button>'}<button id="logout">Выйти</button></span>`;
-  $('#store-sel').onchange = e => { S.store = +e.target.value; ls.set('kassa_store', S.store); S.cust = null; S.bonusSpend = 0; if(S.phone) lookupCustomer(); render(); };
+    <span>${esc(S.me.full_name)} · ${ROLE[S.me.role]}</span>${!canEdit(S.store)?`<span class="chip warn" title="${isViewer()?'Можно смотреть всё, изменения недоступны':'Этот магазин в другом городе: можно смотреть, менять нельзя'}">только просмотр</span>`:''}${S.me.telegram?'':'<button id="tg-link" title="Получать уведомления и входить через Telegram">Привязать Telegram</button>'}<button id="logout">Выйти</button></span>`;
+  $('#store-sel').onchange = e => { S.store = +e.target.value; ls.set('kassa_store', S.store); S.cust = null; S.bonusSpend = 0; if(S.phone) lookupCustomer(); renderHeader(); render(); if(S.view==='shifts') loadShifts().then(render); };
   $('#logout').onclick = async () => { await sb.auth.signOut(); location.reload(); };
   if($('#tg-link')) $('#tg-link').onclick = () => tgLogin('link');
 }
 function render(){
+  document.body.classList.toggle('readonly', !canEdit(S.store));
   document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === S.view));
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -554,10 +562,11 @@ function renderWhList(){
 function renderTransfers(){
   return `<h2>Перемещения</h2>${S.trList.length?S.trList.map(t=>`<div class="card" style="margin-bottom:8px">
     <div class="row"><b>№${t.number}: ${esc(storeName(t.from))} → ${esc(storeName(t.to))}</b>
-      <span class="chip ${t.status==='received'?'ok':'warn'}">${t.status==='received'?'принято':'в пути'}</span></div>
-    <div class="meta">Отправила ${esc(t.sent_by||'')} ${new Date(t.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}${t.received_by?' · приняла '+esc(t.received_by):''}</div>
+      <span class="chip ${({received:'ok',rejected:'zero',awaiting:'warn',sent:'warn'})[t.status]||''}">${({received:'принято',sent:'в пути',awaiting:'ждёт подтверждения',rejected:'отклонено'})[t.status]||t.status}</span></div>
+    <div class="meta">Отправила ${esc(t.sent_by||'')} ${new Date(t.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}${t.received_by?' · приняла '+esc(t.received_by):''}${t.approved_by?(t.status==='rejected'?' · отклонил(а) ':' · подтвердил(а) ')+esc(t.approved_by):''}${t.decision_note?' · «'+esc(t.decision_note)+'»':''}${t.status==='awaiting'?'<br>Между городами: товар спишется со склада после подтверждения менеджера города-получателя.':''}</div>
     <div>${(t.items||[]).map(i=>esc(i.name)+' × '+i.qty).join('<br>')}</div>
-    ${t.status==='sent'&&(isBoss()||t.to===S.store)?`<button class="btn small primary" data-trrecv="${t.id}">Принять в ${esc(storeName(t.to))}</button>`:''}
+    ${t.can_decide&&!isViewer()?`<div class="row" style="justify-content:flex-start;gap:8px"><button class="btn small primary" data-trok="${t.id}">Подтвердить</button><button class="btn small" data-trno="${t.id}">Отклонить</button></div>`:''}
+    ${t.status==='sent'&&!isViewer()&&(isBoss()||t.to===S.store)?`<button class="btn small primary" data-trrecv="${t.id}">Принять в ${esc(storeName(t.to))}</button>`:''}
   </div>`).join(''):'<div class="empty">Перемещений пока нет</div>'}`;
 }
 function renderAudit(head){
@@ -598,7 +607,8 @@ async function postDoc(){
     res = await sb.rpc('create_transfer', { p:{ from_store_id:d.store, to_store_id:d.to, items:d.items.map(i=>({ product_id:i.pid, qty:i.qty })) } });
   if(res.error) return toast('Не проведено: '+errText(res.error));
   const labels = (m==='receipt'||m==='capitalize') ? d.items.map(i=>({ n:i.name, b:i.barcode, p:i.price, q:i.qty })) : null;
-  toast(WH[m].t+' проведено'); S.doc = newDoc(m); await loadWhSide(); render();
+  const inter = m==='transfer' && (S.allStores.find(x=>x.id===+d.store)||{}).city !== (S.allStores.find(x=>x.id===+d.to)||{}).city;
+  toast(inter ? 'Перемещение между городами создано — ждёт подтверждения менеджера города-получателя' : WH[m].t+' проведено'); S.doc = newDoc(m); await loadWhSide(); render();
   if(labels) modal(`<h2>${WH[m].t} проведена</h2><p>Напечатать этикетки? Будет ${labels.reduce((a,l)=>a+l.q,0)} шт. — по одной на каждую единицу.</p>
     <div class="row"><button class="btn" data-close>Не сейчас</button><button class="btn primary" data-labels='${esc(JSON.stringify(labels))}'>Печать этикеток</button></div>`);
 }
@@ -709,7 +719,7 @@ function normAn(data){
   for(const v of Object.values(A.byStore)) for(const k of ['revenue','checks','returns']) v[k] = +v[k];
   for(const k of Object.keys(A.byPay)) A.byPay[k] = +A.byPay[k];
   for(const k of Object.keys(A.byDay)) A.byDay[k] = +A.byDay[k];
-  for(const k of ['revenue','checks','returns','returnsSum','discounts','certSold','items']) A[k] = +A[k];
+  for(const k of ['revenue','checks','returns','returnsSum','discounts','certSold','items','bonusEarned','bonusSpent']) A[k] = +(A[k]||0);
   return A;
 }
 /* изменение к предыдущему периоду: dir 1 — рост хорошо, -1 — рост плохо, 0 — нейтрально */
@@ -773,6 +783,7 @@ function renderSalesAn(){
           ['Скидки',fmt(A.discounts),A.discounts,P&&P.discounts,0,P&&fmt(P.discounts)],
           ['Клиентов с картой',A.clients.size,A.clients.size,P&&P.clients.size,1,P&&P.clients.size],
           ['Продано сертификатов',fmt(A.certSold),A.certSold,P&&P.certSold,1,P&&fmt(P.certSold)]]
+        .concat([['Бонусы',`<span style="font-size:15px">начислено ${fmt(A.bonusEarned).replace(' ₸','')}<br>использовано ${fmt(A.bonusSpent).replace(' ₸','')}</span>`,A.bonusSpent,P&&P.bonusSpent,0,P&&('начислено '+fmt(P.bonusEarned)+', использовано '+fmt(P.bonusSpent))]])
         .map(([k,v,c,p,dir,pt])=>`<div class="card"><div class="label">${k}</div><div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap"><div class="total num" style="font-size:20px">${v}</div>${deltaHtml(c,p,dir,String(pt??''))}</div></div>`).join(''); })()}
     </div>
     ${days.length?revenueChart(days):''}
@@ -787,6 +798,96 @@ function renderSalesAn(){
     </div></div>
     <p class="meta">Считается по всем чекам: новой кассы и истории из Wipon с 1 января 2026.</p>`}`;
 }
+
+/* ---------- смены ---------- */
+async function loadShifts(){
+  if(!navigator.onLine) return;
+  const days = S.shDays || 7, to = new Date(), from = new Date(); from.setHours(0,0,0,0); from.setDate(from.getDate()-(days-1));
+  const [cur, list] = await Promise.all([
+    sb.rpc('shift_current', { p_store: S.store }),
+    sb.rpc('shifts_list', { p_stores: isBoss() ? selStores() : [S.store], p_from: from.toISOString(), p_to: to.toISOString() })
+  ]);
+  if(cur.error) toast(errText(cur.error));
+  S.shift = cur.data || null; S.shifts = list.data || []; S.shLoaded = true;
+}
+const tm = d => d ? new Date(d).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+function diffHtml(v){ v=+v||0; const c = Math.abs(v)<1 ? 'var(--ok)' : 'var(--bad)'; return `<b style="color:${c}">${v>0?'+':''}${fmt(v)}</b>${Math.abs(v)<1?'':v>0?' <span class="meta">излишек</span>':' <span class="meta">недостача</span>'}`; }
+function shiftReportHtml(r, opening, closing){
+  const row = (k,v) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`;
+  const avg = r.checks ? r.revenue/r.checks : 0;
+  return `<div class="grid2"><div><table><tbody>
+    ${row('Выручка', '<b>'+fmt(r.revenue)+'</b>')}${row('Чеков', r.checks)}${row('Средний чек', fmt(avg))}${row('Продано штук', r.items)}
+    ${row('Возвраты', r.returns+' · '+fmt(r.returnsSum))}${row('Скидки', fmt(r.discounts))}
+    ${row('Бонусов начислено', fmt(r.bonusEarned))}${row('Бонусов использовано', fmt(r.bonusSpent))}${row('Продано сертификатов', fmt(r.certSold))}
+  </tbody></table></div><div><table><tbody>
+    ${Object.entries(r.byPay||{}).sort((a,b)=>b[1]-a[1]).map(([k,v])=>row(PAY[k]||k, fmt(v))).join('') || row('Оплат нет','—')}
+    <tr><td colspan="2" class="meta" style="padding-top:10px">Наличные в кассе</td></tr>
+    ${row('На начало смены', fmt(opening))}${row('Наличными за смену', fmt(r.cashNet))}${row('Должно быть', '<b>'+fmt(r.cashExpected)+'</b>')}
+    ${closing!=null ? row('Фактически', fmt(closing)) + row('Расхождение', diffHtml(closing - r.cashExpected)) : ''}
+  </tbody></table>
+  ${(r.byEmployee||[]).length>1 || ((r.byEmployee||[])[0]||{}).name!=='—' ? `<table style="margin-top:8px"><tbody><tr><td colspan="2" class="meta">По продавцам</td></tr>${r.byEmployee.map(e=>row(esc(e.name)+' <span class="meta">· '+e.checks+' чек.</span>', fmt(e.revenue))).join('')}</tbody></table>` : ''}
+  </div></div>`;
+}
+function shiftText(sh, r){
+  const w = 32, pad = (a,b) => a + ' '.repeat(Math.max(1, w - a.length - b.length)) + b, L = [];
+  L.push('ОТЧЁТ О ЗАКРЫТИИ СМЕНЫ', storeName(sh.store_id), 'Смена №'+sh.number, 'Открыта: '+tm(sh.opened_at)+(sh.opened_by_name?' · '+sh.opened_by_name:''), 'Закрыта: '+tm(sh.closed_at)+(sh.closed_by_name?' · '+sh.closed_by_name:''), '-'.repeat(w));
+  L.push(pad('Выручка', fmt(r.revenue)), pad('Чеков', String(r.checks)), pad('Средний чек', fmt(r.checks?r.revenue/r.checks:0)), pad('Продано штук', String(r.items)), pad('Возвраты', r.returns+' / '+fmt(r.returnsSum)), pad('Скидки', fmt(r.discounts)), pad('Бонусов начислено', fmt(r.bonusEarned)), pad('Бонусов использовано', fmt(r.bonusSpent)), pad('Сертификатов продано', fmt(r.certSold)), '-'.repeat(w));
+  Object.entries(r.byPay||{}).forEach(([k,v]) => L.push(pad(PAY[k]||k, fmt(v))));
+  L.push('-'.repeat(w), pad('Наличные на начало', fmt(sh.opening_cash)), pad('Наличными за смену', fmt(r.cashNet)), pad('Должно быть', fmt(r.cashExpected)));
+  if(sh.closing_cash!=null) L.push(pad('Фактически', fmt(sh.closing_cash)), pad('Расхождение', fmt(sh.closing_cash - r.cashExpected)));
+  if(sh.note) L.push('', 'Комментарий: '+sh.note);
+  return L.join('\n');
+}
+function renderShifts(){
+  const sh = S.shift, ro = isViewer(), st = esc(storeName(S.store));
+  let cur;
+  if(!S.shLoaded) cur = '<div class="empty">Загружаем…</div>';
+  else if(!sh) cur = `<div class="card stack"><div><b>${st}</b> · <span class="chip zero">смена закрыта</span></div>
+      ${ro ? '<p class="meta">Открыть смену может сотрудник магазина.</p>' : `<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px">
+        <label class="meta">Наличные в кассе на начало, ₸ <input id="sh-open-cash" type="number" min="0" inputmode="numeric" placeholder="0" style="width:140px"></label>
+        <button class="btn primary" id="sh-open">Открыть смену</button></div>`}</div>`;
+  else cur = `<div class="card stack"><div class="row" style="flex-wrap:wrap;gap:8px"><div><b>${st}</b> · <span class="chip ok">смена №${sh.number} открыта</span>
+        <div class="meta">с ${tm(sh.opened_at)}${sh.opened_by_name?' · открыл(а) '+esc(sh.opened_by_name):''}</div></div><button class="btn small" id="sh-refresh">Обновить цифры</button></div>
+      ${shiftReportHtml(sh.summary, sh.opening_cash, null)}
+      ${ro ? '' : `<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;border-top:1px solid var(--line);padding-top:10px">
+        <label class="meta">Наличные в кассе фактически, ₸ <input id="sh-close-cash" type="number" min="0" inputmode="numeric" placeholder="${Math.round(sh.summary.cashExpected)}" style="width:150px"></label>
+        <input id="sh-note" placeholder="Комментарий (необязательно)" style="flex:1;min-width:180px">
+        <button class="btn primary" id="sh-close">Закрыть смену</button></div>`}</div>`;
+  const days = [[1,'Сегодня'],[7,'7 дней'],[30,'30 дней']];
+  $('#main').innerHTML = `<h2>Смены</h2>${cur}
+    <h2 style="margin-top:18px">Закрытые и открытые смены</h2>${isBoss()?storeFilterHtml():''}
+    <div class="filters">${days.map(([k,t])=>`<button class="btn small ${ (S.shDays||7)===k?'primary':''}" data-shdays="${k}">${t}</button>`).join('')}</div>
+    ${(S.shifts||[]).length ? `<div class="scroll"><table><thead><tr><th>№</th>${isBoss()?'<th>Магазин</th>':''}<th>Открыта</th><th>Закрыта</th><th>Выручка</th><th>Чеков</th><th>Наличные: должно / факт</th><th>Расхождение</th><th></th></tr></thead><tbody>
+      ${S.shifts.map(x=>{ const r = x.report; return `<tr><td class="num">${x.number}</td>${isBoss()?`<td>${esc(storeName(x.store_id))}</td>`:''}
+        <td class="num">${tm(x.opened_at)}<br><span class="meta">${esc(x.opened_by_name||'')}</span></td>
+        <td class="num">${x.closed_at?tm(x.closed_at)+'<br><span class="meta">'+esc(x.closed_by_name||'')+'</span>':'<span class="chip ok">открыта</span>'}</td>
+        <td class="num">${r?fmt(r.revenue):'—'}</td><td class="num">${r?r.checks:'—'}</td>
+        <td class="num">${r?fmt(r.cashExpected)+' / '+fmt(x.closing_cash):'—'}</td><td class="num">${r?diffHtml(x.closing_cash - r.cashExpected):'—'}</td>
+        <td>${r?`<button class="btn small" data-shrep="${x.id}">Отчёт</button>`:''}</td></tr>`; }).join('')}</tbody></table></div>`
+      : '<div class="empty">За период смен нет</div>'}`;
+}
+function showShiftReport(x){
+  const txt = shiftText(x, x.report);
+  modal(`<h2>Смена №${x.number} · ${esc(storeName(x.store_id))}</h2>
+    <p class="meta">${tm(x.opened_at)} — ${tm(x.closed_at)}${x.note?' · '+esc(x.note):''}</p>
+    ${shiftReportHtml(x.report, x.opening_cash, x.closing_cash)}
+    <div class="row"><button class="btn" data-close>Закрыть</button><button class="btn primary" id="print">Печать</button></div>`);
+  $('#print').onclick = () => { $('#paper').textContent = txt; window.print(); };
+}
+document.addEventListener('click', async e => {
+  const t = e.target.closest('button'); if(!t || S.view!=='shifts') return;
+  const d = t.dataset;
+  if(t.id==='sh-open'){ t.disabled = true; const { error } = await sb.rpc('shift_open', { p_store:S.store, p_cash: +($('#sh-open-cash').value||0) });
+    if(error) toast(errText(error)); else toast('Смена открыта'); await loadShifts(); render(); }
+  else if(t.id==='sh-refresh'){ await loadShifts(); render(); }
+  else if(t.id==='sh-close'){
+    const v = $('#sh-close-cash').value; if(v===''){ toast('Пересчитайте наличные в кассе и введите сумму'); $('#sh-close-cash').focus(); return; }
+    t.disabled = true; const { error } = await sb.rpc('shift_close', { p_shift:S.shift.id, p_cash:+v, p_note:$('#sh-note').value });
+    if(error){ toast(errText(error)); t.disabled = false; return; }
+    const id = S.shift.id; await loadShifts(); render(); const x = S.shifts.find(z=>z.id===id); if(x) showShiftReport(x); }
+  else if(d.shrep){ const x = S.shifts.find(z=>z.id===d.shrep); if(x) showShiftReport(x); }
+  else if(d.shdays){ S.shDays = +d.shdays; await loadShifts(); render(); }
+});
 
 /* ---------- аналитика остатков ---------- */
 const SA_GROUPS = [['category','Категория'],['material','Материал'],['color','Цвет'],['price','Цена'],['store','Магазин'],['brand','Бренд'],['supplier','Поставщик'],['site','Связь с сайтом']];
@@ -963,10 +1064,10 @@ function renderEmps(){
       <div>${S.allStores.map(s=>`<label class="meta" style="margin-right:12px;white-space:nowrap"><input type="checkbox" class="ne-store" value="${s.id}"> ${esc(BRAND[s.brand]+' · '+s.address)}</label>`).join('')}</div>
       <div class="row"><span class="meta">Сотрудник входит кнопкой «Войти через Telegram» и делится этим же номером в боте — пароль не нужен.</span><button class="btn primary" id="ne-add">Добавить</button></div></div>
     <div class="scroll"><table><thead><tr><th>Имя</th><th>Роль</th><th>Основной магазин</th><th>Доступ к магазинам</th><th>Вход</th></tr></thead><tbody>
-    ${S.emps.map(e=>`<tr><td>${esc(e.full_name)}<br><span class="meta">${esc(e.phone||'')}${e.telegram_id?' · Telegram ✓':''}${!e.auth_user_id?' · ещё не входил':''}</span></td>
+    ${S.emps.map(e=>`<tr><td>${esc(e.full_name)}<br><input class="small" data-ephone="${e.id}" value="${esc(e.phone||'')}" placeholder="телефон не указан" inputmode="tel" style="width:150px;margin-top:4px"><br><span class="meta">${e.telegram_id?'Telegram ✓':''}${!e.auth_user_id?(e.telegram_id?' · ':'')+'ещё не входил':''}</span></td>
       <td><select data-erole="${e.id}">${Object.entries(ROLE).map(([k,v])=>`<option value="${k}" ${e.role===k?'selected':''}>${v}</option>`).join('')}</select></td>
       <td><select data-estore="${e.id}"><option value="">—</option>${S.allStores.map(s=>`<option value="${s.id}" ${e.home_store_id===s.id?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select></td>
-      <td>${['owner','manager'].includes(e.role)?'<span class="meta">все магазины</span>':S.allStores.map(s=>{ const ids=e.store_ids||(e.home_store_id?[e.home_store_id]:[]);
+      <td>${['owner','viewer'].includes(e.role)?'<span class="meta">все магазины</span>':(e.role==='manager'?'<div class="meta" style="max-width:240px">Видит все магазины. Отмеченные — подтверждает перемещения в них из другого города:</div>':'')+S.allStores.map(s=>{ const ids=e.store_ids||(e.home_store_id?[e.home_store_id]:[]);
         return `<label class="meta" style="display:block;white-space:nowrap"><input type="checkbox" data-estores="${e.id}:${s.id}" ${ids.includes(s.id)?'checked':''}> ${esc(BRAND[s.brand]+' · '+s.address)}</label>`; }).join('')}</td>
       <td><label><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''}> включён</label></td></tr>`).join('')}</tbody></table></div>`;
 }
@@ -1059,6 +1160,7 @@ document.addEventListener('click', async e => {
   else if(t.id==='dq-add'){ const r=searchCatalog(S.dq); if(r.length===1 || (r[0]&&r[0].barcode===S.dq.trim())) docAdd(r[0]); else { S.dfound=r; render(); } }
   else if(d.ddel){ S.doc.items.splice(+d.ddel,1); render(); }
   else if(t.id==='d-post'){ t.disabled=true; await postDoc(); }
+  else if(d.trok || d.trno){ const note = d.trno ? (prompt('Причина отказа (необязательно)')||'') : null; const { error } = await sb.rpc('transfer_decide', { p_transfer:d.trok||d.trno, p_approve:!!d.trok, p_note:note }); if(error) toast(errText(error)); else { toast(d.trok?'Перемещение подтверждено, товар списан с отправителя':'Перемещение отклонено'); await loadWhSide(); render(); } }
   else if(d.trrecv){ const { error } = await sb.rpc('receive_transfer', { p_transfer:d.trrecv }); if(error) toast(errText(error)); else { toast('Перемещение принято'); await loadWhSide(); render(); } }
   else if(d.labels){ printLabels(JSON.parse(d.labels)); }
   else if(t.id==='au-start'){ const { error } = await sb.rpc('audit_start', { p_store:S.store }); if(error) toast(errText(error)); await loadAudit(); render(); }
@@ -1075,6 +1177,7 @@ document.addEventListener('change', async e => {
   const t = e.target, d = t.dataset;
   if(d.erole) updEmp(d.erole, { role:t.value });
   if(d.estore) updEmp(d.estore, { home_store_id: t.value ? +t.value : null });
+  if(d.ephone){ const p = normPhone(t.value); if(t.value.trim() && !p) return toast('Телефон: 10 цифр после +7'); if(p && S.emps.some(x=>x.id!==d.ephone && x.phone===p)) return toast('Этот телефон уже у другого сотрудника'); t.value = p||''; const e2 = S.emps.find(x=>x.id===d.ephone); if(e2) e2.phone = p; updEmp(d.ephone, { phone: p }); }
   if(d.stf){ (S.stockF ||= {})[d.stf]=t.value; await loadStockView(); render(); }
   if(t.id==='cf-store'){ S.cf.store=t.value; await loadCerts(); render(); }
   if(t.id==='nm-cat'){ S.nm.cat=t.value; S.nm.off=0; render(); await loadNom(); render(); }
