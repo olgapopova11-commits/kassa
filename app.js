@@ -705,10 +705,45 @@ async function loadSalesAn(){
 }
 function renderAnalytics(){ return S.anMode==='stock' ? renderStockAn() : renderSalesAn(); }
 const anModeHtml = () => `<div class="seg" style="display:inline-flex;margin-bottom:10px"><button data-anmode="sales" aria-pressed="${S.anMode==='sales'}">Продажи</button><button data-anmode="stock" aria-pressed="${S.anMode==='stock'}">Остатки</button></div>`;
+/* график выручки: группировка по дням / неделям / месяцам, подписи дат */
+const MON = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+const shortNum = v => v>=1e6 ? (v/1e6).toFixed(v>=1e7?0:1).replace('.',',')+' млн' : v>=1e3 ? Math.round(v/1e3)+' тыс' : String(Math.round(v));
+function revenueChart(days){
+  const span = days.length;
+  const mode = span <= 62 ? 'day' : span <= 190 ? 'week' : 'month';
+  const b = new Map();
+  for(const [d,v] of days){
+    const dt = new Date(d+'T00:00:00'); let k, lab, tip;
+    if(mode==='day'){ k=d; lab=dt.getDate()+' '+MON[dt.getMonth()]; tip=dt.toLocaleDateString('ru-RU',{day:'numeric',month:'long',weekday:'short'}); }
+    else if(mode==='week'){ const m=new Date(dt); m.setDate(dt.getDate()-((dt.getDay()+6)%7)); const e=new Date(m); e.setDate(m.getDate()+6);
+      k=m.toISOString().slice(0,10); lab=m.getDate()+' '+MON[m.getMonth()]; tip=`${m.getDate()} ${MON[m.getMonth()]} – ${e.getDate()} ${MON[e.getMonth()]}`; }
+    else { k=d.slice(0,7); lab=MON[dt.getMonth()]+(dt.getMonth()===0?' '+String(dt.getFullYear()).slice(2):''); tip=dt.toLocaleDateString('ru-RU',{month:'long',year:'numeric'}); }
+    const o = b.get(k) || { lab, tip, v:0, n:0 }; o.v += v; o.n++; b.set(k,o);
+  }
+  const bars = [...b.values()], max = Math.max(1, ...bars.map(x=>x.v)), avg = bars.reduce((a,x)=>a+x.v,0)/bars.length;
+  const every = Math.max(1, Math.ceil(bars.length/12));
+  const title = {day:'Выручка по дням', week:'Выручка по неделям', month:'Выручка по месяцам'}[mode];
+  return `<h2 style="margin-top:16px">${title}</h2>
+  <div class="card" style="padding:12px 12px 6px">
+    <div style="display:flex;gap:8px">
+      <div class="meta" style="display:flex;flex-direction:column;justify-content:space-between;height:150px;text-align:right;min-width:52px;font-size:11px"><span>${shortNum(max)}</span><span>${shortNum(max/2)}</span><span>0</span></div>
+      <div style="flex:1;min-width:0">
+        <div style="position:relative;display:flex;align-items:flex-end;gap:${bars.length>40?2:4}px;height:150px;border-bottom:1px solid var(--line,#ddd)">
+          <div title="Среднее: ${fmt(avg)}" style="position:absolute;left:0;right:0;bottom:${Math.round(avg/max*150)}px;border-top:1px dashed currentColor;opacity:.25"></div>
+          ${bars.map(x=>`<div title="${esc(x.tip)}: ${fmt(x.v)}" style="flex:1 1 0;min-width:0;background:var(--accent);opacity:.85;height:${Math.max(2,Math.round(x.v/max*150))}px;border-radius:3px 3px 0 0"></div>`).join('')}
+        </div>
+        <div style="display:flex;gap:${bars.length>40?2:4}px;margin-top:4px">
+          ${bars.map((x,i)=>`<div class="meta" style="flex:1 1 0;min-width:0;font-size:10px;text-align:center;white-space:nowrap;overflow:visible">${i%every===0?esc(x.lab):''}</div>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="meta" style="font-size:11px;margin-top:6px">Пунктир — среднее: ${fmt(avg)}${mode!=='day'?` за ${mode==='week'?'неделю':'месяц'}`:' в день'}. Наведите на столбик — точная сумма.</div>
+  </div>`;
+}
 function renderSalesAn(){
   const A = S.an;
   const periods = [['today','Сегодня'],['7','7 дней'],['30','30 дней'],['90','3 месяца'],['365','Год'],['custom','Свой период']];
-  const days = A ? Object.entries(A.byDay).sort() : [], maxDay = Math.max(1, ...days.map(d=>d[1]));
+  const days = A ? Object.entries(A.byDay).sort() : [];
   $('#main').innerHTML = `<h2>Аналитика</h2>${anModeHtml()}${storeFilterHtml()}
     <div class="filters">${periods.map(([k,t])=>`<button class="btn small ${S.period===k?'primary':''}" data-period="${k}">${t}</button>`).join('')}
       ${S.period==='custom'?`<input type="date" id="an-from" value="${S.from}"><input type="date" id="an-to" value="${S.to}"><button class="btn small" id="an-go">Показать</button>`:''}</div>
@@ -717,8 +752,7 @@ function renderSalesAn(){
       ${[['Выручка',fmt(A.revenue)],['Чеков',A.checks],['Средний чек',fmt(A.checks?A.revenue/A.checks:0)],['Продано штук',A.items],['Возвраты',A.returns+' · '+fmt(A.returnsSum)],['Скидки',fmt(A.discounts)],['Клиентов с картой',A.clients.size],['Продано сертификатов',fmt(A.certSold)]]
         .map(([k,v])=>`<div class="card"><div class="label">${k}</div><div class="total num" style="font-size:20px">${v}</div></div>`).join('')}
     </div>
-    ${days.length?`<h2 style="margin-top:16px">Выручка по дням</h2><div class="card" style="display:flex;align-items:flex-end;gap:3px;height:140px;overflow-x:auto">
-      ${days.map(([d,v])=>`<div title="${d}: ${fmt(v)}" style="flex:1 0 8px;max-width:28px;background:var(--accent);opacity:.85;height:${Math.max(2,Math.round(v/maxDay*120))}px;border-radius:3px 3px 0 0"></div>`).join('')}</div>`:''}
+    ${days.length?revenueChart(days):''}
     <div class="grid2" style="margin-top:16px"><div>
       <h2>По магазинам</h2><div class="scroll"><table><thead><tr><th>Магазин</th><th>Выручка</th><th>Чеков</th><th>Средний чек</th><th>Возвратов</th></tr></thead><tbody>
       ${Object.entries(A.byStore).sort((a,b)=>b[1].revenue-a[1].revenue).map(([id,v])=>`<tr><td>${esc(storeName(+id))}</td><td class="num">${fmt(v.revenue)}</td><td class="num">${v.checks}</td><td class="num">${fmt(v.checks?v.revenue/v.checks:0)}</td><td class="num">${v.returns}</td></tr>`).join('') || '<tr><td colspan="5" class="meta">Продаж за период нет</td></tr>'}</tbody></table></div>
