@@ -180,7 +180,7 @@ async function boot(){
     $('#app').innerHTML = `<div class="login card"><h2>Магазин не назначен</h2><p>${esc(me.full_name)}, менеджер должен открыть вам доступ к магазину.</p><button class="btn" id="out">Выйти</button></div>`;
     $('#out').onclick = async()=>{ await sb.auth.signOut(); renderLogin(); }; return;
   }
-  S.store = ls.get('kassa_store', null) || me.home_store_id || (S.stores[0]||{}).id;
+  S.store = ls.get('kassa_store', null) || (me.store_ids||[])[0] || (S.stores[0]||{}).id;
   if(!S.stores.some(s=>s.id===S.store)) S.store = (S.stores[0]||{}).id;
   renderShell(); await loadCatalog(); render(); flushQueue(); subscribeReqs();
 }
@@ -1065,10 +1065,9 @@ function renderEmps(){
         <select id="ne-role">${Object.entries(ROLE).filter(([k])=>k!=='owner'||S.me.role==='owner').map(([k,v])=>`<option value="${k}" ${k==='consultant'?'selected':''}>${v}</option>`).join('')}</select></div>
       <div>${S.allStores.map(s=>`<label class="meta" style="margin-right:12px;white-space:nowrap"><input type="checkbox" class="ne-store" value="${s.id}"> ${esc(BRAND[s.brand]+' · '+s.address)}</label>`).join('')}</div>
       <div class="row"><span class="meta">Сотрудник входит кнопкой «Войти через Telegram» и делится этим же номером в боте — пароль не нужен.</span><button class="btn primary" id="ne-add">Добавить</button></div></div>
-    <div class="scroll"><table><thead><tr><th>Имя</th><th>Роль</th><th>Основной магазин</th><th>Доступ к магазинам</th><th>Вход</th></tr></thead><tbody>
+    <div class="scroll"><table><thead><tr><th>Имя</th><th>Роль</th><th>Доступ к магазинам</th><th>Вход</th></tr></thead><tbody>
     ${S.emps.map(e=>`<tr><td>${esc(e.full_name)}<br><input class="small" data-ephone="${e.id}" value="${esc(e.phone||'')}" placeholder="телефон не указан" inputmode="tel" style="width:150px;margin-top:4px"><br><span class="meta">${e.telegram_id?'Telegram ✓':''}${!e.auth_user_id?(e.telegram_id?' · ':'')+'ещё не входил':''}</span></td>
       <td><select data-erole="${e.id}">${Object.entries(ROLE).map(([k,v])=>`<option value="${k}" ${e.role===k?'selected':''}>${v}</option>`).join('')}</select></td>
-      <td><select data-estore="${e.id}"><option value="">—</option>${S.allStores.map(s=>`<option value="${s.id}" ${e.home_store_id===s.id?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select></td>
       <td>${['owner','viewer'].includes(e.role)?'<span class="meta">все магазины</span>':(e.role==='manager'?'<div class="meta" style="max-width:240px">Видит все магазины. Отмеченные — подтверждает перемещения в них из другого города:</div>':'')+S.allStores.map(s=>{ const ids=e.store_ids||(e.home_store_id?[e.home_store_id]:[]);
         return `<label class="meta" style="display:block;white-space:nowrap"><input type="checkbox" data-estores="${e.id}:${s.id}" ${ids.includes(s.id)?'checked':''}> ${esc(BRAND[s.brand]+' · '+s.address)}</label>`; }).join('')}</td>
       <td><label><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''}> включён</label></td></tr>`).join('')}</tbody></table></div>`;
@@ -1178,7 +1177,6 @@ document.addEventListener('click', async e => {
 document.addEventListener('change', async e => {
   const t = e.target, d = t.dataset;
   if(d.erole) updEmp(d.erole, { role:t.value });
-  if(d.estore) updEmp(d.estore, { home_store_id: t.value ? +t.value : null });
   if(d.ephone){ const p = normPhone(t.value); if(t.value.trim() && !p) return toast('Телефон: 10 цифр после +7'); if(p && S.emps.some(x=>x.id!==d.ephone && x.phone===p)) return toast('Этот телефон уже у другого сотрудника'); t.value = p||''; const e2 = S.emps.find(x=>x.id===d.ephone); if(e2) e2.phone = p; updEmp(d.ephone, { phone: p }); }
   if(d.stf){ (S.stockF ||= {})[d.stf]=t.value; await loadStockView(); render(); }
   if(t.id==='cf-store'){ S.cf.store=t.value; await loadCerts(); render(); }
