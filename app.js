@@ -6,7 +6,7 @@ const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true,
 
 const POS_PAY = ['cash','card','certificate'];
 const PAY = { cash:'Наличные', card:'Карта', kaspi_qr:'Kaspi QR', transfer:'Перевод', invoice:'По счёту', bonus:'Бонусы', certificate:'Сертификат' };
-const ROLE = { owner:'Владелец', manager:'Менеджер', consultant:'Консультант', purchaser:'Закуп', viewer:'Просмотр' };
+const ROLE = { owner:'Владелец', manager:'Менеджер', consultant:'Консультант', purchaser:'Закуп', viewer:'Управленец Астаны' };
 const BRAND = { moon:'MOON', sunshine:'Sunshine' };
 
 const S = {
@@ -50,6 +50,7 @@ async function onSelChange(){
   if(S.view==='analytics') await loadAnalytics();
   if(S.view==='shifts') await loadShifts();
   if(S.view==='cash') await loadCash();
+  if(S.view==='pay') await loadPay();
   render();
 }
 function normPhone(v){ let d=String(v||'').replace(/\D/g,''); if(d.length===11&&(d[0]==='7'||d[0]==='8')) d=d.slice(1); if(d.length===10) return '+7'+d; return null; }
@@ -184,7 +185,7 @@ async function boot(){
   }
   S.store = ls.get('kassa_store', null) || (me.store_ids||[])[0] || (S.stores[0]||{}).id;
   if(!S.stores.some(s=>s.id===S.store)) S.store = (S.stores[0]||{}).id;
-  { const { data } = await sb.rpc('get_tab_access'); S.tabAccess = data || {}; }
+  { const [a, e] = await Promise.all([sb.rpc('get_tab_access'), sb.rpc('get_tab_edit')]); S.tabAccess = a.data || {}; S.tabEdit = e.data || {}; }
   renderShell(); await loadPosShift(); await loadCatalog(); render(); flushQueue(); subscribeReqs();
 }
 
@@ -195,6 +196,7 @@ function renderShell(){
   // настройка владельца: какие вкладки видит каждая роль
   const acc = (S.tabAccess||{})[S.me.role];
   if(S.me.role !== 'owner' && Array.isArray(acc)){ const keep = tabs.filter(([v]) => acc.includes(v)); tabs.splice(0, tabs.length, ...keep); }
+  tabs.push(['pay', isBoss() ? 'Зарплата' : 'Моя зарплата']);
   if(tabs.length && !tabs.some(([v]) => v===S.view)) S.view = tabs[0][0];
   if(isViewer()){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pos' && v!=='emps')); if(!S.view || S.view==='pos' || S.view==='emps') S.view = 'analytics'; }
 
@@ -205,7 +207,7 @@ function renderShell(){
 }
 // вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
 const GROUPS = [['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['stock','wh','nom','site']],
-  ['clients','💳','Клиенты',['bonus','certs']],['analytics','📈','Аналитика',['analytics']],['team','👥','Сотрудники',['emps']]];
+  ['clients','💳','Клиенты',['bonus','certs']],['analytics','📈','Аналитика',['analytics']],['team','👥','Сотрудники',['emps','pay']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 function renderNav(){
   const tabs = S.tabs || [], has = v => tabs.some(t => t[0]===v), title = v => (tabs.find(t=>t[0]===v)||[])[1];
@@ -232,10 +234,10 @@ function renderHeader(){
   if($('#tg-link')) $('#tg-link').onclick = () => tgLogin('link');
 }
 function render(){
-  document.body.classList.toggle('readonly', !canEdit(S.store));
+  document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -1275,19 +1277,77 @@ function renderBonus(){
   </div></div>`;
 }
 
+/* ---------- зарплата ---------- */
+const PY = { month: new Date().toISOString().slice(0,7), data:null, open:null, store:null, day:new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'}), sheet:null, add:{ emp:'', hours:'', kind:'sale' } };
+async function loadPay(){
+  const [y,m] = PY.month.split('-').map(Number), from = `${PY.month}-01`, to = new Date(Date.UTC(y, m, 0)).toISOString().slice(0,10);
+  PY.data = null;
+  const jobs = [ sb.rpc('payroll', { p_from:from, p_to:to, p_stores: isBoss() ? selStores() : null }) ];
+  const tabel = S.me && ['owner','manager'].includes(S.me.role);
+  if(tabel){ PY.store = PY.store || S.store; jobs.push(sb.rpc('work_hours_list', { p_store:PY.store, p_day:PY.day })); if(!S.emps) jobs.push(loadEmps()); }
+  const [p, w] = await Promise.all(jobs);
+  if(p.error) toast(errText(p.error)); PY.data = p.data || [];
+  if(w) PY.sheet = w.data || [];
+}
+function payRuleText(r){
+  if(!r) return 'для магазина нет правила';
+  if(r.mode==='each') return `каждому ${r.pct}% от продаж дня, минимум ${fmt(r.min)}`;
+  return `${r.pct_high===r.pct_low?r.pct_high+'%':r.pct_high+'%, если по часам работало больше одного человека, иначе '+r.pct_low+'%'} от продаж дня делится по часам${r.min_div?' (минимум на '+r.min_div+' ч)':''}; минимум ${fmt(r.min_full)} за полную смену ${r.full} ч, за неполную — ${fmt(r.min_hour)}/ч`;
+}
+function payLine(x){
+  const r = x.rule || {}, d = new Date(x.day+'T00:00').toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',weekday:'short'});
+  let f;
+  if(x.kind==='dress') f = `переодевание: ${x.hours} ч × ${fmt(1200)} = ${fmt(x.amount)}`;
+  else if(r.mode==='each'){ const base = Math.round(x.sales*x.pct/100); f = `продажи ${fmt(x.sales)} × ${x.pct}% = ${fmt(base)}${x.amount>base?` → минимум ${fmt(x.amount)}`:''}`; }
+  else { const div = Math.max(x.team_hours, r.min_div||0), base = Math.round(x.rate*x.hours);
+    f = `продажи ${fmt(x.sales)} × ${x.pct}% ÷ ${div} ч${r.min_div&&div>x.team_hours?' (минимум '+r.min_div+')':''} = ${fmt(x.rate)}/ч × ${x.hours} ч = ${fmt(base)}${x.amount>base?` → минимум ${fmt(x.amount)}${x.hours==r.full?' за полную смену':' ('+fmt(r.min_hour)+'/ч)'}`:''}`; }
+  const team = (x.team||[]).map(t=>esc(t.name)+' '+t.hours+' ч').join(', ');
+  return `<tr><td class="num">${d}</td><td>${esc(storeName(x.store))}<br><span class="meta">${x.kind==='dress'?'переодевание':'на смене: '+team}</span></td><td class="meta">${f}</td><td class="num"><b>${fmt(x.amount)}</b></td></tr>`;
+}
+function renderPay(){
+  const D = PY.data, tabel = S.me && ['owner','manager'].includes(S.me.role) && !isViewer();
+  const total = (D||[]).reduce((a,e)=>a+e.total,0);
+  const stEmps = (S.emps||[]).filter(e => e.active && (!e.store_ids || !e.store_ids.length || e.store_ids.includes(+PY.store)));
+  $('#main').innerHTML = `<div class="row"><h2>${isBoss()?'Зарплата':'Моя зарплата'}</h2><label class="meta">Месяц <input type="month" id="py-month" value="${PY.month}"></label></div>
+  ${isBoss()?storeFilterHtml():''}
+  <p class="meta">Предварительный расчёт по продажам в кассе и табелю часов. Правила: ${['Курмангазы, Толе би, Гагарина — 12/10% по часам','MOON Курмангазы — 5%','Астана — 6% Sunshine, 3% MOON'].join(' · ')}.</p>
+  <div class="grid2"><div>
+   ${!D?'<div class="empty">Считаем…</div>':!D.length?'<div class="empty">За этот месяц нет часов в табеле</div>':`<div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Часы</th><th>Начислено</th></tr></thead><tbody>
+     ${D.map(e=>`<tr><td><button class="btn small" data-pyopen="${e.employee}" style="border:0;background:none;padding:0;font-weight:600">${PY.open===e.employee?'▾':'▸'} ${esc(e.name)}</button></td><td class="num">${e.hours}</td><td class="num"><b>${fmt(e.total)}</b></td></tr>
+       ${PY.open===e.employee || D.length===1?`<tr><td colspan="3" style="padding:0"><table style="margin:0 0 8px"><tbody>${e.days.map(payLine).join('')}</tbody></table></td></tr>`:''}`).join('')}
+     ${D.length>1?`<tr><td><b>Итого</b></td><td></td><td class="num"><b>${fmt(total)}</b></td></tr>`:''}</tbody></table></div>`}
+  </div><div>
+   ${tabel?`<div class="card stack"><b>Табель часов</b>
+     <div class="row" style="flex-wrap:wrap;justify-content:flex-start"><select id="py-store">${S.stores.map(s=>`<option value="${s.id}" ${+PY.store===s.id?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select><input type="date" id="py-day" value="${PY.day}"></div>
+     <span class="meta">${esc(payRuleText(((D&&D.flatMap(e=>e.days).find(x=>x.store===+PY.store))||{}).rule))}</span>
+     ${(PY.sheet||[]).length?`<table><tbody>${PY.sheet.map(w=>`<tr><td>${esc(w.name)}${w.kind==='dress'?' <span class="chip">переодевание</span>':''}</td>
+       <td><input class="small" type="number" min="0" max="24" step="0.5" value="${w.hours}" data-pyh="${w.employee}:${w.kind}" inputmode="decimal"> ч</td>
+       <td><button class="btn small" data-pydel="${w.employee}:${w.kind}">✕</button></td></tr>`).join('')}</tbody></table>`:'<span class="meta">На этот день в табеле никого нет. Тот, кто открывает смену, попадает в табель автоматически.</span>'}
+     <div class="row" style="flex-wrap:wrap;justify-content:flex-start">
+       <select id="py-emp"><option value="">Сотрудник…</option>${stEmps.map(e=>`<option value="${e.id}" ${PY.add.emp===e.id?'selected':''}>${esc(e.full_name)}</option>`).join('')}</select>
+       <input id="py-hours" class="small" type="number" min="0.5" max="24" step="0.5" placeholder="часы" value="${esc(PY.add.hours)}" inputmode="decimal">
+       <select id="py-kind"><option value="sale" ${PY.add.kind==='sale'?'selected':''}>продажи</option><option value="dress" ${PY.add.kind==='dress'?'selected':''}>переодевание (1 200/ч)</option></select>
+       <button class="btn primary" id="py-add">Добавить</button></div>
+   </div>`:`<div class="card meta">Часы в табель ставит менеджер. Если вы видите ошибку в часах — напишите менеджеру.</div>`}
+  </div></div>`;
+}
+
 /* ---------- доступ к вкладкам по ролям ---------- */
 const ALL_TABS = [['pos','Продажа'],['analytics','Аналитика'],['shifts','Смены'],['cash','Расходы'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты'],['bonus','Бонусные карты'],['nom','Номенклатура'],['site','Сайт'],['emps','Сотрудники']];
 const BOSS_ONLY = ['analytics','bonus','nom','site','emps'];
 function defaultTabs(role){ const boss = ['manager','viewer'].includes(role);
   return ALL_TABS.map(([v])=>v).filter(v => (boss || !BOSS_ONLY.includes(v)) && !(role==='viewer' && (v==='pos'||v==='emps'))); }
+function canEditTab(v){ if(!S.me || S.me.role==='owner') return true; const E=(S.tabEdit||{})[S.me.role]; return Array.isArray(E) ? E.includes(v) : true; }
 function accessHtml(){
   if(S.me.role!=='owner') return '';
   const roles = ['manager','consultant','purchaser','viewer'], A = S.tabAccess || {};
   const has = (r,v) => Array.isArray(A[r]) ? A[r].includes(v) : defaultTabs(r).includes(v);
-  return `<div class="card stack" style="margin-top:16px"><b>Какие вкладки видит каждая роль</b>
-    <p class="meta" style="margin:0">Владелец видит всё. Галочка — вкладка видна. Данные защищены и в базе: например, консультант не увидит выручку и закупочные цены, даже если открыть ему «Аналитику» — нужны и права роли.</p>
-    <div class="scroll"><table><thead><tr><th>Вкладка</th>${roles.map(r=>`<th>${ROLE[r]}</th>`).join('')}</tr></thead><tbody>
-    ${ALL_TABS.map(([v,t])=>`<tr><td>${t}</td>${roles.map(r=>`<td><input type="checkbox" data-acc="${r}:${v}" ${has(r,v)?'checked':''} aria-label="${ROLE[r]}: ${t}"></td>`).join('')}</tr>`).join('')}</tbody></table></div>
+  const E = S.tabEdit || {}, can = (r,v) => has(r,v) && r!=='viewer' && (Array.isArray(E[r]) ? E[r].includes(v) : true);
+  return `<div class="card stack" style="margin-top:16px"><b>Какие вкладки видит и может менять каждая роль</b>
+    <p class="meta" style="margin:0">Владелец видит и меняет всё. В каждой ячейке две галочки: 👁 — вкладка видна (только смотреть), ✎ — можно и менять (кнопки сохранения, проведения и т.п.). Данные защищены и в базе: например, консультант не увидит выручку и закупочные цены, даже если открыть ему «Аналитику».</p>
+    <div class="scroll"><table><thead><tr><th>Вкладка</th>${roles.map(r=>`<th>${ROLE[r]}<br><span class="meta">👁 смотреть · ✎ менять</span></th>`).join('')}</tr></thead><tbody>
+    ${ALL_TABS.map(([v,t])=>`<tr><td>${t}</td>${roles.map(r=>`<td style="white-space:nowrap"><label title="Видит"><input type="checkbox" data-acc="${r}:${v}" ${has(r,v)?'checked':''} aria-label="${ROLE[r]}: ${t} — видит"> 👁</label>
+      <label title="Может менять" style="margin-left:8px"><input type="checkbox" data-accedit="${r}:${v}" ${can(r,v)?'checked':''} ${has(r,v)&&r!=='viewer'?'':'disabled'} aria-label="${ROLE[r]}: ${t} — может менять"> ✎</label></td>`).join('')}</tr>`).join('')}</tbody></table></div>
     <div class="row"><button class="btn small" id="acc-reset">Вернуть по умолчанию</button><span class="meta">Изменения сохраняются сразу; сотрудник увидит их после обновления страницы.</span></div></div>`;
 }
 
@@ -1368,6 +1428,11 @@ document.addEventListener('click', async e => {
     const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product: d.nmlink?S.nm.ed.id:null, p_status: d.nmlink?'confirmed':'rejected' });
     if(error) toast(errText(error)); else { toast(d.nmlink?'Связано с сайтом':'Отвязано'); S.nm.sq=''; S.nm.sfound=[]; await loadNom(); const fr=S.nm.data.rows.find(r=>r.id===S.nm.ed.id); if(fr) nmOpen(fr); else render(); } }
   else if(d.wook||d.wono){ t.disabled=true; const { data, error } = await sb.rpc('decide_writeoff', { p_id:d.wook||d.wono, p_approve:!!d.wook, p_note:null }); if(error){ toast(errText(error)); t.disabled=false; return; } toast(data); await loadWhSide(); render(); }
+  else if(d.pyopen){ PY.open = PY.open===d.pyopen ? null : d.pyopen; render(); }
+  else if(d.pydel){ const [emp,kind]=d.pydel.split(':'); const { error } = await sb.rpc('work_hours_set', { p_store:+PY.store, p_day:PY.day, p_employee:emp, p_hours:0, p_kind:kind }); if(error) toast(errText(error)); else { await loadPay(); render(); } }
+  else if(t.id==='py-add'){ if(!PY.add.emp || !(+PY.add.hours>0)) return toast('Выберите сотрудника и часы');
+    const { error } = await sb.rpc('work_hours_set', { p_store:+PY.store, p_day:PY.day, p_employee:PY.add.emp, p_hours:+PY.add.hours, p_kind:PY.add.kind });
+    if(error) return toast(errText(error)); PY.add = { emp:'', hours:'', kind:'sale' }; toast('Добавлено в табель'); await loadPay(); render(); }
   else if(d.csdir){ CS.dir=d.csdir; CS.cat=''; render(); }
   else if(d.cscat!=null){ CS.cat=d.cscat; render(); }
   else if(d.csdays){ CS.days=+d.csdays; await loadCash(); render(); }
@@ -1385,7 +1450,7 @@ document.addEventListener('click', async e => {
   else if(t.id==='bk-adj'){ const amt=+$('#bk-amt').value; t.disabled=true;
     const { error } = await sb.rpc('bonus_adjust', { p_customer:BK.cur, p_brand:BK.brand, p_amount:amt, p_reason:$('#bk-reason').value, p_ttl_days:+$('#bk-ttl').value||91 });
     if(error){ toast(errText(error)); t.disabled=false; } else { toast('Бонусы скорректированы'); await openBonusClient(BK.cur); loadBonus().then(render); } }
-  else if(t.id==='acc-reset'){ const { error } = await sb.rpc('set_tab_access', { p:{} }); if(error) toast(errText(error)); else { S.tabAccess={}; toast('Доступы по умолчанию'); render(); } }
+  else if(t.id==='acc-reset'){ const [a,b] = await Promise.all([sb.rpc('set_tab_access', { p:{} }), sb.rpc('set_tab_edit', { p:{} })]); if(a.error||b.error) toast(errText(a.error||b.error)); else { S.tabAccess={}; S.tabEdit={}; toast('Доступы по умолчанию'); render(); } }
   else if(t.id==='ne-add'){ const ids=[...document.querySelectorAll('.ne-store:checked')].map(x=>+x.value);
     const { error } = await sb.rpc('employee_add', { p_phone:$('#ne-phone').value, p_name:$('#ne-name').value, p_role:$('#ne-role').value, p_store_ids:ids });
     if(error) toast(errText(error)); else { toast('Сотрудник добавлен'); await loadEmps(); render(); } }
@@ -1433,9 +1498,17 @@ document.addEventListener('change', async e => {
   if(d.erole) updEmp(d.erole, { role:t.value });
   if(d.ephone){ const p = normPhone(t.value); if(t.value.trim() && !p) return toast('Телефон: 10 цифр после +7'); if(p && S.emps.some(x=>x.id!==d.ephone && x.phone===p)) return toast('Этот телефон уже у другого сотрудника'); t.value = p||''; const e2 = S.emps.find(x=>x.id===d.ephone); if(e2) e2.phone = p; updEmp(d.ephone, { phone: p }); }
   if(d.stf){ (S.stockF ||= {})[d.stf]=t.value; await loadStockView(); render(); }
+  if(d.accedit){ const [r,v]=d.accedit.split(':'); const E={...(S.tabEdit||{})}; const vis=Array.isArray((S.tabAccess||{})[r])?S.tabAccess[r]:defaultTabs(r);
+    const cur=new Set(Array.isArray(E[r])?E[r]:vis); t.checked?cur.add(v):cur.delete(v); E[r]=ALL_TABS.map(([x])=>x).filter(x=>cur.has(x));
+    const { error } = await sb.rpc('set_tab_edit', { p:E }); if(error){ toast(errText(error)); t.checked=!t.checked; } else { S.tabEdit=E; toast(t.checked?'Может менять':'Только смотреть'); } }
   if(d.acc){ const [r,v]=d.acc.split(':'); const A={...(S.tabAccess||{})}; const cur=new Set(Array.isArray(A[r])?A[r]:defaultTabs(r)); t.checked?cur.add(v):cur.delete(v);
     A[r]=ALL_TABS.map(([x])=>x).filter(x=>cur.has(x)); const { error } = await sb.rpc('set_tab_access', { p:A }); if(error){ toast(errText(error)); t.checked=!t.checked; } else { S.tabAccess=A; toast('Сохранено'); } }
   if(t.id==='cs-photo'){ cashPhoto(t.files[0]); }
+  if(t.id==='py-month'){ PY.month = t.value || PY.month; PY.open=null; await loadPay(); render(); }
+  if(t.id==='py-store'){ PY.store = +t.value; await loadPay(); render(); }
+  if(t.id==='py-day'){ PY.day = t.value; await loadPay(); render(); }
+  if(t.id==='py-emp'){ PY.add.emp = t.value; } if(t.id==='py-kind'){ PY.add.kind = t.value; }
+  if(t.dataset && t.dataset.pyh){ const [emp,kind]=t.dataset.pyh.split(':'); const { error } = await sb.rpc('work_hours_set', { p_store:+PY.store, p_day:PY.day, p_employee:emp, p_hours:+t.value, p_kind:kind }); if(error) toast(errText(error)); else { toast('Часы сохранены'); await loadPay(); render(); } }
   if(t.id==='bk-filter'){ BK.filter=t.value; BK.off=0; render(); await loadBonus(); render(); }
   if(t.id==='bk-sort'){ BK.sort=t.value; BK.off=0; render(); await loadBonus(); render(); }
   if(t.id==='cf-store'){ S.cf.store=t.value; await loadCerts(); render(); }
@@ -1458,6 +1531,7 @@ document.addEventListener('input', e => {
   else if(t.id==='cert-code'){ S.certCode = t.value; }
   else if(t.id==='cert-q'){ S.certQ = t.value; render(); }
   else if(t.id==='cs-cat'){ CS.cat=t.value; }
+  else if(t.id==='py-hours'){ PY.add.hours=t.value; }
   else if(t.id==='cs-amount'){ CS.amount=t.value; } else if(t.id==='cs-comment'){ CS.comment=t.value; } else if(t.id==='cs-collector'){ CS.collector=t.value; }
   else if(t.id==='bk-q'){ BK.q=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ BK.off=0; await loadBonus(); render(); }, 400); }
   else if(t.id==='cf-q'){ S.cf.q=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ await loadCerts(); render(); }, 400); }
@@ -1491,6 +1565,7 @@ document.addEventListener('click', async e => {
   if(S.view==='sales'){ await loadSales(); render(); }
   if(S.view==='certs'){ await loadCerts(); render(); }
   if(S.view==='emps'){ await loadEmps(); render(); }
+  if(S.view==='pay'){ render(); await loadPay(); render(); }
   if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); }
   if(S.view==='stock' && !S.stockRows.length){ await loadStockView(); render(); }
   if(S.view==='site'){ render(); await loadSite(); render(); }
