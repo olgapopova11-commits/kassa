@@ -14,7 +14,7 @@ const S = {
   cart:[], discType:'pct', disc:0, pays:{}, certCode:'',
   phone:'', cust:null, custMsg:'', bonusSpend:0,
   sales:[], salesQ:'', stockQ:'', stockRows:[], certs:[], emps:[], busy:false,
-  sel:null, period:'30', from:'', to:'', an:null, stockSort:'total',
+  sel:null, period:'30', from:'', to:'', an:null, stockSort:'total', wmode:null, doc:null, dq:'', dfound:[], audit:null, auditRows:[], whList:[], trList:[],
 };
 
 /* ---------- утилиты ---------- */
@@ -145,7 +145,7 @@ async function boot(){
 
 /* ---------- каркас ---------- */
 function renderShell(){
-  const tabs = [['pos','Продажа'],['sales','Чеки и возвраты'],['stock','Остатки'],['certs','Сертификаты']];
+  const tabs = [['pos','Продажа'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты']];
   if(isBoss()) { tabs.splice(1,0,['analytics','Аналитика']); tabs.push(['emps','Сотрудники']); }
   $('#app').innerHTML = `<header id="hdr"></header><main id="main"></main>
     <nav class="tabs" role="tablist">${tabs.map(([v,t])=>`<button role="tab" data-view="${v}">${t}</button>`).join('')}</nav>`;
@@ -166,7 +166,7 @@ function renderHeader(){
 function render(){
   document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === S.view));
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, analytics:renderAnalytics })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, analytics:renderAnalytics, wh:renderWh })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -400,6 +400,126 @@ async function openHistory(pid){
     <button class="btn" data-close>Закрыть</button>`);
 }
 
+/* ---------- склад: приёмка, оприходование, списание, перемещение, ревизия ---------- */
+const WH = {
+  receipt:   { t:'Приёмка', boss:true, hint:'Товар от поставщика. Закупочная цена обновится, после проведения можно напечатать этикетки.' },
+  capitalize:{ t:'Оприходование', boss:true, hint:'Излишки и найденный товар без поставщика.' },
+  writeoff:  { t:'Списание', boss:true, hint:'Брак, потеря, подарок. Причина обязательна.' },
+  transfer:  { t:'Перемещение', boss:false, hint:'Товар списывается в магазине-отправителе сразу, а в магазине-получателе — когда там нажмут «Принять».' },
+  audit:     { t:'Ревизия', boss:false, hint:'Сканируйте товар на полке — каждое сканирование +1. Продажи во время ревизии учитываются. Закрывает менеджер.' },
+};
+function whModes(){ return Object.entries(WH).filter(([k,v]) => !v.boss || isBoss()); }
+function newDoc(mode){ return { mode, store:S.store, to:(S.stores.find(x=>x.id!==S.store)||{}).id, supplier:'', note:'', reason:'', items:[] }; }
+async function loadWhSide(){
+  if(S.wmode==='transfer'){ const { data } = await sb.rpc('transfers_list', { p_store: isBoss()?null:S.store }); S.trList = data||[]; }
+  else if(S.wmode==='audit'){ await loadAudit(); }
+  else { const { data } = await sb.rpc('writeoffs_list', { p_store: isBoss()?null:S.store }); S.whList = (data||[]).filter(x => x.kind === S.wmode); }
+}
+async function loadAudit(){
+  const { data: open } = await sb.from('audits').select('id,store_id,status,started_at').eq('store_id', S.store).eq('status','counting').limit(1);
+  S.audit = open && open[0] || null; S.auditRows = [];
+  if(S.audit){ const { data } = await sb.rpc('audit_diff', { p_audit:S.audit.id, p_include_uncounted:false }); S.auditRows = (data&&data.rows)||[]; }
+}
+function docSearchHtml(ph){
+  return `<div class="row"><input id="dq" style="flex:1" placeholder="${ph||'Скан штрихкода или название'}" value="${esc(S.dq)}" autocomplete="off"><button class="btn" id="dq-add">Добавить</button></div>
+    ${S.dfound.length?`<div class="list">${S.dfound.slice(0,10).map(p=>`<button class="prod" data-dadd="${p.id}"><span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}</span></span><span class="price num">${fmt(p.price)}</span></button>`).join('')}</div>`:''}`;
+}
+function renderWh(){
+  if(!S.wmode) S.wmode = whModes()[0][0];
+  const m = S.wmode, d = S.doc && S.doc.mode===m ? S.doc : (S.doc = newDoc(m));
+  const head = `<div class="filters">${whModes().map(([k,v])=>`<button class="btn small ${k===m?'primary':''}" data-wmode="${k}">${v.t}</button>`).join('')}</div>
+    <p class="meta">${WH[m].hint}</p>`;
+  if(m==='audit') return renderAudit(head);
+  const storeSel = (id, val) => `<select id="${id}">${S.stores.map(st=>`<option value="${st.id}" ${st.id===val?'selected':''}>${esc(BRAND[st.brand]+' · '+st.city+', '+st.address)}</option>`).join('')}</select>`;
+  const total = d.items.reduce((a,i)=>a+i.qty,0);
+  $('#main').innerHTML = `<h2>Склад</h2>${head}<div class="grid2"><div class="card stack">
+    <div class="row" style="flex-wrap:wrap"><span class="label">${m==='transfer'?'Откуда':'Магазин'}</span>${storeSel('d-store', d.store)}
+      ${m==='transfer'?`<span class="label">Куда</span>${storeSel('d-to', d.to)}`:''}</div>
+    ${m==='receipt'?`<input id="d-supplier" placeholder="Поставщик (например, 1688, Иу, рынок)" value="${esc(d.supplier)}">`:''}
+    ${m==='writeoff'?`<input id="d-reason" placeholder="Причина списания *" value="${esc(d.reason)}">`:''}
+    ${m==='capitalize'||m==='receipt'?`<input id="d-note" placeholder="Комментарий" value="${esc(d.note)}">`:''}
+    ${docSearchHtml()}
+    ${d.items.length?`<div class="scroll"><table><thead><tr><th>Товар</th><th>Кол-во</th>${m==='receipt'?'<th>Закуп, ₸</th>':''}<th></th></tr></thead><tbody>
+      ${d.items.map((i,n)=>`<tr><td>${esc(i.name)}<br><span class="meta num">${esc(i.barcode)}</span></td>
+        <td><input class="small" type="number" min="1" id="dqty-${n}" data-dqty="${n}" value="${i.qty}" inputmode="numeric"></td>
+        ${m==='receipt'?`<td><input class="small" type="number" min="0" id="dcost-${n}" data-dcost="${n}" value="${i.cost??''}" inputmode="numeric"></td>`:''}
+        <td><button class="btn small" data-ddel="${n}">✕</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Добавьте товары сканером или поиском</div>'}
+    <div class="row"><span class="meta">Позиций: ${d.items.length} · штук: ${total}</span>
+      <button class="btn primary" id="d-post" ${d.items.length?'':'disabled'}>${{receipt:'Провести приёмку',capitalize:'Оприходовать',writeoff:'Списать',transfer:'Отправить'}[m]}</button></div>
+  </div><div>${m==='transfer'?renderTransfers():renderWhList()}</div></div>`;
+}
+function renderWhList(){
+  return `<h2>Последние документы</h2>${S.whList.length?S.whList.map(x=>`<div class="card" style="margin-bottom:8px">
+    <div class="row"><b>${esc(WH[x.kind]?WH[x.kind].t:x.kind)}${x.number?' №'+x.number:''}</b><span class="meta">${new Date(x.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span></div>
+    <div class="meta">${esc(storeName(x.store))} · ${esc(x.by||'')}${x.supplier?' · '+esc(x.supplier):''}${x.reason?' · '+esc(x.reason):''}</div>
+    <div>${(x.items||[]).map(i=>esc(i.name)+' × '+i.qty).join('<br>')}</div>
+    ${x.kind!=='writeoff'&&x.items?`<button class="btn small" data-labels='${esc(JSON.stringify(x.items.map(i=>({n:i.name,b:i.barcode,p:i.price,q:i.qty}))))}'>Этикетки</button>`:''}
+  </div>`).join(''):'<div class="empty">Документов пока нет</div>'}`;
+}
+function renderTransfers(){
+  return `<h2>Перемещения</h2>${S.trList.length?S.trList.map(t=>`<div class="card" style="margin-bottom:8px">
+    <div class="row"><b>№${t.number}: ${esc(storeName(t.from))} → ${esc(storeName(t.to))}</b>
+      <span class="chip ${t.status==='received'?'ok':'warn'}">${t.status==='received'?'принято':'в пути'}</span></div>
+    <div class="meta">Отправила ${esc(t.sent_by||'')} ${new Date(t.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}${t.received_by?' · приняла '+esc(t.received_by):''}</div>
+    <div>${(t.items||[]).map(i=>esc(i.name)+' × '+i.qty).join('<br>')}</div>
+    ${t.status==='sent'&&(isBoss()||t.to===S.store)?`<button class="btn small primary" data-trrecv="${t.id}">Принять в ${esc(storeName(t.to))}</button>`:''}
+  </div>`).join(''):'<div class="empty">Перемещений пока нет</div>'}`;
+}
+function renderAudit(head){
+  const a = S.audit;
+  $('#main').innerHTML = `<h2>Склад</h2>${head}
+    <div class="card stack"><div class="row"><b>Ревизия · ${esc(storeName(S.store))}</b>${a?`<span class="meta">начата ${new Date(a.started_at).toLocaleString('ru-RU')}</span>`:''}</div>
+    ${!a?`<button class="btn primary" id="au-start">Начать ревизию в этом магазине</button>`:`
+      ${docSearchHtml('Сканируйте товар — каждое сканирование +1')}
+      <div class="scroll"><table><thead><tr><th>Товар</th><th>Посчитано</th><th>По базе</th><th>Разница</th></tr></thead><tbody>
+      ${S.auditRows.map(r=>`<tr><td>${esc(r.name)}<br><span class="meta num">${esc(r.barcode)}</span></td>
+        <td><input class="small" type="number" min="0" id="ac-${r.product_id}" data-acset="${r.product_id}" value="${r.counted??0}"></td>
+        <td class="num">${r.expected}</td><td class="num" style="color:${r.diff<0?'var(--bad)':r.diff>0?'var(--ok)':'inherit'}">${r.diff>0?'+':''}${r.diff}</td></tr>`).join('') || '<tr><td colspan="4" class="meta">Пока ничего не посчитано</td></tr>'}</tbody></table></div>
+      ${isBoss()?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start">
+        <button class="btn" id="au-uncounted">Показать и непосчитанные</button>
+        <button class="btn primary" id="au-close">Закрыть: поправить только посчитанные</button>
+        <button class="btn" id="au-close-full">Закрыть полностью (непосчитанные = 0)</button></div>`:'<p class="meta">Закрыть ревизию может менеджер.</p>'}`}
+    </div>`;
+}
+function docAdd(p){
+  if(S.wmode==='audit') return auditAdd(p);
+  const d = S.doc, it = d.items.find(i=>i.pid===p.id);
+  if(it) it.qty++; else d.items.push({ pid:p.id, name:p.name, barcode:p.barcode, price:p.price, qty:1, cost:null });
+  S.dq=''; S.dfound=[]; render(); $('#dq') && $('#dq').focus();
+}
+async function auditAdd(p){
+  const { error } = await sb.rpc('audit_count', { p_audit:S.audit.id, p_product:p.id, p_delta:1, p_set:null });
+  if(error) return toast(errText(error));
+  S.dq=''; S.dfound=[]; await loadAudit(); render(); $('#dq') && $('#dq').focus();
+}
+async function postDoc(){
+  const d = S.doc, m = d.mode; let res;
+  if(m==='receipt' || m==='capitalize')
+    res = await sb.rpc('post_receipt', { p:{ kind:m, store_id:d.store, supplier:d.supplier, note:d.note, items:d.items.map(i=>({ product_id:i.pid, qty:i.qty, unit_cost:i.cost })) } });
+  else if(m==='writeoff'){
+    if(!d.reason.trim()) return toast('Укажите причину списания');
+    res = await sb.rpc('post_writeoff', { p_store:d.store, p_reason:d.reason, p_items:d.items.map(i=>({ product_id:i.pid, qty:i.qty })) });
+  } else if(m==='transfer')
+    res = await sb.rpc('create_transfer', { p:{ from_store_id:d.store, to_store_id:d.to, items:d.items.map(i=>({ product_id:i.pid, qty:i.qty })) } });
+  if(res.error) return toast('Не проведено: '+errText(res.error));
+  const labels = (m==='receipt'||m==='capitalize') ? d.items.map(i=>({ n:i.name, b:i.barcode, p:i.price, q:i.qty })) : null;
+  toast(WH[m].t+' проведено'); S.doc = newDoc(m); await loadWhSide(); render();
+  if(labels) modal(`<h2>${WH[m].t} проведена</h2><p>Напечатать этикетки? Будет ${labels.reduce((a,l)=>a+l.q,0)} шт. — по одной на каждую единицу.</p>
+    <div class="row"><button class="btn" data-close>Не сейчас</button><button class="btn primary" data-labels='${esc(JSON.stringify(labels))}'>Печать этикеток</button></div>`);
+}
+function printLabels(list){
+  const box = document.getElementById('labels') || Object.assign(document.body.appendChild(document.createElement('div')), { id:'labels' });
+  box.innerHTML = '';
+  list.forEach(l => { for(let k=0;k<l.q;k++){
+    const el = document.createElement('div'); el.className='label47';
+    el.innerHTML = `<div class="ln">${esc(l.n)}</div><svg></svg><div class="lp">${fmt(l.p)}</div>`;
+    box.appendChild(el);
+    try{ JsBarcode(el.querySelector('svg'), l.b, { format:/^\d{13}$/.test(l.b)?'EAN13':'CODE128', height:28, width:1.4, fontSize:10, margin:0, displayValue:true }); }catch(e){ JsBarcode(el.querySelector('svg'), l.b, { format:'CODE128', height:28, width:1.2, fontSize:10, margin:0 }); }
+  }});
+  document.body.classList.add('print-labels'); closeModal();
+  setTimeout(()=>{ window.print(); document.body.classList.remove('print-labels'); }, 300);
+}
+
 /* ---------- сертификаты ---------- */
 async function loadCerts(){
   const { data, error } = await sb.from('certificate_report').select('*').order('sold_at',{ascending:false}).limit(200);
@@ -559,6 +679,19 @@ document.addEventListener('click', async e => {
   else if(d.eact){ updEmp(d.eact, { active:t.checked }); }
   else if(d.sgroup){ const g=d.sgroup; S.sel = S.stores.filter(st => g==='all' || st.brand===g || st.city===g).map(st=>st.id); onSelChange(); }
   else if(d.sone){ const id=+d.sone; selStores(); S.sel = t.checked ? [...new Set([...S.sel, id])] : S.sel.filter(x=>x!==id); if(!S.sel.length) S.sel=[id]; onSelChange(); }
+  else if(d.wmode){ S.wmode=d.wmode; S.dq=''; S.dfound=[]; await loadWhSide(); render(); }
+  else if(d.dadd){ const p=S.dfound.find(x=>x.id===d.dadd); if(p) docAdd(p); }
+  else if(t.id==='dq-add'){ const r=searchCatalog(S.dq); if(r.length===1 || (r[0]&&r[0].barcode===S.dq.trim())) docAdd(r[0]); else { S.dfound=r; render(); } }
+  else if(d.ddel){ S.doc.items.splice(+d.ddel,1); render(); }
+  else if(t.id==='d-post'){ t.disabled=true; await postDoc(); }
+  else if(d.trrecv){ const { error } = await sb.rpc('receive_transfer', { p_transfer:d.trrecv }); if(error) toast(errText(error)); else { toast('Перемещение принято'); await loadWhSide(); render(); } }
+  else if(d.labels){ printLabels(JSON.parse(d.labels)); }
+  else if(t.id==='au-start'){ const { error } = await sb.rpc('audit_start', { p_store:S.store }); if(error) toast(errText(error)); await loadAudit(); render(); }
+  else if(t.id==='au-uncounted'){ const { data } = await sb.rpc('audit_diff', { p_audit:S.audit.id, p_include_uncounted:true }); S.auditRows=(data&&data.rows)||[]; render(); }
+  else if(t.id==='au-close'||t.id==='au-close-full'){ const full=t.id==='au-close-full';
+    modal(`<h2>Закрыть ревизию?</h2><p>${full?'Все товары, которые не посчитали, будут обнулены в этом магазине.':'Остатки поправятся только по посчитанным товарам.'}</p>
+      <div class="row"><button class="btn" data-close>Отмена</button><button class="btn primary" data-auclose="${full?1:0}">Закрыть ревизию</button></div>`); }
+  else if(d.auclose!=null){ const { error } = await sb.rpc('close_audit', { p_audit:S.audit.id, p_full:d.auclose==='1' }); closeModal(); if(error) toast(errText(error)); else { toast('Ревизия закрыта, остатки поправлены'); await loadAudit(); render(); } }
   else if(d.ssort){ S.stockSort = d.ssort; await loadStockView(); render(); }
   else if(d.period){ S.period=d.period; if(d.period!=='custom'){ S.an=null; render(); await loadAnalytics(); } render(); }
   else if(t.id==='an-go'){ S.from=$('#an-from').value; S.to=$('#an-to').value; S.an=null; render(); await loadAnalytics(); render(); }
@@ -567,6 +700,9 @@ document.addEventListener('change', e => {
   const t = e.target, d = t.dataset;
   if(d.erole) updEmp(d.erole, { role:t.value });
   if(d.estore) updEmp(d.estore, { home_store_id: t.value ? +t.value : null });
+  if(t.id==='d-store'){ S.doc.store=+t.value; }
+  if(t.id==='d-to'){ S.doc.to=+t.value; }
+  if(d.acset){ sb.rpc('audit_count', { p_audit:S.audit.id, p_product:d.acset, p_delta:0, p_set:Math.max(0,+t.value||0) }).then(async r=>{ if(r.error) toast(errText(r.error)); await loadAudit(); render(); }); }
   if(t.id==='stsort'){ S.stockSort = t.value; loadStockView().then(render); }
 });
 document.addEventListener('input', e => {
@@ -577,12 +713,17 @@ document.addEventListener('input', e => {
   else if(t.id==='phone'){ S.phone = t.value; if(normPhone(t.value) && t.value.replace(/\D/g,'').length>=10){ clearTimeout(searchTimer); searchTimer=setTimeout(lookupCustomer, 300); } }
   else if(d.pamt){ S.pays[d.pamt] = Math.max(0,+t.value||0); if(d.pamt==='bonus') S.pays.bonus = Math.min(S.pays.bonus, maxBonus()); render(); }
   else if(t.id==='cert-code'){ S.certCode = t.value; }
+  else if(t.id==='dq'){ S.dq=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ S.dfound=searchCatalog(S.dq); render(); }, 200); }
+  else if(d.dqty!=null){ S.doc.items[+d.dqty].qty = Math.max(1,+t.value||1); }
+  else if(d.dcost!=null){ S.doc.items[+d.dcost].cost = t.value===''?null:Math.max(0,+t.value); }
+  else if(t.id==='d-supplier'){ S.doc.supplier=t.value; } else if(t.id==='d-reason'){ S.doc.reason=t.value; } else if(t.id==='d-note'){ S.doc.note=t.value; }
   else if(t.id==='sq'){ S.salesQ = t.value; }
   else if(t.id==='stq'){ S.stockQ = t.value; clearTimeout(searchTimer); searchTimer = setTimeout(async()=>{ await loadStockView(); render(); }, 300); }
 });
 document.addEventListener('keydown', e => {
   if(e.key!=='Enter') return;
   if(e.target.id==='q'){ e.preventDefault(); $('#q-add').click(); }
+  if(e.target.id==='dq'){ e.preventDefault(); $('#dq-add').click(); }
   if(e.target.id==='phone'){ e.preventDefault(); lookupCustomer(); }
   if(e.target.id==='sq'){ e.preventDefault(); $('#sq-go').click(); }
   if(e.target.id==='cc'){ e.preventDefault(); $('#cc-go').click(); }
@@ -593,6 +734,7 @@ document.addEventListener('click', async e => {
   if(S.view==='sales'){ await loadSales(); render(); }
   if(S.view==='certs'){ await loadCerts(); render(); }
   if(S.view==='emps'){ await loadEmps(); render(); }
+  if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); }
   if(S.view==='stock' && !S.stockRows.length){ await loadStockView(); render(); }
   if(S.view==='analytics'){ S.an=null; render(); await loadAnalytics(); render(); }
 });
