@@ -14,7 +14,7 @@ const S = {
   cart:[], discType:'pct', disc:0, pays:{}, certCode:'',
   phone:'', cust:null, custMsg:'', bonusSpend:0,
   sales:[], salesQ:'', stockQ:'', stockRows:[], certs:[], emps:[], busy:false,
-  sel:null, period:'30', from:'', to:'', an:null, stockSort:'total', wmode:null, doc:null, dq:'', dfound:[], audit:null, auditRows:[], whList:[], trList:[],
+  sel:null, period:'30', from:'', to:'', an:null, anMode:'sales', sa:null, saGroup:'category', saFilter:{}, saItems:null, saKey:null, stockSort:'total', wmode:null, doc:null, dq:'', dfound:[], audit:null, auditRows:[], whList:[], trList:[],
 };
 
 /* ---------- утилиты ---------- */
@@ -585,7 +585,8 @@ function periodRange(){
   const days = { today:0, '7':6, '30':29, '90':89, '365':364 }[S.period] ?? 29;
   const from = new Date(d0); from.setDate(from.getDate()-days); return [from, now];
 }
-async function loadAnalytics(){
+async function loadAnalytics(){ return S.anMode==='stock' ? loadStockAn() : loadSalesAn(); }
+async function loadSalesAn(){
   const [from, to] = periodRange(), ids = selStores();
   const rows = []; let off = 0;
   while(true){
@@ -607,11 +608,13 @@ async function loadAnalytics(){
   }
   S.an = A;
 }
-function renderAnalytics(){
+function renderAnalytics(){ return S.anMode==='stock' ? renderStockAn() : renderSalesAn(); }
+const anModeHtml = () => `<div class="seg" style="display:inline-flex;margin-bottom:10px"><button data-anmode="sales" aria-pressed="${S.anMode==='sales'}">Продажи</button><button data-anmode="stock" aria-pressed="${S.anMode==='stock'}">Остатки</button></div>`;
+function renderSalesAn(){
   const A = S.an;
   const periods = [['today','Сегодня'],['7','7 дней'],['30','30 дней'],['90','3 месяца'],['365','Год'],['custom','Свой период']];
   const days = A ? Object.entries(A.byDay).sort() : [], maxDay = Math.max(1, ...days.map(d=>d[1]));
-  $('#main').innerHTML = `<h2>Аналитика</h2>${storeFilterHtml()}
+  $('#main').innerHTML = `<h2>Аналитика</h2>${anModeHtml()}${storeFilterHtml()}
     <div class="filters">${periods.map(([k,t])=>`<button class="btn small ${S.period===k?'primary':''}" data-period="${k}">${t}</button>`).join('')}
       ${S.period==='custom'?`<input type="date" id="an-from" value="${S.from}"><input type="date" id="an-to" value="${S.to}"><button class="btn small" id="an-go">Показать</button>`:''}</div>
     ${!A?'<div class="empty">Загружаем…</div>':`
@@ -633,6 +636,40 @@ function renderAnalytics(){
     <p class="meta">Пока считается по чекам, пробитым в новой кассе. После переноса истории из Wipon здесь будут и прошлые продажи.</p>`}`;
 }
 
+/* ---------- аналитика остатков ---------- */
+const SA_GROUPS = [['category','Категория'],['material','Материал'],['color','Цвет'],['price','Цена'],['store','Магазин'],['brand','Бренд'],['supplier','Поставщик'],['site','Связь с сайтом']];
+const SA_FILTERABLE = { category:'Категория', material:'Материал', color:'Цвет' };
+async function loadStockAn(){
+  S.sa = null; S.saItems = null; S.saKey = null;
+  const { data, error } = await sb.rpc('stock_analytics', { p_stores: selStores(), p_group: S.saGroup, p_filter: S.saFilter });
+  if(error){ toast(errText(error)); S.sa = { rows:[], total:{} }; return; }
+  S.sa = data;
+}
+function renderStockAn(){
+  const A = S.sa, ids = selStores(), T = (A && A.total) || {}, units = +T.units || 0;
+  const filt = Object.entries(S.saFilter);
+  $('#main').innerHTML = `<h2>Аналитика</h2>${anModeHtml()}${storeFilterHtml()}
+    <div class="filters"><span class="label" style="align-self:center">Разрез</span>${SA_GROUPS.map(([k,t])=>`<button class="btn small ${S.saGroup===k?'primary':''}" data-sagroup="${k}">${t}</button>`).join('')}</div>
+    ${filt.length?`<div class="filters"><span class="label" style="align-self:center">Фильтр</span>${filt.map(([k,v])=>`<span class="chip ok">${SA_FILTERABLE[k]}: ${esc(v)} <button class="btn small" style="padding:0 6px;border:0" data-saunf="${k}" aria-label="Убрать фильтр">✕</button></span>`).join('')}</div>`:''}
+    ${!A?'<div class="empty">Считаем остатки…</div>':`
+    <div class="pays" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr))">
+      ${[['Штук на остатке',units.toLocaleString('ru-RU')],['Артикулов в наличии',(+T.skus||0).toLocaleString('ru-RU')],['В розничных ценах',fmt(T.retail||0)],['По себестоимости',fmt(T.cost||0)],['Средняя цена штуки',fmt(units?T.retail/units:0)],['Минусовые остатки',(T.negatives||0)+' поз.']]
+        .map(([k,v])=>`<div class="card"><div class="label">${k}</div><div class="total num" style="font-size:20px">${v}</div></div>`).join('')}
+    </div>
+    <p class="meta">Нажмите на строку, чтобы увидеть товары внутри. ${SA_FILTERABLE[S.saGroup]?'Кнопка «Фильтр» оставит только эту группу — потом можно выбрать другой разрез (например, категория → материал).':''}</p>
+    <div class="scroll"><table><thead><tr><th>${SA_GROUPS.find(g=>g[0]===S.saGroup)[1]}</th><th>Штук</th><th>Доля</th><th>Артикулов</th><th>Розница</th><th>Себест.</th>
+      ${S.saGroup!=='store'?ids.map(id=>`<th>${esc(storeName(id))}</th>`).join(''):''}<th></th></tr></thead><tbody>
+    ${A.rows.map(r=>`<tr data-sakey="${esc(r.g)}" style="cursor:pointer"><td><b>${esc(r.g)}</b>${r.negatives?`<br><span class="chip zero">минус: ${r.negatives}</span>`:''}</td>
+      <td class="num">${(r.units||0).toLocaleString('ru-RU')}</td><td class="num"><div style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;height:8px;border-radius:4px;background:var(--accent);width:${Math.round((r.units||0)/Math.max(1,units)*60)}px"></span>${units?((r.units||0)/units*100).toFixed(1):0}%</div></td>
+      <td class="num">${r.skus||0}</td><td class="num">${fmt(r.retail||0)}</td><td class="num">${fmt(r.cost||0)}</td>
+      ${S.saGroup!=='store'?ids.map(id=>`<td class="num">${(r.per_store&&r.per_store[id])||'—'}</td>`).join(''):''}
+      <td>${SA_FILTERABLE[S.saGroup]?`<button class="btn small" data-safilter="${esc(r.g)}">Фильтр</button>`:''}</td></tr>`).join('') || '<tr><td colspan="7" class="meta">Нет остатков</td></tr>'}
+    </tbody></table></div>
+    ${S.saKey?`<h2 style="margin-top:16px">${esc(S.saKey)}: товары по убыванию остатка</h2>${!S.saItems?'<div class="empty">Загружаем…</div>':`<div class="scroll"><table><thead><tr><th></th><th>Товар</th><th>Цена</th><th>Всего</th>${ids.map(id=>`<th>${esc(storeName(id))}</th>`).join('')}</tr></thead><tbody>
+      ${S.saItems.map(p=>`<tr><td>${thumb(p)}</td><td>${esc(p.name)}<br><span class="meta num">${esc(p.barcode)}</span></td><td class="num">${fmt(p.price)}</td><td class="num"><b>${p.total}</b></td>${ids.map(id=>`<td class="num">${p.per_store[id]??'—'}</td>`).join('')}</tr>`).join('')}</tbody></table></div><p class="meta">Показаны первые 100.</p>`}`:''}
+    <p class="meta">Материал и цвет взяты из Google-таблицы товаров, а где их там нет — из названия. Товары без материала стоят в строке «Не указан».</p>`}`;
+}
+
 /* ---------- сотрудники ---------- */
 async function loadEmps(){ const { data } = await sb.from('employees').select('*').order('created_at'); S.emps = data || []; }
 function renderEmps(){
@@ -651,6 +688,14 @@ function closeModal(){ $('#modal').innerHTML = ''; }
 
 /* ---------- события ---------- */
 let searchTimer;
+document.addEventListener('click', async e => {
+  if(e.target.closest('button')) return;
+  const tr = e.target.closest('[data-sakey]'); if(!tr) return;
+  const k = tr.dataset.sakey; S.saKey=k; S.saItems=null; render();
+  const { data, error } = await sb.rpc('stock_group_items', { p_stores: selStores(), p_group: S.saGroup, p_key: k, p_filter: S.saFilter, p_limit: 100 });
+  if(error) toast(errText(error)); S.saItems = data || []; render();
+  const h = document.querySelector('#main h2:last-of-type'); h && h.scrollIntoView({behavior:'smooth'});
+});
 document.addEventListener('click', async e => {
   const t = e.target.closest('button,input[type=checkbox]'); if(!t) return;
   const d = t.dataset;
@@ -682,6 +727,10 @@ document.addEventListener('click', async e => {
   else if(d.eact){ updEmp(d.eact, { active:t.checked }); }
   else if(d.sgroup){ const g=d.sgroup; S.sel = S.stores.filter(st => g==='all' || st.brand===g || st.city===g).map(st=>st.id); onSelChange(); }
   else if(d.sone){ const id=+d.sone; selStores(); S.sel = t.checked ? [...new Set([...S.sel, id])] : S.sel.filter(x=>x!==id); if(!S.sel.length) S.sel=[id]; onSelChange(); }
+  else if(d.anmode){ S.anMode=d.anmode; render(); await loadAnalytics(); render(); }
+  else if(d.sagroup){ S.saGroup=d.sagroup; render(); await loadStockAn(); render(); }
+  else if(d.safilter!=null){ e.stopPropagation(); S.saFilter={...S.saFilter, [S.saGroup]:d.safilter}; S.saGroup = S.saGroup==='category'?'material':'category'; render(); await loadStockAn(); render(); }
+  else if(d.saunf){ const f={...S.saFilter}; delete f[d.saunf]; S.saFilter=f; render(); await loadStockAn(); render(); }
   else if(d.wmode){ S.wmode=d.wmode; S.dq=''; S.dfound=[]; await loadWhSide(); render(); }
   else if(d.dadd){ const p=S.dfound.find(x=>x.id===d.dadd); if(p) docAdd(p); }
   else if(t.id==='dq-add'){ const r=searchCatalog(S.dq); if(r.length===1 || (r[0]&&r[0].barcode===S.dq.trim())) docAdd(r[0]); else { S.dfound=r; render(); } }
