@@ -15,7 +15,7 @@ const S = {
   cart:[], discType:'pct', disc:0, pays:{}, certCode:'', cert:null, certQ:'', certList:null,
   phone:'', cust:null, custMsg:'', bonusSpend:0,
   sales:[], salesQ:'', stockQ:'', stockRows:[], certs:[], emps:[], busy:false,
-  sel:null, period:'30', from:'', to:'', an:null, anMode:'sales', sa:null, saGroup:'category', saFilter:{}, saItems:null, saKey:null, stockSort:'total', wmode:null, st:{ site:'moon', status:'review', q:'', off:0, data:null, open:null, cands:null, cq:'', cfound:[] }, doc:null, dq:'', dfound:[], audit:null, auditRows:[], whList:[], trList:[],
+  sel:null, period:'30', from:'', to:'', an:null, anMode:'sales', sa:null, saGroup:'category', saFilter:{}, saItems:null, saKey:null, stockSort:'total', stockDir:'desc', wmode:null, nm:{ q:'', cat:'', arch:false, off:0, data:null, cats:null, ed:null, sq:'', sfound:[], busy:false }, st:{ site:'moon', status:'review', q:'', off:0, data:null, open:null, cands:null, cq:'', cfound:[] }, doc:null, dq:'', dfound:[], audit:null, auditRows:[], whList:[], trList:[],
 };
 
 /* ---------- утилиты ---------- */
@@ -154,7 +154,7 @@ async function boot(){
 /* ---------- каркас ---------- */
 function renderShell(){
   const tabs = [['pos','Продажа'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты']];
-  if(isBoss()) { tabs.splice(1,0,['analytics','Аналитика']); tabs.push(['site','Сайт']); tabs.push(['emps','Сотрудники']); }
+  if(isBoss()) { tabs.splice(1,0,['analytics','Аналитика']); tabs.push(['nom','Номенклатура']); tabs.push(['site','Сайт']); tabs.push(['emps','Сотрудники']); }
   $('#app').innerHTML = `<header id="hdr"></header><main id="main"></main>
     <nav class="tabs" role="tablist">${tabs.map(([v,t])=>`<button role="tab" data-view="${v}">${t}</button>`).join('')}</nav>`;
   document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => { S.view = b.dataset.view; render(); scrollTo(0,0); });
@@ -174,7 +174,7 @@ function renderHeader(){
 function render(){
   document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === S.view));
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, analytics:renderAnalytics, wh:renderWh, site:renderSite })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -389,14 +389,14 @@ function openReturn(id){
 
 /* ---------- остатки ---------- */
 async function loadStockView(){
-  const sortCol = S.stockSort === 'total' ? null : +S.stockSort;
+  const byName = S.stockSort === 'name', sortCol = (S.stockSort === 'total' || byName) ? null : +S.stockSort, dir = S.stockDir === 'asc' ? 1 : -1;
   if(S.stockQ.trim()){
     const found = searchCatalog(S.stockQ).slice(0,100);
     await loadStock(found.map(p=>p.id));
     const q = p => { const st = S.stock[p.id]||{}; return sortCol ? (st[sortCol]||0) : S.allStores.reduce((a,x)=>a+(st[x.id]||0),0); };
-    S.stockRows = found.sort((a,b)=>q(b)-q(a));
+    S.stockRows = byName ? found.sort((a,b)=>dir*-1*a.name.localeCompare(b.name,'ru')) : found.sort((a,b)=>dir*(q(a)-q(b)));
   } else {
-    const { data, error } = await sb.rpc('stock_top', { p_sort_store: sortCol, p_stores: null, p_limit: 200, p_offset: 0 });
+    const { data, error } = await sb.rpc('stock_top2', { p_sort_store: sortCol, p_order: byName ? (S.stockDir==='asc'?'name_desc':'name_asc') : S.stockDir, p_limit: 200, p_offset: 0 });
     if(error) return toast(errText(error));
     const byId = new Map(S.catalog.map(a=>[a[0],a]));
     S.stockRows = (data||[]).map(r => { S.stock[r.product_id] = Object.fromEntries(Object.entries(r.per_store).map(([k,v])=>[+k,v]));
@@ -404,13 +404,15 @@ async function loadStockView(){
   }
 }
 function renderStock(){
-  const sortCol = S.stockSort === 'total' ? null : +S.stockSort;
-  const th = (key, label) => `<th><button class="btn small" data-ssort="${key}" style="${String(S.stockSort)===String(key)?'background:var(--ink);color:var(--surface)':''}">${label} ↓</button></th>`;
+  const sortCol = (S.stockSort === 'total' || S.stockSort === 'name') ? null : +S.stockSort;
+  const act = key => String(S.stockSort)===String(key);
+  const arrow = key => !act(key) ? '↕' : key==='name' ? (S.stockDir==='asc'?'Я→А':'А→Я') : (S.stockDir==='asc'?'↑':'↓');
+  const th = (key, label) => `<th><button class="btn small" data-ssort="${key}" style="${act(key)?'background:var(--ink);color:var(--surface)':''}">${label} ${arrow(key)}</button></th>`;
   $('#main').innerHTML = `<h2>Остатки по магазинам</h2>
     <div class="filters"><input id="stq" style="flex:1" placeholder="Название, штрихкод или артикул (пусто — все товары)" value="${esc(S.stockQ)}"><button class="btn" id="stq-go">Найти</button>
       <select id="stsort"><option value="total" ${S.stockSort==='total'?'selected':''}>Сортировать: всего по сети</option>${S.allStores.map(st=>`<option value="${st.id}" ${String(S.stockSort)===String(st.id)?'selected':''}>Сортировать: ${esc(BRAND[st.brand]+' · '+st.address)}</option>`).join('')}</select></div>
-    <p class="meta">${S.stockQ.trim()?'Найденные товары':'Топ-200 товаров по остатку'}, по убыванию ${sortCol?'в магазине '+esc(storeName(sortCol)):'по всей сети'}. Нажмите на заголовок магазина, чтобы отсортировать по нему.</p>
-    ${S.stockRows.length?`<div class="scroll"><table><thead><tr><th>Товар</th>${S.allStores.map(st=>th(st.id, esc(BRAND[st.brand])+'<br>'+esc(st.address))).join('')}${th('total','Всего')}<th></th></tr></thead><tbody>
+    <p class="meta">${S.stockQ.trim()?'Найденные товары':'200 товаров'}: ${S.stockSort==='name'?'по названию':(S.stockDir==='asc'?'от меньшего остатка к большему':'от большего остатка к меньшему')+' '+(sortCol?'в магазине '+esc(storeName(sortCol)):'по всей сети')}. Нажмите на заголовок столбца, чтобы сортировать по нему; повторное нажатие — в обратную сторону.${S.stockDir==='asc'&&S.stockSort!=='name'?' Товары с нулевым остатком не показываются.':''}</p>
+    ${S.stockRows.length?`<div class="scroll"><table><thead><tr>${th('name','Товар')}${S.allStores.map(st=>th(st.id, esc(BRAND[st.brand])+'<br>'+esc(st.address))).join('')}${th('total','Всего')}<th></th></tr></thead><tbody>
     ${S.stockRows.map(p=>{ const st=S.stock[p.id]||{}; const qs=S.allStores.map(x=>st[x.id]||0);
       return `<tr><td><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)} · ${fmt(p.price)}</span></td>${qs.map((n,i)=>`<td class="num" style="${n?'':'color:var(--muted)'};${S.allStores[i].id===sortCol?'background:var(--soft)':''}">${n}</td>`).join('')}
       <td class="num" style="${sortCol?'':'background:var(--soft)'}"><b>${qs.reduce((a,b)=>a+b,0)}</b></td><td><button class="btn small" data-hist="${p.id}">История</button></td></tr>`}).join('')}</tbody></table></div>`
@@ -696,6 +698,88 @@ function renderStockAn(){
     <p class="meta">Материал и цвет взяты из Google-таблицы товаров, а где их там нет — из названия. Товары без материала стоят в строке «Не указан».</p>`}`;
 }
 
+/* ---------- номенклатура ---------- */
+const NM_EMPTY = () => ({ id:null, barcode:'', sku:'', name:'', price:'', cost:'', category_id:'', material:'', color:'', supplier:'', purchase_url:'', photo_url:'', is_basic:false, archived:false, sites:[] });
+async function loadNom(){
+  const f = S.nm; f.data = null;
+  if(!f.cats){ const { data } = await sb.from('categories').select('id,name').order('name'); f.cats = data || []; }
+  const { data, error } = await sb.rpc('product_list', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:50 });
+  if(error){ toast(errText(error)); f.data = { rows:[], total:0 }; } else f.data = data;
+}
+function renderNom(){
+  const f = S.nm, D = f.data, e = f.ed, cats = f.cats || [];
+  const inp = (k, label, extra='') => `<label class="stack" style="gap:4px"><span class="label">${label}</span><input data-nf="${k}" value="${esc(e[k]??'')}" ${extra}></label>`;
+  $('#main').innerHTML = `<div class="row"><h2>Номенклатура</h2><button class="btn primary" id="nm-new">+ Новый товар</button></div>
+  <div class="grid2">
+   <div>
+    <div class="filters"><input id="nm-q" placeholder="Штрихкод, артикул или название" value="${esc(f.q)}" style="flex:1;min-width:180px">
+      <select id="nm-cat"><option value="">Все категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+      <label class="meta" style="align-self:center"><input type="checkbox" id="nm-arch" ${f.arch?'checked':''}> архив</label></div>
+    ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}</p>
+    <div class="list">${D.rows.map(p=>`<button class="prod" data-nmopen="${p.id}" style="${e&&e.id===p.id?'background:var(--soft)':''}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)} · остаток ${p.stock}</span>
+      ${(p.sites||[]).length?'<span class="chip ok">на сайте</span>':''}${p.is_basic?'<span class="chip">базовый</span>':''}</span><span class="price num">${fmt(p.price)}</span></button>`).join('') || '<div class="empty">Ничего не найдено</div>'}</div>
+    ${f.off||D.rows.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-nmpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-nmpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`}
+   </div>
+   <div>${!e?'<div class="card empty">Выберите товар слева или создайте новый</div>':`<div class="card stack">
+     <div class="row"><h2 style="margin:0">${e.id?'Карточка товара':'Новый товар'}</h2><button class="btn small" id="nm-close">Закрыть</button></div>
+     <div class="row" style="justify-content:flex-start;align-items:flex-start">
+       ${e.photo_url?`<img src="${esc(e.photo_url)}" alt="" style="width:120px;height:120px;object-fit:cover;border-radius:12px">`:'<span class="thumb" style="width:120px;height:120px"></span>'}
+       <div class="stack" style="flex:1"><span class="label">Фото</span>
+         <input type="file" id="nm-photo" accept="image/*" aria-label="Загрузить фото">
+         <input data-nf="photo_url" placeholder="или ссылка на картинку" value="${esc(e.photo_url||'')}">
+         ${f.busy?'<span class="meta">Загружаем фото…</span>':''}</div></div>
+     ${inp('name','Название *')}
+     <div class="grid2" style="grid-template-columns:1fr 1fr;gap:10px">
+       ${inp('barcode','Штрихкод', 'placeholder="пусто — создать свой"')}${inp('sku','Артикул')}
+       ${inp('price','Розничная цена, ₸ *','type="number" min="0" inputmode="numeric"')}${inp('cost','Закупочная цена, ₸','type="number" min="0" inputmode="numeric"')}
+       <label class="stack" style="gap:4px"><span class="label">Категория</span><select data-nf="category_id"><option value="">—</option>${cats.map(c=>`<option value="${c.id}" ${String(e.category_id)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label>
+       ${inp('material','Материал','list="nm-mats"')}${inp('color','Цвет','list="nm-colors"')}${inp('supplier','Поставщик')}
+     </div>
+     <datalist id="nm-mats">${['Серебро 925','Нержавейка','Мед сплав','Пластик','мельхиор','Жемчуг','Кожа','другой'].map(m=>`<option value="${m}">`).join('')}</datalist>
+     <datalist id="nm-colors">${['золото','серебро','цветной','черный'].map(m=>`<option value="${m}">`).join('')}</datalist>
+     ${inp('purchase_url','Ссылка на закуп (1688 и т.п.)')}
+     <div class="row" style="justify-content:flex-start;gap:16px"><label><input type="checkbox" data-nf="is_basic" ${e.is_basic?'checked':''}> Базовый товар (для рекомендаций дозаказа)</label>
+       <label><input type="checkbox" data-nf="archived" ${e.archived?'checked':''}> В архиве</label></div>
+     <div class="row"><span>${e.id&&e.barcode?`<button class="btn small" data-labels='${esc(JSON.stringify([{n:e.name,b:e.barcode,p:+e.price,q:1}]))}'>Этикетка</button>`:''}</span>
+       <button class="btn primary" id="nm-save">${e.id?'Сохранить':'Создать товар'}</button></div>
+     <div class="cust stack"><span class="label">Связь с сайтом</span>
+       ${!e.id?'<span class="meta">Сначала сохраните товар</span>':`
+       ${(e.sites||[]).map(x=>`<div class="row"><span>${x.site==='moon'?'MOON':'Sunshine'}: ${esc(x.title)} ${x.url?`<a href="${esc(x.url)}" target="_blank" rel="noopener">открыть</a>`:''}</span><button class="btn small" data-nmunlink="${x.site}:${x.uid}">Отвязать</button></div>`).join('') || '<span class="meta">Не связан с сайтом</span>'}
+       <input id="nm-sq" placeholder="Найти карточку на сайте по названию" value="${esc(f.sq)}" autocomplete="off">
+       ${f.sfound.map(x=>`<button class="prod" data-nmlink="${x.site}:${x.uid}">${thumb({photo_url:x.photo})}<span><b>${esc(x.title)}</b><br><span class="meta">${x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'}${x.linked_to?' · сейчас связан с: '+esc(x.linked_to):''}</span></span><span class="price num">${fmt(x.price)}</span></button>`).join('')}`}
+     </div>
+   </div>`}</div>
+  </div>`;
+}
+function nmOpen(p){ S.nm.ed = { ...NM_EMPTY(), ...p, category_id: p.category_id??'', cost: p.cost??'', supplier: p.supplier||'', sites: p.sites||[] }; S.nm.sq=''; S.nm.sfound=[]; render(); }
+async function nmSave(){
+  const e = S.nm.ed; if(!e) return;
+  const { data, error } = await sb.rpc('product_save', { p: { ...e, sites: undefined } });
+  if(error) return toast(errText(error));
+  toast(e.id ? 'Сохранено' : 'Товар создан, штрихкод '+data.barcode);
+  e.id = data.id; e.barcode = data.barcode;
+  const row = [e.id, e.barcode, e.sku||'', e.name, Number(e.price), e.photo_url||''];
+  const i = S.catalog.findIndex(a=>a[0]===e.id); if(i>=0) S.catalog[i]=row; else S.catalog.push(row);
+  try{ ls.set('kassa_catalog3', { at:S.catalogAt, items:S.catalog }); }catch(_){}
+  await loadNom(); const fresh = S.nm.data.rows.find(r=>r.id===e.id); if(fresh) nmOpen(fresh); else render();
+}
+async function nmPhoto(file){
+  const e = S.nm.ed; if(!file || !e) return;
+  S.nm.busy = true; render();
+  try{
+    const img = await createImageBitmap(file); const k = Math.min(1, 1200/Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.round(img.width*k); c.height = Math.round(img.height*k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
+    const path = `${e.id || 'new'}/${Date.now()}.jpg`;
+    const { error } = await sb.storage.from('product-photos').upload(path, blob, { contentType:'image/jpeg', upsert:true });
+    if(error) throw error;
+    e.photo_url = sb.storage.from('product-photos').getPublicUrl(path).data.publicUrl;
+    toast('Фото загружено — нажмите «Сохранить»');
+  }catch(err){ toast('Фото не загрузилось: '+errText(err)); }
+  S.nm.busy = false; render();
+}
+
 /* ---------- сайт ↔ база ---------- */
 const SITE_ST = [['review','Проверить'],['auto','Связано автоматически'],['confirmed','Подтверждено'],['none','Без пары'],['rejected','Нет в базе']];
 const SITE_NAME = { moon:'mooncollection.kz', sunshine:'sunshinejewelry.kz' };
@@ -807,6 +891,14 @@ document.addEventListener('click', async e => {
   else if(d.estores){ const [eid, sid] = d.estores.split(':'); const e = S.emps.find(x=>x.id===eid); if(e){ const cur = new Set(e.store_ids||(e.home_store_id?[e.home_store_id]:[])); t.checked ? cur.add(+sid) : cur.delete(+sid); e.store_ids=[...cur].sort((a,b)=>a-b); updEmp(eid, { store_ids: e.store_ids }); } }
   else if(d.sgroup){ const g=d.sgroup; S.sel = S.stores.filter(st => g==='all' || st.brand===g || st.city===g).map(st=>st.id); onSelChange(); }
   else if(d.sone){ const id=+d.sone; selStores(); S.sel = t.checked ? [...new Set([...S.sel, id])] : S.sel.filter(x=>x!==id); if(!S.sel.length) S.sel=[id]; onSelChange(); }
+  else if(t.id==='nm-new'){ nmOpen({}); }
+  else if(t.id==='nm-close'){ S.nm.ed=null; render(); }
+  else if(t.id==='nm-save'){ t.disabled=true; await nmSave(); }
+  else if(d.nmopen){ const p=(S.nm.data&&S.nm.data.rows||[]).find(r=>r.id===d.nmopen); if(p) nmOpen(p); }
+  else if(d.nmpage){ S.nm.off=Math.max(0,S.nm.off+50*(+d.nmpage)); render(); await loadNom(); render(); }
+  else if(d.nmlink||d.nmunlink){ const key=d.nmlink||d.nmunlink, [site,uid]=key.split(':');
+    const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product: d.nmlink?S.nm.ed.id:null, p_status: d.nmlink?'confirmed':'rejected' });
+    if(error) toast(errText(error)); else { toast(d.nmlink?'Связано с сайтом':'Отвязано'); S.nm.sq=''; S.nm.sfound=[]; await loadNom(); const fr=S.nm.data.rows.find(r=>r.id===S.nm.ed.id); if(fr) nmOpen(fr); else render(); } }
   else if(d.stsite){ S.st.site=d.stsite; S.st.off=0; S.st.open=null; render(); await loadSite(); render(); }
   else if(d.ststatus){ S.st.status=d.ststatus; S.st.off=0; S.st.open=null; render(); await loadSite(); render(); }
   else if(d.stpage){ S.st.off=Math.max(0,S.st.off+50*(+d.stpage)); S.st.open=null; render(); await loadSite(); render(); window.scrollTo(0,0); }
@@ -832,18 +924,22 @@ document.addEventListener('click', async e => {
     modal(`<h2>Закрыть ревизию?</h2><p>${full?'Все товары, которые не посчитали, будут обнулены в этом магазине.':'Остатки поправятся только по посчитанным товарам.'}</p>
       <div class="row"><button class="btn" data-close>Отмена</button><button class="btn primary" data-auclose="${full?1:0}">Закрыть ревизию</button></div>`); }
   else if(d.auclose!=null){ const { error } = await sb.rpc('close_audit', { p_audit:S.audit.id, p_full:d.auclose==='1' }); closeModal(); if(error) toast(errText(error)); else { toast('Ревизия закрыта, остатки поправлены'); await loadAudit(); render(); } }
-  else if(d.ssort){ S.stockSort = d.ssort; await loadStockView(); render(); }
+  else if(d.ssort){ if(String(S.stockSort)===d.ssort) S.stockDir = S.stockDir==='desc'?'asc':'desc'; else { S.stockSort = d.ssort; S.stockDir = 'desc'; } await loadStockView(); render(); }
   else if(d.period){ S.period=d.period; if(d.period!=='custom'){ S.an=null; render(); await loadAnalytics(); } render(); }
   else if(t.id==='an-go'){ S.from=$('#an-from').value; S.to=$('#an-to').value; S.an=null; render(); await loadAnalytics(); render(); }
 });
-document.addEventListener('change', e => {
+document.addEventListener('change', async e => {
   const t = e.target, d = t.dataset;
   if(d.erole) updEmp(d.erole, { role:t.value });
   if(d.estore) updEmp(d.estore, { home_store_id: t.value ? +t.value : null });
+  if(t.id==='nm-cat'){ S.nm.cat=t.value; S.nm.off=0; render(); await loadNom(); render(); }
+  if(t.id==='nm-arch'){ S.nm.arch=t.checked; S.nm.off=0; render(); await loadNom(); render(); }
+  if(t.id==='nm-photo'){ nmPhoto(t.files[0]); }
+  if(d.nf && (t.type==='checkbox' || t.tagName==='SELECT')){ S.nm.ed[d.nf] = t.type==='checkbox' ? t.checked : t.value; }
   if(t.id==='d-store'){ S.doc.store=+t.value; }
   if(t.id==='d-to'){ S.doc.to=+t.value; }
   if(d.acset){ sb.rpc('audit_count', { p_audit:S.audit.id, p_product:d.acset, p_delta:0, p_set:Math.max(0,+t.value||0) }).then(async r=>{ if(r.error) toast(errText(r.error)); await loadAudit(); render(); }); }
-  if(t.id==='stsort'){ S.stockSort = t.value; loadStockView().then(render); }
+  if(t.id==='stsort'){ S.stockSort = t.value; S.stockDir='desc'; loadStockView().then(render); }
 });
 document.addEventListener('input', e => {
   const t = e.target, d = t.dataset;
@@ -854,6 +950,9 @@ document.addEventListener('input', e => {
   else if(d.pamt){ S.pays[d.pamt] = Math.max(0,+t.value||0); if(d.pamt==='bonus') S.pays.bonus = Math.min(S.pays.bonus, maxBonus()); render(); }
   else if(t.id==='cert-code'){ S.certCode = t.value; }
   else if(t.id==='cert-q'){ S.certQ = t.value; render(); }
+  else if(t.id==='nm-q'){ S.nm.q=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ S.nm.off=0; await loadNom(); render(); }, 400); }
+  else if(d.nf && t.type!=='checkbox' && t.tagName!=='SELECT'){ S.nm.ed[d.nf]=t.value; }
+  else if(t.id==='nm-sq'){ S.nm.sq=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ if(S.nm.sq.trim().length<2){ S.nm.sfound=[]; return render(); } const { data } = await sb.rpc('site_search', { p_q:S.nm.sq.trim() }); S.nm.sfound=data||[]; render(); }, 400); }
   else if(t.id==='st-q'){ S.st.q=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ S.st.off=0; await loadSite(); render(); }, 400); }
   else if(t.id==='st-cq'){ S.st.cq=t.value; S.st.cfound=searchCatalog(t.value); render(); }
   else if(t.id==='dq'){ S.dq=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ S.dfound=searchCatalog(S.dq); render(); }, 200); }
@@ -880,6 +979,7 @@ document.addEventListener('click', async e => {
   if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); }
   if(S.view==='stock' && !S.stockRows.length){ await loadStockView(); render(); }
   if(S.view==='site'){ render(); await loadSite(); render(); }
+  if(S.view==='nom'){ render(); await loadNom(); render(); }
   if(S.view==='analytics'){ S.an=null; render(); await loadAnalytics(); render(); }
 });
 
