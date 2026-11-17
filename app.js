@@ -198,10 +198,22 @@ function renderShell(){
   if(tabs.length && !tabs.some(([v]) => v===S.view)) S.view = tabs[0][0];
   if(isViewer()){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pos' && v!=='emps')); if(!S.view || S.view==='pos' || S.view==='emps') S.view = 'analytics'; }
 
-  $('#app').innerHTML = `<header id="hdr"></header><main id="main"></main>
-    <nav class="tabs" role="tablist">${tabs.map(([v,t])=>`<button role="tab" data-view="${v}">${t}</button>`).join('')}</nav>`;
-  document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = async () => { S.view = b.dataset.view; render(); scrollTo(0,0); if(S.view==='shifts'){ await loadShifts(); render(); } });
+  S.tabs = tabs;
+  $('#app').innerHTML = `<header id="hdr"></header><nav class="subtabs" id="subnav" role="tablist"></nav><main id="main"></main>
+    <nav class="tabs" id="mainnav" role="tablist"></nav>`;
   renderHeader();
+}
+// вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
+const GROUPS = [['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['stock','wh','nom','site']],
+  ['clients','💳','Клиенты',['bonus','certs']],['analytics','📈','Аналитика',['analytics']],['team','👥','Сотрудники',['emps']]];
+const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
+function renderNav(){
+  const tabs = S.tabs || [], has = v => tabs.some(t => t[0]===v), title = v => (tabs.find(t=>t[0]===v)||[])[1];
+  const cur = groupOf(S.view); (S.lastView ||= {})[cur[0]] = S.view;
+  const rq = S.reqCount ? ` (${S.reqCount})` : '';
+  const mn = $('#mainnav'); if(mn) mn.innerHTML = GROUPS.filter(g => g[3].some(has)).map(g => `<button role="tab" data-group="${g[0]}" aria-selected="${g===cur}"><span class="ico">${g[1]}</span>${g[2]}${g[0]==='goods'?rq:''}</button>`).join('');
+  const av = cur[3].filter(has), sn = $('#subnav');
+  if(sn){ sn.hidden = av.length < 2; sn.innerHTML = av.map(v => `<button role="tab" data-view="${v}" aria-selected="${v===S.view}">${title(v)}${v==='wh'?rq:''}</button>`).join(''); }
 }
 function renderHeader(){
   const h = $('#hdr'); if(!h) return;
@@ -217,7 +229,7 @@ function renderHeader(){
 }
 function render(){
   document.body.classList.toggle('readonly', !canEdit(S.store));
-  document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === S.view));
+  renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
   ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
@@ -485,14 +497,14 @@ const WH = {
   requests:  { t:'Запросы', boss:false, hint:'Консультант на кассе просит оприходовать товар, которого нет по системе. Менеджер подтверждает — товар сразу приходуется в этот магазин.' },
   receipt:   { t:'Приёмка', boss:true, hint:'Товар от поставщика. Закупочная цена обновится, после проведения можно напечатать этикетки.' },
   capitalize:{ t:'Оприходование', boss:true, hint:'Излишки и найденный товар без поставщика.' },
-  writeoff:  { t:'Списание', boss:true, hint:'Брак, потеря, подарок. Причина обязательна.' },
+  writeoff:  { t:'Списание', boss:false, hint:'Брак, потеря, подарок. Причина обязательна. Списание сначала уходит на подтверждение директору (Астана — Ирине Николаевне) и проводится только после «Списать».' },
   transfer:  { t:'Перемещение', boss:false, hint:'Создаёт перемещение менеджер. Товар списывается в магазине-отправителе сразу, а в магазине-получателе — когда там нажмут «Принять».' },
   audit:     { t:'Ревизия', boss:false, hint:'Сканируйте товар на полке — каждое сканирование +1. Продажи во время ревизии учитываются. Закрывает менеджер.' },
 };
 function whModes(){ return Object.entries(WH).filter(([k,v]) => !v.boss || isBoss()); }
 function newDoc(mode){ return { mode, store:S.store, to:(S.stores.find(x=>x.id!==S.store)||{}).id, supplier:'', note:'', reason:'', items:[] }; }
 async function loadReqs(){ const { data, error } = await sb.rpc('requests_list', { p_status: S.reqSt||'pending' }); if(error) toast(errText(error)); S.reqs = data||[]; if((S.reqSt||'pending')==='pending') setReqBadge(S.reqs.length); }
-function setReqBadge(n){ S.reqCount=n; const b=document.querySelector('nav.tabs [data-view="wh"]'); if(b) b.textContent = n ? `Склад (${n})` : 'Склад'; }
+function setReqBadge(n){ S.reqCount=n; renderNav(); }
 function renderReqs(head){
   const st = S.reqSt||'pending';
   $('#main').innerHTML = `<h2>Склад</h2>${head}
@@ -523,7 +535,8 @@ async function loadWhSide(){
   if(S.wmode==='requests'){ await loadReqs(); return; }
   if(S.wmode==='transfer'){ const { data } = await sb.rpc('transfers_list', { p_store: isBoss()?null:S.store }); S.trList = data||[]; }
   else if(S.wmode==='audit'){ await loadAudit(); }
-  else { const { data } = await sb.rpc('writeoffs_list', { p_store: isBoss()?null:S.store }); S.whList = (data||[]).filter(x => x.kind === S.wmode); }
+  else { const { data } = await sb.rpc('writeoffs_list', { p_store: isBoss()?null:S.store }); S.whList = (data||[]).filter(x => x.kind === S.wmode);
+    if(S.wmode==='writeoff'){ const r = await sb.rpc('writeoff_requests_list', { p_status:null }); S.woReqs = r.data||[]; } }
 }
 async function loadAudit(){
   const { data: open } = await sb.from('audits').select('id,store_id,status,started_at').eq('store_id', S.store).eq('status','counting').limit(1);
@@ -557,8 +570,19 @@ function renderWh(){
         ${m==='receipt'?`<td><input class="small" type="number" min="0" id="dcost-${n}" data-dcost="${n}" value="${i.cost??''}" inputmode="numeric"></td>`:''}
         <td><button class="btn small" data-ddel="${n}">✕</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Добавьте товары сканером или поиском</div>'}
     <div class="row"><span class="meta">Позиций: ${d.items.length} · штук: ${total}</span>
-      <button class="btn primary" id="d-post" ${d.items.length?'':'disabled'}>${{receipt:'Провести приёмку',capitalize:'Оприходовать',writeoff:'Списать',transfer:'Отправить'}[m]}</button></div>
-  </div><div>${m==='transfer'?renderTransfers():renderWhList()}</div></div>`;
+      <button class="btn primary" id="d-post" ${d.items.length?'':'disabled'}>${{receipt:'Провести приёмку',capitalize:'Оприходовать',writeoff:'Отправить на подтверждение',transfer:'Отправить'}[m]}</button></div>
+  </div><div>${m==='transfer'?renderTransfers():m==='writeoff'?renderWoReqs()+renderWhList():renderWhList()}</div></div>`;
+}
+function renderWoReqs(){
+  const L = S.woReqs||[]; if(!L.length) return '';
+  const ST = { pending:['warn','ждёт подтверждения'], approved:['ok','списано'], rejected:['zero','отклонено'] };
+  return `<h2>Запросы на списание</h2>${L.slice(0,30).map(r=>`<div class="card" style="margin-bottom:8px">
+    <div class="row"><b>${esc(storeName(r.store))}</b><span class="chip ${ST[r.status][0]}">${ST[r.status][1]}</span></div>
+    <div class="meta">${tm(r.created_at)} · ${esc(r.by||'')} · причина: ${esc(r.reason)}${r.decided_by?' · решение: '+esc(r.decided_by):''}${r.note?' ('+esc(r.note)+')':''}</div>
+    <div>${(r.items||[]).map(i=>esc(i.name)+' × '+i.qty+' <span class="meta num">'+esc(i.barcode||'')+'</span>').join('<br>')}</div>
+    <div class="meta">Сумма по рознице: ${fmt((r.items||[]).reduce((a,i)=>a+(+i.price||0)*i.qty,0))}</div>
+    ${r.status==='pending'&&r.can_decide?`<div class="row" style="justify-content:flex-start"><button class="btn small primary" data-wook="${r.id}">Списать</button><button class="btn small" data-wono="${r.id}">Отклонить</button></div>`:''}
+  </div>`).join('')}`;
 }
 function renderWhList(){
   return `<h2>Последние документы</h2>${S.whList.length?S.whList.map(x=>`<div class="card" style="margin-bottom:8px">
@@ -611,7 +635,9 @@ async function postDoc(){
     res = await sb.rpc('post_receipt', { p:{ kind:m, store_id:d.store, supplier:d.supplier, note:d.note, items:d.items.map(i=>({ product_id:i.pid, qty:i.qty, unit_cost:i.cost })) } });
   else if(m==='writeoff'){
     if(!d.reason.trim()) return toast('Укажите причину списания');
-    res = await sb.rpc('post_writeoff', { p_store:d.store, p_reason:d.reason, p_items:d.items.map(i=>({ product_id:i.pid, qty:i.qty })) });
+    res = await sb.rpc('request_writeoff', { p_store:+d.store, p_reason:d.reason, p_items:d.items.map(i=>({ product_id:i.pid, qty:i.qty })) });
+    if(res.error) return toast('Не отправлено: '+errText(res.error));
+    toast('Запрос на списание отправлен директору'); S.doc = newDoc(m); await loadWhSide(); render(); return;
   } else if(m==='transfer')
     res = await sb.rpc('create_transfer', { p:{ from_store_id:d.store, to_store_id:d.to, items:d.items.map(i=>({ product_id:i.pid, qty:i.qty })) } });
   if(res.error) return toast('Не проведено: '+errText(res.error));
@@ -1005,8 +1031,8 @@ function renderNom(){
       <select id="nm-cat"><option value="">Все категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
       <label class="meta" style="align-self:center"><input type="checkbox" id="nm-arch" ${f.arch?'checked':''}> архив</label></div>
     ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}</p>
-    <div class="list">${D.rows.map(p=>`<button class="prod" data-nmopen="${p.id}" style="${e&&e.id===p.id?'background:var(--soft)':''}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)} · остаток ${p.stock}</span>
-      ${(p.sites||[]).length?'<span class="chip ok">на сайте</span>':''}${p.is_basic?'<span class="chip">базовый</span>':''}</span><span class="price num">${fmt(p.price)}</span></button>`).join('') || '<div class="empty">Ничего не найдено</div>'}</div>
+    <div class="list">${D.rows.map(p=>`<div style="${e&&e.id===p.id?'background:var(--soft);':''}border-radius:10px"><button class="prod" data-nmopen="${p.id}" style="background:transparent">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta">${esc(nmInfo(p))}</span><br><span class="meta num">${esc(p.barcode)}${p.sku?' · арт. '+esc(p.sku):''} · остаток ${p.stock}</span>
+      ${p.is_basic?'<span class="chip">базовый</span>':''}</span><span class="price num">${fmt(p.price)}</span></button>${nmSiteLinks(p)}</div>`).join('') || '<div class="empty">Ничего не найдено</div>'}</div>
     ${f.off||D.rows.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-nmpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-nmpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`}
    </div>
    <div>${!e?'<div class="card empty">Выберите товар слева или создайте новый</div>':`<div class="card stack">
@@ -1017,6 +1043,8 @@ function renderNom(){
          <input type="file" id="nm-photo" accept="image/*" aria-label="Загрузить фото">
          <input data-nf="photo_url" placeholder="или ссылка на картинку" value="${esc(e.photo_url||'')}">
          ${f.busy?'<span class="meta">Загружаем фото…</span>':''}</div></div>
+     ${e.id?`<div class="cust stack" style="gap:4px"><b>${esc(e.name)}</b><span>${esc(nmInfo(e))||'<span class="meta">категория, цвет и материал не указаны</span>'}</span>
+       <span class="meta num">Штрихкод ${esc(e.barcode)}${e.sku?' · артикул '+esc(e.sku):''} · ${fmt(e.price)}${e.cost!==''&&e.cost!=null?' · закуп '+fmt(e.cost):''} · остаток по сети ${e.stock??'—'}</span>${nmSiteLinks(e)||'<span class="meta">На сайте не найден</span>'}</div>`:''}
      ${inp('name','Название *')}
      <div class="grid2" style="grid-template-columns:1fr 1fr;gap:10px">
        ${inp('barcode','Штрихкод', 'placeholder="пусто — создать свой"')}${inp('sku','Артикул')}
@@ -1040,6 +1068,8 @@ function renderNom(){
    </div>`}</div>
   </div>`;
 }
+function nmInfo(p){ return [p.category, p.color, p.material, p.stone, p.brand, p.supplier?'поставщик '+p.supplier:''].filter(Boolean).join(' · '); }
+function nmSiteLinks(p){ const L=(p.sites||[]).filter(x=>x.url); return L.length?`<div class="meta" style="padding:0 10px 8px">${L.map(x=>`🔗 <a href="${esc(x.url)}" target="_blank" rel="noopener">${x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'}${x.status==='review'?' (связь не проверена)':''}</a>`).join(' &nbsp; ')}</div>`:''; }
 function nmOpen(p){ S.nm.ed = { ...NM_EMPTY(), ...p, category_id: p.category_id??'', cost: p.cost??'', supplier: p.supplier||'', sites: p.sites||[] }; S.nm.sq=''; S.nm.sfound=[]; render(); }
 async function nmSave(){
   const e = S.nm.ed; if(!e) return;
@@ -1322,6 +1352,7 @@ document.addEventListener('click', async e => {
   else if(d.nmlink||d.nmunlink){ const key=d.nmlink||d.nmunlink, [site,uid]=key.split(':');
     const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product: d.nmlink?S.nm.ed.id:null, p_status: d.nmlink?'confirmed':'rejected' });
     if(error) toast(errText(error)); else { toast(d.nmlink?'Связано с сайтом':'Отвязано'); S.nm.sq=''; S.nm.sfound=[]; await loadNom(); const fr=S.nm.data.rows.find(r=>r.id===S.nm.ed.id); if(fr) nmOpen(fr); else render(); } }
+  else if(d.wook||d.wono){ t.disabled=true; const { data, error } = await sb.rpc('decide_writeoff', { p_id:d.wook||d.wono, p_approve:!!d.wook, p_note:null }); if(error){ toast(errText(error)); t.disabled=false; return; } toast(data); await loadWhSide(); render(); }
   else if(d.csdir){ CS.dir=d.csdir; CS.cat=''; render(); }
   else if(d.cscat!=null){ CS.cat=d.cscat; render(); }
   else if(d.csdays){ CS.days=+d.csdays; await loadCash(); render(); }
@@ -1437,7 +1468,11 @@ document.addEventListener('keydown', e => {
 });
 // при переключении вкладок подгружаем данные
 document.addEventListener('click', async e => {
-  const b = e.target.closest('nav.tabs button'); if(!b) return;
+  const b = e.target.closest('nav.tabs button, nav.subtabs button'); if(!b) return;
+  if(b.dataset.group){ const g = GROUPS.find(x=>x[0]===b.dataset.group), av = g[3].filter(v => (S.tabs||[]).some(t=>t[0]===v)); const last = (S.lastView||{})[g[0]]; S.view = av.includes(last) ? last : av[0]; }
+  else S.view = b.dataset.view;
+  render(); scrollTo(0,0);
+  if(S.view==='shifts'){ await loadShifts(); render(); }
   if(S.view==='sales'){ await loadSales(); render(); }
   if(S.view==='certs'){ await loadCerts(); render(); }
   if(S.view==='emps'){ await loadEmps(); render(); }
