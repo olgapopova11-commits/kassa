@@ -752,9 +752,42 @@ async function loadSalesAn(){
     sb.rpc('sales_analytics', { p_stores: ids, p_from: pFrom.toISOString(), p_to: pTo.toISOString() })
   ]);
   if(cur.error){ toast(errText(cur.error)); S.an = null; return; }
+  S.trend = null; loadTrends(from, to, pFrom, pTo);
   S.an = normAn(cur.data);
   S.anPrev = prev.error ? null : normAn(prev.data);
   S.anPrevRange = [pFrom, pTo];
+}
+async function loadTrends(from, to, pFrom, pTo){
+  if(from){ S.trRange = [from, to, pFrom, pTo]; } else [from, to, pFrom, pTo] = S.trRange || [];
+  if(!from) return;
+  const { data, error } = await sb.rpc('sales_trends', { p_stores: selStores(), p_from: from.toISOString(), p_to: to.toISOString(), p_pfrom: pFrom.toISOString(), p_pto: pTo.toISOString(), p_group: S.trG||'category' });
+  S.trend = error ? [] : (data||[]); if(error) toast(errText(error));
+  if(S.view==='analytics' && S.anMode!=='stock') render();
+}
+const TR_GROUPS = [['category','Категории'],['material','Материалы'],['color','Цвета'],['price','Цены'],['store','Магазины'],['supplier','Поставщики']];
+function trendsHtml(){
+  const T = S.trend, g = S.trG||'category';
+  const pct = r => r.prev ? Math.round((r.cur - r.prev) / Math.abs(r.prev) * 100) : null;
+  const rows = (T||[]).filter(r => r.cur || r.prev);
+  const tot = rows.reduce((a,r)=>a+r.cur,0) || 1, totP = rows.reduce((a,r)=>a+r.prev,0);
+  const sig = rows.filter(r => Math.max(r.cur, r.prev) >= Math.max(tot*0.02, 1)); // заметные группы (≥2% выручки)
+  const up = sig.filter(r=>r.cur>r.prev).sort((a,b)=>(b.cur-b.prev)-(a.cur-a.prev)).slice(0,3);
+  const down = sig.filter(r=>r.cur<r.prev).sort((a,b)=>(a.cur-a.prev)-(b.cur-b.prev)).slice(0,3);
+  const share = (v,t) => t ? Math.round(v/t*1000)/10 : 0;
+  const line = (r, sign) => `<li><b>${esc(r.g)}</b>: ${sign>0?'+':'−'}${fmt(Math.abs(r.cur-r.prev))}${pct(r)!==null?` (${pct(r)>0?'+':''}${pct(r)}%)`:' (новое)'}, доля ${share(r.prev,totP)}% → ${share(r.cur,tot)}%</li>`;
+  return `<h2 style="margin-top:18px">Тренды</h2>
+    <div class="filters">${TR_GROUPS.map(([k,t])=>`<button class="btn small ${g===k?'primary':''}" data-trg="${k}">${t}</button>`).join('')}</div>
+    ${!T?'<div class="empty">Считаем тренды…</div>':!rows.length?'<div class="empty">Нет продаж с товарами за период</div>':`
+    <div class="grid2" style="gap:12px;margin-bottom:10px">
+      <div class="card"><div class="label" style="color:var(--ok)">▲ Растут сильнее всего</div>${up.length?`<ul style="margin:6px 0 0;padding-left:18px">${up.map(r=>line(r,1)).join('')}</ul>`:'<div class="meta">Нет заметного роста</div>'}</div>
+      <div class="card"><div class="label" style="color:var(--bad)">▼ Падают сильнее всего</div>${down.length?`<ul style="margin:6px 0 0;padding-left:18px">${down.map(r=>line(r,-1)).join('')}</ul>`:'<div class="meta">Нет заметного падения</div>'}</div>
+    </div>
+    <div class="scroll"><table><thead><tr><th>${TR_GROUPS.find(x=>x[0]===g)[1]}</th><th>Сейчас</th><th>Было</th><th>Изменение</th><th>Штук сейчас / было</th><th>Доля</th></tr></thead><tbody>
+      ${rows.map(r=>{ const p = pct(r); return `<tr><td>${esc(r.g)}</td><td class="num">${fmt(r.cur)}</td><td class="num meta">${fmt(r.prev)}</td>
+        <td class="num" style="font-weight:600;color:${p===null?'var(--muted)':p>0?'var(--ok)':p<0?'var(--bad)':'var(--muted)'}">${p===null?'новое':(p>0?'▲ +':p<0?'▼ ':'')+p+'%'}</td>
+        <td class="num">${r.cur_q} / <span class="meta">${r.prev_q}</span></td><td class="num">${share(r.cur,tot)}%</td></tr>`; }).join('')}
+    </tbody></table></div>
+    <p class="meta">Сравнение с предыдущим периодом такой же длины по выбранным магазинам. «Растут/падают» — группы, у которых больше 2% выручки.</p>`}`;
 }
 function normAn(data){
   const A = { ...data, clients: { size: +data.clients }, byProd: Object.fromEntries((data.byProd||[]).map((p,i)=>[i,p])) };
@@ -874,6 +907,7 @@ function renderSalesAn(){
       <h2>Топ товаров</h2><div class="scroll"><table><thead><tr><th>Товар</th><th>Шт.</th><th>Сумма</th></tr></thead><tbody>
       ${Object.values(A.byProd).sort((a,b)=>b.sum-a.sum).slice(0,20).map(p=>`<tr><td>${esc(p.name)}</td><td class="num">${p.qty}</td><td class="num">${fmt(p.sum)}</td></tr>`).join('') || '<tr><td colspan="3" class="meta">—</td></tr>'}</tbody></table></div>
     </div></div>
+    ${trendsHtml()}
     <p class="meta">Считается по всем чекам: новой кассы и истории из Wipon с 1 января 2026.</p>`}`;
 }
 
@@ -994,7 +1028,38 @@ async function loadStockAn(){
   S.sa = null; S.saItems = null; S.saKey = null;
   const { data, error } = await sb.rpc('stock_analytics', { p_stores: selStores(), p_group: S.saGroup, p_filter: S.saFilter });
   if(error){ toast(errText(error)); S.sa = { rows:[], total:{} }; return; }
-  S.sa = data;
+  S.sa = data; S.turn = null; loadTurnover();
+}
+async function loadTurnover(){
+  const g = ['store','brand'].includes(S.saGroup) ? 'category' : S.saGroup;
+  const { data, error } = await sb.rpc('stock_turnover', { p_stores: selStores(), p_group: g });
+  S.turn = error ? { rows:[], total:{}, stale:[] } : data; S.turnG = g; if(error) toast(errText(error));
+  if(S.view==='analytics' && S.anMode==='stock') render();
+}
+function turnoverHtml(){
+  const U = S.turn; if(!U) return '<div class="empty">Считаем оборачиваемость…</div>';
+  const T = U.total||{}, n = v => (+v||0).toLocaleString('ru-RU'), all = +T.units||1;
+  const cover = d => d==null ? '<span class="meta">не продаётся</span>' : d>365 ? `<span style="color:var(--bad)">${(d/30).toFixed(0)} мес.</span>` : d>180 ? `<span style="color:var(--bad)">${d} дн.</span>` : d>90 ? `<span style="color:#b7791f">${d} дн.</span>` : `${d} дн.`;
+  const gname = (SA_GROUPS.find(x=>x[0]===S.turnG)||[])[1];
+  return `<h2 style="margin-top:18px">Оборачиваемость и залежи</h2>
+  <div class="pays" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr))">
+    ${[['Хватит остатков при текущих продажах', T.cover_days!=null?(T.cover_days>60?Math.round(T.cover_days/30)+' мес.':T.cover_days+' дн.'):'—'],['Продано за 90 дней', n(T.sold90)+' шт.'],
+       ['Лежит без продаж больше 90 дней', n((+T.b180||0)+(+T.b999||0))+' шт.'],['Залежи в рознице', fmt(T.stale_retail||0)],['Залежи по себестоимости', fmt(T.stale_cost||0)]]
+      .map(([k,v])=>`<div class="card"><div class="label">${k}</div><div class="total num" style="font-size:20px">${v}</div></div>`).join('')}
+  </div>
+  <div class="card" style="margin:10px 0"><div class="label">Сколько дней товар лежит без продаж (штук)</div>
+    <div style="display:flex;height:22px;border-radius:6px;overflow:hidden;margin:8px 0">${[['b30','#2f855a','до 30 дн.'],['b90','#68d391','31–90'],['b180','#ecc94b','91–180'],['b999','#e53e3e','больше 180 / не продавался']].map(([k,c,t])=>`<div title="${t}: ${n(T[k])} шт." style="background:${c};width:${(+T[k]||0)/all*100}%"></div>`).join('')}</div>
+    <div class="meta">${[['b30','до 30 дней'],['b90','31–90 дней'],['b180','91–180 дней'],['b999','больше 180 дней или ни разу не продавался']].map(([k,t])=>`${t}: <b>${n(T[k])}</b> (${Math.round((+T[k]||0)/all*100)}%)`).join(' · ')}</div></div>
+  <div class="scroll"><table><thead><tr><th>${gname}</th><th>Штук</th><th>Продано за 90 дн.</th><th>Хватит на</th><th>Без продаж 90+ дн.</th><th>Залежи, розница</th></tr></thead><tbody>
+    ${(U.rows||[]).map(r=>`<tr><td>${esc(r.g)}</td><td class="num">${n(r.units)}</td><td class="num">${n(r.sold90)}</td><td class="num">${cover(r.cover_days)}</td>
+      <td class="num">${n((+r.b180||0)+(+r.b999||0))} <span class="meta">(${Math.round(((+r.b180||0)+(+r.b999||0))/(+r.units||1)*100)}%)</span></td><td class="num">${fmt(r.stale_retail||0)}</td></tr>`).join('')}
+  </tbody></table></div>
+  <h2 style="margin-top:16px">Залежавшиеся товары — больше 90 дней без продаж</h2>
+  <div class="scroll"><table><thead><tr><th></th><th>Товар</th><th>Остаток</th><th>На сумму</th><th>Последняя продажа</th></tr></thead><tbody>
+    ${(U.stale||[]).map(p=>`<tr><td>${thumb(p)}</td><td>${esc(p.name)}<br><span class="meta num">${esc(p.barcode)} · ${esc(p.g||'')}</span></td><td class="num">${p.qty}</td><td class="num">${fmt(p.qty*p.price)}</td>
+      <td class="num">${p.last_sale?dshort(p.last_sale)+'<br><span class="meta">'+p.idle+' дн. назад</span>':'<span class="meta">не продавался с января 2026</span>'}</td></tr>`).join('') || '<tr><td colspan="5" class="meta">Нет залежавшихся товаров</td></tr>'}
+  </tbody></table></div>
+  <p class="meta">«Хватит на» = остаток ÷ средние продажи в день за последние 90 дней. История продаж — с 1 января 2026 (Wipon + новая касса). Показаны первые 60 товаров по сумме.</p>`;
 }
 function renderStockAn(){
   const A = S.sa, ids = selStores(), T = (A && A.total) || {}, units = +T.units || 0;
@@ -1018,6 +1083,7 @@ function renderStockAn(){
     </tbody></table></div>
     ${S.saKey?`<h2 style="margin-top:16px">${esc(S.saKey)}: товары по убыванию остатка</h2>${!S.saItems?'<div class="empty">Загружаем…</div>':`<div class="scroll"><table><thead><tr><th></th><th>Товар</th><th>Цена</th><th>Всего</th>${ids.map(id=>`<th>${esc(storeName(id))}</th>`).join('')}</tr></thead><tbody>
       ${S.saItems.map(p=>`<tr><td>${thumb(p)}</td><td>${esc(p.name)}<br><span class="meta num">${esc(p.barcode)}</span></td><td class="num">${fmt(p.price)}</td><td class="num"><b>${p.total}</b></td>${ids.map(id=>`<td class="num">${p.per_store[id]??'—'}</td>`).join('')}</tr>`).join('')}</tbody></table></div><p class="meta">Показаны первые 100.</p>`}`:''}
+    ${turnoverHtml()}
     <p class="meta">Материал и цвет взяты из Google-таблицы товаров, а где их там нет — из названия. Товары без материала стоят в строке «Не указан».</p>`}`;
 }
 
@@ -1287,10 +1353,17 @@ async function loadPay(){
   const jobs = [ sb.rpc('payroll', { p_from:from, p_to:to, p_stores: isBoss() ? selStores() : null }) ];
   const tabel = S.me && ['owner','manager'].includes(S.me.role);
   if(tabel){ PY.store = PY.store || S.store; jobs.push(sb.rpc('work_hours_list', { p_store:PY.store, p_day:PY.day })); if(!S.emps) jobs.push(loadEmps()); }
-  const [p, w] = await Promise.all(jobs);
-  if(p.error) toast(errText(p.error)); PY.data = p.data || [];
+  jobs.unshift(sb.rpc('pay_adj_list', { p_month: from }));
+  const [aj, p, w] = await Promise.all(jobs);
+  if(p.error) toast(errText(p.error)); PY.data = p.data || []; PY.adj = aj.data || [];
+  // сотрудники, у которых есть выплаты, но нет часов в этом месяце
+  const have = new Set(PY.data.map(e=>e.employee));
+  for(const a of PY.adj) if(!have.has(a.employee)){ have.add(a.employee);
+    const em = (S.emps||[]).find(x=>x.id===a.employee) || (S.me.id===a.employee ? { full_name:S.me.full_name } : null);
+    PY.data.push({ employee:a.employee, name: em ? em.full_name : '—', total:0, hours:0, days:[] }); }
   if(w) PY.sheet = w.data || [];
 }
+const tabelOk = () => S.me && ['owner','manager'].includes(S.me.role);
 function payRuleText(r){
   if(!r) return 'для магазина нет правила';
   if(r.mode==='each') return `каждому ${r.pct}% от продаж дня, минимум ${fmt(r.min)}`;
@@ -1306,6 +1379,13 @@ function payLine(x){
   const team = (x.team||[]).map(t=>esc(t.name)+' '+t.hours+' ч').join(', ');
   return `<tr><td class="num">${d}</td><td>${esc(storeName(x.store))}<br><span class="meta">${x.kind==='dress'?'переодевание':'на смене: '+team}</span></td><td class="meta">${f}</td><td class="num"><b>${fmt(x.amount)}</b></td></tr>`;
 }
+const PADJ = { bonus:['Бонус',1], audit:['Доплата за ревизию',1], carry_in:['Долг с прошлого месяца',1], fine:['Штраф',-1], overpay:['Переплата в прошлом месяце',-1], advance:['Аванс',0], paid:['Выплачено наличными',0], card:['Переведено на карту',0] };
+function paySum(e){
+  const A = (PY.adj||[]).filter(a=>a.employee===e.employee), by = k => A.filter(a=>a.kind===k).reduce((s,a)=>s+ +a.amount,0);
+  const plus = by('bonus')+by('audit')+by('carry_in'), minus = by('fine')+by('overpay');
+  const due = e.total + plus - minus, paid = by('advance')+by('paid')+by('card');
+  return { A, by, plus, minus, due, paid, rest: due - paid };
+}
 function renderPay(){
   const D = PY.data, tabel = S.me && ['owner','manager'].includes(S.me.role) && !isViewer();
   const total = (D||[]).reduce((a,e)=>a+e.total,0);
@@ -1314,10 +1394,25 @@ function renderPay(){
   ${isBoss()?storeFilterHtml():''}
   <p class="meta">Предварительный расчёт по продажам в кассе и табелю часов. Правила: ${['Курмангазы, Толе би, Гагарина — 12/10% по часам','MOON Курмангазы — 5%','Астана — 6% Sunshine, 3% MOON'].join(' · ')}.</p>
   <div class="grid2"><div>
-   ${!D?'<div class="empty">Считаем…</div>':!D.length?'<div class="empty">За этот месяц нет часов в табеле</div>':`<div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Часы</th><th>Начислено</th></tr></thead><tbody>
-     ${D.map(e=>`<tr><td><button class="btn small" data-pyopen="${e.employee}" style="border:0;background:none;padding:0;font-weight:600">${PY.open===e.employee?'▾':'▸'} ${esc(e.name)}</button></td><td class="num">${e.hours}</td><td class="num"><b>${fmt(e.total)}</b></td></tr>
-       ${PY.open===e.employee || D.length===1?`<tr><td colspan="3" style="padding:0"><table style="margin:0 0 8px"><tbody>${e.days.map(payLine).join('')}</tbody></table></td></tr>`:''}`).join('')}
-     ${D.length>1?`<tr><td><b>Итого</b></td><td></td><td class="num"><b>${fmt(total)}</b></td></tr>`:''}</tbody></table></div>`}
+   ${!D?'<div class="empty">Считаем…</div>':!D.length?'<div class="empty">За этот месяц нет часов в табеле</div>':`<div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Часы</th><th>Начислено</th><th>Бонусы / удержания</th><th>К выплате</th><th>Выплачено</th><th>Остаток</th></tr></thead><tbody>
+     ${D.map(e=>{ const P = paySum(e), open = PY.open===e.employee || D.length===1; return `<tr><td><button class="btn small" data-pyopen="${e.employee}" style="border:0;background:none;padding:0;font-weight:600">${open?'▾':'▸'} ${esc(e.name)}</button></td><td class="num">${e.hours}</td><td class="num">${fmt(e.total)}</td>
+       <td class="num">${P.plus?'+'+fmt(P.plus):''}${P.plus&&P.minus?'<br>':''}${P.minus?'<span style="color:var(--bad)">−'+fmt(P.minus)+'</span>':''}</td><td class="num"><b>${fmt(P.due)}</b></td><td class="num">${P.paid?fmt(P.paid):''}</td>
+       <td class="num" style="color:${P.rest<0?'var(--bad)':P.rest>0?'inherit':'var(--ok)'}"><b>${P.rest<0?'переплата '+fmt(-P.rest):fmt(P.rest)}</b></td></tr>
+       ${open?`<tr><td colspan="7" style="padding:0 0 10px">
+         ${e.days.length?`<table style="margin:0 0 6px"><tbody>${e.days.map(payLine).join('')}</tbody></table>`:''}
+         <div class="cust stack" style="gap:6px"><b>Расчёт</b>
+           <div class="row"><span>Начислено по продажам</span><span class="num">${fmt(e.total)}</span></div>
+           ${P.A.map(a=>`<div class="row"><span>${PADJ[a.kind][0]}${a.note?' <span class="meta">— '+esc(a.note)+'</span>':''} <span class="meta">${dshort(a.at)}</span></span><span class="num">${PADJ[a.kind][1]>0?'+':'−'}${fmt(a.amount)}${tabelOk()?` <button class="btn small" data-padel="${a.id}" title="Удалить">✕</button>`:''}</span></div>`).join('')}
+           <div class="row" style="border-top:1px solid var(--line);padding-top:6px"><b>${P.rest<0?'Переплата (учесть в следующем месяце)':'Остаток к выплате'}</b><b class="num">${fmt(Math.abs(P.rest))}</b></div>
+           ${P.by('card')?`<div class="meta">из них переведено на карту: ${fmt(P.by('card'))}</div>`:''}
+           ${tabelOk()?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
+             <select id="pa-kind-${e.employee}">${Object.entries(PADJ).map(([k,[t]])=>`<option value="${k}">${t}</option>`).join('')}</select>
+             <input id="pa-amt-${e.employee}" class="small" type="number" min="1" inputmode="numeric" placeholder="сумма" style="width:110px">
+             <input id="pa-note-${e.employee}" placeholder="комментарий" style="flex:1;min-width:120px">
+             <button class="btn small primary" data-paadd="${e.employee}">Добавить</button>
+             ${P.rest>0?`<button class="btn small" data-papayall="${e.employee}" data-rest="${Math.round(P.rest)}">Выплатить остаток ${fmt(P.rest)}</button>`:''}</div>`:''}
+         </div></td></tr>`:''}`; }).join('')}
+     ${D.length>1?(()=>{ const T = D.map(paySum).reduce((a,p)=>({due:a.due+p.due, paid:a.paid+p.paid, rest:a.rest+p.rest}),{due:0,paid:0,rest:0}); return `<tr><td><b>Итого</b></td><td></td><td class="num"><b>${fmt(total)}</b></td><td></td><td class="num"><b>${fmt(T.due)}</b></td><td class="num">${fmt(T.paid)}</td><td class="num"><b>${fmt(T.rest)}</b></td></tr>`; })():''}</tbody></table></div>`}
   </div><div>
    ${tabel?`<div class="card stack"><b>Табель часов</b>
      <div class="row" style="flex-wrap:wrap;justify-content:flex-start"><select id="py-store">${S.stores.map(s=>`<option value="${s.id}" ${+PY.store===s.id?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select><input type="date" id="py-day" value="${PY.day}"></div>
@@ -1430,6 +1525,13 @@ document.addEventListener('click', async e => {
     const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product: d.nmlink?S.nm.ed.id:null, p_status: d.nmlink?'confirmed':'rejected' });
     if(error) toast(errText(error)); else { toast(d.nmlink?'Связано с сайтом':'Отвязано'); S.nm.sq=''; S.nm.sfound=[]; await loadNom(); const fr=S.nm.data.rows.find(r=>r.id===S.nm.ed.id); if(fr) nmOpen(fr); else render(); } }
   else if(d.wook||d.wono){ t.disabled=true; const { data, error } = await sb.rpc('decide_writeoff', { p_id:d.wook||d.wono, p_approve:!!d.wook, p_note:null }); if(error){ toast(errText(error)); t.disabled=false; return; } toast(data); await loadWhSide(); render(); }
+  else if(d.trg){ S.trG=d.trg; S.trend=null; render(); loadTrends(); }
+  else if(d.paadd){ const id=d.paadd, amt=+($('#pa-amt-'+id)||{}).value; if(!(amt>0)) return toast('Укажите сумму');
+    const { error } = await sb.rpc('pay_adj_add', { p_employee:id, p_month:PY.month+'-01', p_kind:$('#pa-kind-'+id).value, p_amount:amt, p_note:$('#pa-note-'+id).value });
+    if(error) return toast(errText(error)); toast('Добавлено'); PY.open=id; await loadPay(); render(); }
+  else if(d.papayall){ const { error } = await sb.rpc('pay_adj_add', { p_employee:d.papayall, p_month:PY.month+'-01', p_kind:'paid', p_amount:+d.rest, p_note:'остаток' });
+    if(error) return toast(errText(error)); toast('Отмечено как выплачено'); PY.open=d.papayall; await loadPay(); render(); }
+  else if(d.padel){ const { error } = await sb.rpc('pay_adj_del', { p_id:d.padel }); if(error) return toast(errText(error)); await loadPay(); render(); }
   else if(d.pyopen){ PY.open = PY.open===d.pyopen ? null : d.pyopen; render(); }
   else if(d.pydel){ const [emp,kind]=d.pydel.split(':'); const { error } = await sb.rpc('work_hours_set', { p_store:+PY.store, p_day:PY.day, p_employee:emp, p_hours:0, p_kind:kind }); if(error) toast(errText(error)); else { await loadPay(); render(); } }
   else if(t.id==='py-add'){ if(!PY.add.emp || !(+PY.add.hours>0)) return toast('Выберите сотрудника и часы');
