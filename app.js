@@ -210,6 +210,8 @@ const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 function renderNav(){
   const tabs = S.tabs || [], has = v => tabs.some(t => t[0]===v), title = v => (tabs.find(t=>t[0]===v)||[])[1];
   const cur = groupOf(S.view); (S.lastView ||= {})[cur[0]] = S.view;
+  // магазин выбирают только там, где работают с кассой конкретного магазина
+  const ss = $('#store-sel'); if(ss) ss.hidden = !['pos','shifts','cash'].includes(S.view);
   const rq = S.reqCount ? ` (${S.reqCount})` : '';
   const mn = $('#mainnav'); if(mn) mn.innerHTML = GROUPS.filter(g => g[3].some(has)).map(g => `<button role="tab" data-group="${g[0]}" aria-selected="${g===cur}"><span class="ico">${g[1]}</span>${g[2]}${g[0]==='goods'?rq:''}</button>`).join('');
   const av = cur[3].filter(has), sn = $('#subnav');
@@ -218,7 +220,7 @@ function renderNav(){
 function renderHeader(){
   const h = $('#hdr'); if(!h) return;
   const q = queue();
-  h.innerHTML = `<span class="brand">Касса</span>
+  h.innerHTML = `<span class="brand">MOON · Sunshine</span>
     <select id="store-sel" aria-label="Магазин">${S.stores.map(s=>`<option value="${s.id}" ${s.id===S.store?'selected':''}>${esc(BRAND[s.brand]+' · '+s.city+', '+s.address)}</option>`).join('')}</select>
     <span class="who"><span class="net ${navigator.onLine?'':'off'}">${navigator.onLine?'онлайн':'нет интернета'}</span>
     ${q.length?`<span class="chip warn">в очереди: ${q.length}</span>`:''}
