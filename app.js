@@ -4,6 +4,7 @@ const SB_URL = 'https://ottuadjdksxipfjytlyv.supabase.co';
 const SB_KEY = 'sb_publishable_OyN1810CuHrR9Ys0VTSExA_XY-nO7zo';
 const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
 
+const POS_PAY = ['cash','card','certificate'];
 const PAY = { cash:'Наличные', card:'Карта', kaspi_qr:'Kaspi QR', transfer:'Перевод', invoice:'По счёту', bonus:'Бонусы', certificate:'Сертификат' };
 const ROLE = { owner:'Владелец', manager:'Менеджер', consultant:'Консультант', purchaser:'Закуп' };
 const BRAND = { moon:'MOON', sunshine:'Sunshine' };
@@ -11,7 +12,7 @@ const BRAND = { moon:'MOON', sunshine:'Sunshine' };
 const S = {
   me:null, stores:[], store:null, view:'pos', catalog:[], catalogAt:null,
   q:'', found:[], stock:{},
-  cart:[], discType:'pct', disc:0, pays:{}, certCode:'',
+  cart:[], discType:'pct', disc:0, pays:{}, certCode:'', cert:null, certQ:'', certList:null,
   phone:'', cust:null, custMsg:'', bonusSpend:0,
   sales:[], salesQ:'', stockQ:'', stockRows:[], certs:[], emps:[], busy:false,
   sel:null, period:'30', from:'', to:'', an:null, anMode:'sales', sa:null, saGroup:'category', saFilter:{}, saItems:null, saKey:null, stockSort:'total', wmode:null, doc:null, dq:'', dfound:[], audit:null, auditRows:[], whList:[], trList:[],
@@ -23,8 +24,8 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;
 const fmt = n => Math.round(Number(n)||0).toLocaleString('ru-RU').replace(/ |,/g,' ') + ' ₸';
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c=='x'?r:(r&3|8)).toString(16)}));
 const isBoss = () => S.me && ['owner','manager'].includes(S.me.role);
-const store = () => S.stores.find(s => s.id === S.store) || {};
-const storeName = id => { const s = S.stores.find(x=>x.id===id); return s ? `${BRAND[s.brand]} · ${s.address}` : '—'; };
+const store = () => S.allStores.find(s => s.id === S.store) || {};
+const storeName = id => { const s = S.allStores.find(x=>x.id===id); return s ? `${BRAND[s.brand]} · ${s.address}` : '—'; };
 function selStores(){
   if(!isBoss()) return [S.store];
   if(!S.sel) S.sel = ls.get('kassa_sel', null) || S.stores.map(s=>s.id);
@@ -139,7 +140,12 @@ async function boot(){
     $('#out').onclick = async()=>{ await sb.auth.signOut(); renderLogin(); }; return;
   }
   const st = await sb.from('stores').select('*').eq('active', true).order('id');
-  S.stores = st.data || [];
+  S.allStores = st.data || [];
+  S.stores = ['owner','manager'].includes(me.role) ? S.allStores : S.allStores.filter(s => (me.store_ids||[]).includes(s.id));
+  if(!S.stores.length){
+    $('#app').innerHTML = `<div class="login card"><h2>Магазин не назначен</h2><p>${esc(me.full_name)}, менеджер должен открыть вам доступ к магазину.</p><button class="btn" id="out">Выйти</button></div>`;
+    $('#out').onclick = async()=>{ await sb.auth.signOut(); renderLogin(); }; return;
+  }
   S.store = ls.get('kassa_store', null) || me.home_store_id || (S.stores[0]||{}).id;
   if(!S.stores.some(s=>s.id===S.store)) S.store = (S.stores[0]||{}).id;
   renderShell(); await loadCatalog(); render(); flushQueue();
@@ -173,12 +179,14 @@ function render(){
 }
 
 /* ---------- продажа ---------- */
+function lineDisc(l){ const base=l.price*l.qty, v=+l.dv||0; return Math.round(l.dt==='pct' ? base*Math.min(v,100)/100 : Math.min(v, base)); }
 function totals(){
+  S.cart.forEach(l => { l.disc = lineDisc(l); });
   const sub = S.cart.reduce((a,l)=>a+l.price*l.qty,0);
-  const lineDisc = S.cart.reduce((a,l)=>a+Math.min(l.disc||0, l.price*l.qty),0);
-  const after = sub - lineDisc;
+  const lineDisc_ = S.cart.reduce((a,l)=>a+l.disc,0), lineDiscV = lineDisc_;
+  const after = sub - lineDiscV;
   const chk = Math.round(S.discType==='pct' ? after*Math.min(S.disc||0,100)/100 : Math.min(S.disc||0, after));
-  return { sub, lineDisc, chk, total: after - chk };
+  return { sub, lineDisc: lineDiscV, chk, total: after - chk };
 }
 const paid = () => Object.values(S.pays).reduce((a,v)=>a+(+v||0),0);
 function syncPays(){
@@ -214,7 +222,7 @@ function renderPos(){
      <div class="list">${S.found.length ? S.found.map(p=>{ const s = S.stock[p.id]||{}; const here = s[S.store] ?? null;
         return `<button class="prod" data-add="${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}${p.sku?' · '+esc(p.sku):''}</span><br>
           ${here===null?'<span class="chip">остаток…</span>':`<span class="chip ${here>0?'ok':'zero'}">здесь: ${here}</span>`}
-          ${Object.entries(s).filter(([k,v])=>+k!==S.store&&v>0).slice(0,4).map(([k,v])=>`<span class="chip">${esc((S.stores.find(x=>x.id==k)||{}).address||k)}: ${v}</span>`).join('')}</span>
+          ${Object.entries(s).filter(([k,v])=>+k!==S.store&&v>0).slice(0,4).map(([k,v])=>`<span class="chip">${esc((S.allStores.find(x=>x.id==k)||{}).address||k)}: ${v}</span>`).join('')}</span>
           <span class="price num">${fmt(p.price)}</span></button>`}).join('') : `<div class="empty">${S.q?'Ничего не найдено':'Отсканируйте штрихкод или введите название'}</div>`}</div>
    </div>
    <div class="card stack">
@@ -223,7 +231,8 @@ function renderPos(){
         <span>${esc(l.name)}</span><span class="price num">${fmt(l.price*l.qty-(l.disc||0))}</span>
         <div class="ctrl"><span class="qty"><button data-dec="${i}" aria-label="Меньше">−</button><span class="num">${l.qty}</span><button data-inc="${i}" aria-label="Больше">+</button></span>
         <span class="meta num">× ${fmt(l.price)}</span>
-        <label class="meta">скидка ₸ <input class="small" type="number" min="0" id="ld-${i}" data-ldisc="${i}" value="${l.disc||''}" inputmode="numeric"></label>
+        <span class="meta">скидка</span><div class="seg"><button data-ldt="${i}:pct" aria-pressed="${l.dt==='pct'}">%</button><button data-ldt="${i}:kzt" aria-pressed="${l.dt!=='pct'}">₸</button></div>
+        <input class="small" type="number" min="0" id="ld-${i}" data-ldisc="${i}" value="${l.dv||''}" inputmode="numeric" aria-label="Скидка на товар">${l.disc?`<span class="meta num">−${fmt(l.disc)}</span>`:''}
         <button class="btn small" data-del="${i}">Убрать</button></div></div>`).join('') : '<div class="empty">Чек пуст</div>'}
      <div class="row" style="justify-content:flex-start;flex-wrap:wrap"><span class="label">Скидка на чек</span>
        <div class="seg"><button data-dt="pct" aria-pressed="${S.discType==='pct'}">%</button><button data-dt="kzt" aria-pressed="${S.discType==='kzt'}">₸</button></div>
@@ -245,21 +254,38 @@ function renderPos(){
        <div class="row total"><span>Итого</span><span>${fmt(t.total)}</span></div>
      </div>
      <div><div class="label" style="margin-bottom:6px">Способ оплаты — обязательно</div>
-       <div class="pays">${Object.entries(PAY).filter(([k])=>k!=='bonus'||c).map(([k,v])=>`<div class="pay ${k in S.pays?'on':''}">
+       <div class="pays">${[...POS_PAY, ...(c?['bonus']:[])].map(k=>[k,PAY[k]]).map(([k,v])=>`<div class="pay ${k in S.pays?'on':''}">
          <label><input type="checkbox" data-pay="${k}" ${k in S.pays?'checked':''}>${v}${k==='bonus'?` <span class="meta">до ${fmt(maxBonus()).replace(' ₸','')}</span>`:''}</label>
          ${k in S.pays?`<input type="number" min="0" id="pa-${k}" data-pamt="${k}" value="${S.pays[k]}" inputmode="numeric" aria-label="Сумма ${v}">`:''}
-         ${k==='certificate'&&k in S.pays?`<input type="text" id="cert-code" placeholder="Номер сертификата" value="${esc(S.certCode)}"><button class="btn small" id="cert-check">Проверить</button>`:''}
-       </div>`).join('')}</div></div>
+
+       </div>`).join('')}</div>
+       ${'certificate' in S.pays ? certPickerHtml() : ''}</div>
      ${S.cart.length&&!keys.length?'<div class="warn">Выберите способ оплаты</div>':''}
      ${keys.length&&Math.abs(diff)>=1?`<div class="warn num">${diff>0?'Не хватает '+fmt(diff):'Лишние '+fmt(-diff)}</div>`:''}
-     ${needCode?'<div class="warn">Введите номер сертификата</div>':''}
+     ${needCode?'<div class="warn">Выберите сертификат из списка</div>':''}
      <div class="row"><button class="btn" id="clear" ${S.cart.length?'':'disabled'}>Очистить</button>
        <button class="btn primary" id="checkout" ${canPay?'':'disabled'}>${S.busy?'Проводим…':'Провести чек'}</button></div>
    </div></div>`;
 }
+async function loadCertList(){
+  const { data, error } = await sb.from('certificates').select('code,kind,nominal,balance,expires_at,buyer_name,buyer_phone,recipient_name,recipient_phone,sold_store_id')
+    .eq('status','active').gt('balance',0).order('created_at',{ascending:false}).limit(1000);
+  S.certList = error ? [] : (data||[]).filter(c => !c.expires_at || new Date(c.expires_at) > new Date());
+  if(error) toast(errText(error));
+}
+function certPickerHtml(){
+  if(S.cert) return `<div class="cust" style="margin-top:8px"><div class="row"><span><b>Сертификат ${esc(S.cert.code)}</b><br><span class="meta">остаток ${fmt(S.cert.balance)}${S.cert.recipient_name?' · для '+esc(S.cert.recipient_name):''}</span></span><button class="btn small" id="cert-change">Другой</button></div></div>`;
+  if(!S.certList) return '<div class="meta" style="margin-top:8px">Загружаем сертификаты…</div>';
+  const q = S.certQ.trim().toLowerCase(), qd = q.replace(/\D/g,'');
+  const list = S.certList.filter(c => !q || c.code.toLowerCase().includes(q) || [c.buyer_name,c.recipient_name].some(n=>n&&n.toLowerCase().includes(q)) || (qd.length>=4 && [c.buyer_phone,c.recipient_phone].some(p=>p&&p.replace(/\D/g,'').includes(qd)))).slice(0,8);
+  return `<div class="cust stack" style="margin-top:8px"><span class="label">Сертификат из базы</span>
+    <input id="cert-q" placeholder="Номер, имя или телефон" value="${esc(S.certQ)}" autocomplete="off">
+    ${list.length?`<div class="list" style="margin-top:0">${list.map(c=>`<button class="prod" style="grid-template-columns:minmax(0,1fr) auto" data-certpick="${esc(c.code)}"><span><b class="num">${esc(c.code)}</b><br><span class="meta">${c.kind==='electronic'?'электронный':'физический'}${c.recipient_name?' · для '+esc(c.recipient_name):''}${c.buyer_name?' · купил(а) '+esc(c.buyer_name):''}</span></span><span class="price num">${fmt(c.balance)}</span></button>`).join('')}</div>`
+      :`<div class="meta">${S.certList.length?'Не найдено':'Активных сертификатов пока нет'}</div>`}</div>`;
+}
 function addToCart(p){
   const l = S.cart.find(x=>x.pid===p.id);
-  if(l) l.qty++; else S.cart.push({ pid:p.id, name:p.name, barcode:p.barcode, price:p.price, qty:1, disc:0 });
+  if(l) l.qty++; else S.cart.push({ pid:p.id, name:p.name, barcode:p.barcode, price:p.price, qty:1, disc:0, dt:'pct', dv:0 });
   syncPays(); render();
 }
 async function doSearch(){
@@ -285,7 +311,7 @@ async function checkout(){
   } else {
     const r = await sb.from('sales').select('number,bonus_earned').eq('id', data).single(); number = r.data && r.data.number; snapshot.bonus = r.data && r.data.bonus_earned;
   }
-  S.cart=[]; S.disc=0; S.pays={}; S.certCode=''; S.phone=''; S.cust=null; S.custMsg=''; S.q=''; S.found=[];
+  S.cart=[]; S.disc=0; S.pays={}; S.certCode=''; S.cert=null; S.certQ=''; S.phone=''; S.cust=null; S.custMsg=''; S.q=''; S.found=[];
   render(); showReceipt(snapshot, number, offline);
 }
 function receiptText(s, number){
@@ -340,7 +366,7 @@ function openReturn(id){
   const s = S.sales.find(x=>x.id===id); const back = returnedQty(id);
   const rows = s.sale_items.map(i=>({ i, left: i.qty - (back[i.product_id]||0) })).filter(r=>r.left>0);
   if(!rows.length) return toast('По этому чеку всё уже возвращено');
-  const methods = [...new Set(s.sale_payments.map(p=>p.method).filter(m=>m!=='bonus'))].concat(Object.keys(PAY).filter(k=>k!=='bonus'&&!s.sale_payments.some(p=>p.method===k)));
+  const methods = [...new Set(s.sale_payments.map(p=>p.method).filter(m=>m!=='bonus'))].concat(POS_PAY.filter(k=>!s.sale_payments.some(p=>p.method===k)));
   modal(`<h2>Возврат по чеку №${s.number}</h2><p class="meta">Отметьте количество. Сумма считается из цены в чеке с учётом скидок.</p>
     ${rows.map(({i,left})=>`<label class="row"><span>${esc(i.products?i.products.name:'')}<br><span class="meta">можно вернуть: ${left} · ${fmt(i.total/i.qty)} за шт.</span></span>
       <input class="small" type="number" min="0" max="${left}" value="0" data-rq="${i.product_id}" data-unit="${i.total/i.qty}" data-price="${i.price}"></label>`).join('')}
@@ -367,7 +393,7 @@ async function loadStockView(){
   if(S.stockQ.trim()){
     const found = searchCatalog(S.stockQ).slice(0,100);
     await loadStock(found.map(p=>p.id));
-    const q = p => { const st = S.stock[p.id]||{}; return sortCol ? (st[sortCol]||0) : S.stores.reduce((a,x)=>a+(st[x.id]||0),0); };
+    const q = p => { const st = S.stock[p.id]||{}; return sortCol ? (st[sortCol]||0) : S.allStores.reduce((a,x)=>a+(st[x.id]||0),0); };
     S.stockRows = found.sort((a,b)=>q(b)-q(a));
   } else {
     const { data, error } = await sb.rpc('stock_top', { p_sort_store: sortCol, p_stores: null, p_limit: 200, p_offset: 0 });
@@ -382,11 +408,11 @@ function renderStock(){
   const th = (key, label) => `<th><button class="btn small" data-ssort="${key}" style="${String(S.stockSort)===String(key)?'background:var(--ink);color:var(--surface)':''}">${label} ↓</button></th>`;
   $('#main').innerHTML = `<h2>Остатки по магазинам</h2>
     <div class="filters"><input id="stq" style="flex:1" placeholder="Название, штрихкод или артикул (пусто — все товары)" value="${esc(S.stockQ)}"><button class="btn" id="stq-go">Найти</button>
-      <select id="stsort"><option value="total" ${S.stockSort==='total'?'selected':''}>Сортировать: всего по сети</option>${S.stores.map(st=>`<option value="${st.id}" ${String(S.stockSort)===String(st.id)?'selected':''}>Сортировать: ${esc(BRAND[st.brand]+' · '+st.address)}</option>`).join('')}</select></div>
+      <select id="stsort"><option value="total" ${S.stockSort==='total'?'selected':''}>Сортировать: всего по сети</option>${S.allStores.map(st=>`<option value="${st.id}" ${String(S.stockSort)===String(st.id)?'selected':''}>Сортировать: ${esc(BRAND[st.brand]+' · '+st.address)}</option>`).join('')}</select></div>
     <p class="meta">${S.stockQ.trim()?'Найденные товары':'Топ-200 товаров по остатку'}, по убыванию ${sortCol?'в магазине '+esc(storeName(sortCol)):'по всей сети'}. Нажмите на заголовок магазина, чтобы отсортировать по нему.</p>
-    ${S.stockRows.length?`<div class="scroll"><table><thead><tr><th>Товар</th>${S.stores.map(st=>th(st.id, esc(BRAND[st.brand])+'<br>'+esc(st.address))).join('')}${th('total','Всего')}<th></th></tr></thead><tbody>
-    ${S.stockRows.map(p=>{ const st=S.stock[p.id]||{}; const qs=S.stores.map(x=>st[x.id]||0);
-      return `<tr><td><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)} · ${fmt(p.price)}</span></td>${qs.map((n,i)=>`<td class="num" style="${n?'':'color:var(--muted)'};${S.stores[i].id===sortCol?'background:var(--soft)':''}">${n}</td>`).join('')}
+    ${S.stockRows.length?`<div class="scroll"><table><thead><tr><th>Товар</th>${S.allStores.map(st=>th(st.id, esc(BRAND[st.brand])+'<br>'+esc(st.address))).join('')}${th('total','Всего')}<th></th></tr></thead><tbody>
+    ${S.stockRows.map(p=>{ const st=S.stock[p.id]||{}; const qs=S.allStores.map(x=>st[x.id]||0);
+      return `<tr><td><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)} · ${fmt(p.price)}</span></td>${qs.map((n,i)=>`<td class="num" style="${n?'':'color:var(--muted)'};${S.allStores[i].id===sortCol?'background:var(--soft)':''}">${n}</td>`).join('')}
       <td class="num" style="${sortCol?'':'background:var(--soft)'}"><b>${qs.reduce((a,b)=>a+b,0)}</b></td><td><button class="btn small" data-hist="${p.id}">История</button></td></tr>`}).join('')}</tbody></table></div>`
     : '<div class="empty">Загружаем остатки…</div>'}`;
 }
@@ -398,7 +424,7 @@ async function openHistory(pid){
   modal(`<h2>${esc(p.name)}</h2><p class="meta num">${esc(p.barcode)}</p>
     <div class="scroll"><table><thead><tr><th>Когда</th><th>Что</th><th>Магазин</th><th>Шт.</th><th>Кто</th></tr></thead><tbody>
     ${data.map(m=>`<tr><td class="num">${new Date(m.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}</td><td>${T[m.type]||m.type}</td>
-      <td>${esc((S.stores.find(s=>s.id===m.store_id)||{}).address||'')}</td><td class="num" style="color:${m.qty>0?'var(--ok)':'var(--bad)'}">${m.qty>0?'+':''}${m.qty}</td><td>${esc(m.employees?m.employees.full_name:'')}</td></tr>`).join('')}</tbody></table></div>
+      <td>${esc((S.allStores.find(s=>s.id===m.store_id)||{}).address||'')}</td><td class="num" style="color:${m.qty>0?'var(--ok)':'var(--bad)'}">${m.qty>0?'+':''}${m.qty}</td><td>${esc(m.employees?m.employees.full_name:'')}</td></tr>`).join('')}</tbody></table></div>
     <button class="btn" data-close>Закрыть</button>`);
 }
 
@@ -549,7 +575,7 @@ function renderCerts(){
     <input id="c-bname" placeholder="Имя покупателя"><input id="c-bphone" placeholder="Телефон покупателя *" inputmode="tel">
     <div class="label">Кому сертификат</div>
     <input id="c-rname" placeholder="Имя получателя"><input id="c-rphone" placeholder="Телефон получателя" inputmode="tel">
-    <select id="c-pay">${['cash','card','kaspi_qr','transfer','invoice'].map(k=>`<option value="${k}">${PAY[k]}</option>`).join('')}</select>
+    <select id="c-pay">${['cash','card'].map(k=>`<option value="${k}">${PAY[k]}</option>`).join('')}</select>
     <button class="btn primary" id="c-sell">Продать сертификат</button>
     <p class="meta">Бонусы за покупку сертификата не начисляются — они начислятся, когда им оплатят товар.</p>
   </div></div>`;
@@ -656,14 +682,14 @@ function renderStockAn(){
       ${[['Штук на остатке',units.toLocaleString('ru-RU')],['Артикулов в наличии',(+T.skus||0).toLocaleString('ru-RU')],['В розничных ценах',fmt(T.retail||0)],['По себестоимости',fmt(T.cost||0)],['Средняя цена штуки',fmt(units?T.retail/units:0)],['Минусовые остатки',(T.negatives||0)+' поз.']]
         .map(([k,v])=>`<div class="card"><div class="label">${k}</div><div class="total num" style="font-size:20px">${v}</div></div>`).join('')}
     </div>
-    <p class="meta">Нажмите на строку, чтобы увидеть товары внутри. ${SA_FILTERABLE[S.saGroup]?'Кнопка «Фильтр» оставит только эту группу — потом можно выбрать другой разрез (например, категория → материал).':''}</p>
+    <p class="meta">Нажмите на строку, чтобы увидеть товары внутри. ${SA_FILTERABLE[S.saGroup]?'Кнопка «Внутри ▸» раскроет группу по другому разрезу: например, Серьги → по материалу, цвету или цене.':''}</p>
     <div class="scroll"><table><thead><tr><th>${SA_GROUPS.find(g=>g[0]===S.saGroup)[1]}</th><th>Штук</th><th>Доля</th><th>Артикулов</th><th>Розница</th><th>Себест.</th>
       ${S.saGroup!=='store'?ids.map(id=>`<th>${esc(storeName(id))}</th>`).join(''):''}<th></th></tr></thead><tbody>
     ${A.rows.map(r=>`<tr data-sakey="${esc(r.g)}" style="cursor:pointer"><td><b>${esc(r.g)}</b>${r.negatives?`<br><span class="chip zero">минус: ${r.negatives}</span>`:''}</td>
       <td class="num">${(r.units||0).toLocaleString('ru-RU')}</td><td class="num"><div style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;height:8px;border-radius:4px;background:var(--accent);width:${Math.round((r.units||0)/Math.max(1,units)*60)}px"></span>${units?((r.units||0)/units*100).toFixed(1):0}%</div></td>
       <td class="num">${r.skus||0}</td><td class="num">${fmt(r.retail||0)}</td><td class="num">${fmt(r.cost||0)}</td>
       ${S.saGroup!=='store'?ids.map(id=>`<td class="num">${(r.per_store&&r.per_store[id])||'—'}</td>`).join(''):''}
-      <td>${SA_FILTERABLE[S.saGroup]?`<button class="btn small" data-safilter="${esc(r.g)}">Фильтр</button>`:''}</td></tr>`).join('') || '<tr><td colspan="7" class="meta">Нет остатков</td></tr>'}
+      <td>${SA_FILTERABLE[S.saGroup]?`<button class="btn small" data-safilter="${esc(r.g)}">Внутри ▸</button>`:''}</td></tr>`).join('') || '<tr><td colspan="7" class="meta">Нет остатков</td></tr>'}
     </tbody></table></div>
     ${S.saKey?`<h2 style="margin-top:16px">${esc(S.saKey)}: товары по убыванию остатка</h2>${!S.saItems?'<div class="empty">Загружаем…</div>':`<div class="scroll"><table><thead><tr><th></th><th>Товар</th><th>Цена</th><th>Всего</th>${ids.map(id=>`<th>${esc(storeName(id))}</th>`).join('')}</tr></thead><tbody>
       ${S.saItems.map(p=>`<tr><td>${thumb(p)}</td><td>${esc(p.name)}<br><span class="meta num">${esc(p.barcode)}</span></td><td class="num">${fmt(p.price)}</td><td class="num"><b>${p.total}</b></td>${ids.map(id=>`<td class="num">${p.per_store[id]??'—'}</td>`).join('')}</tr>`).join('')}</tbody></table></div><p class="meta">Показаны первые 100.</p>`}`:''}
@@ -674,10 +700,12 @@ function renderStockAn(){
 async function loadEmps(){ const { data } = await sb.from('employees').select('*').order('created_at'); S.emps = data || []; }
 function renderEmps(){
   $('#main').innerHTML = `<h2>Сотрудники</h2><p class="meta">Сотрудник регистрируется сам на странице входа. Здесь включите доступ, роль и магазин.</p>
-    <div class="scroll"><table><thead><tr><th>Имя</th><th>Роль</th><th>Магазин</th><th>Доступ</th></tr></thead><tbody>
+    <div class="scroll"><table><thead><tr><th>Имя</th><th>Роль</th><th>Основной магазин</th><th>Доступ к магазинам</th><th>Вход</th></tr></thead><tbody>
     ${S.emps.map(e=>`<tr><td>${esc(e.full_name)}</td>
       <td><select data-erole="${e.id}">${Object.entries(ROLE).map(([k,v])=>`<option value="${k}" ${e.role===k?'selected':''}>${v}</option>`).join('')}</select></td>
-      <td><select data-estore="${e.id}"><option value="">—</option>${S.stores.map(s=>`<option value="${s.id}" ${e.home_store_id===s.id?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select></td>
+      <td><select data-estore="${e.id}"><option value="">—</option>${S.allStores.map(s=>`<option value="${s.id}" ${e.home_store_id===s.id?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select></td>
+      <td>${['owner','manager'].includes(e.role)?'<span class="meta">все магазины</span>':S.allStores.map(s=>{ const ids=e.store_ids||(e.home_store_id?[e.home_store_id]:[]);
+        return `<label class="meta" style="display:block;white-space:nowrap"><input type="checkbox" data-estores="${e.id}:${s.id}" ${ids.includes(s.id)?'checked':''}> ${esc(BRAND[s.brand]+' · '+s.address)}</label>`; }).join('')}</td>
       <td><label><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''}> включён</label></td></tr>`).join('')}</tbody></table></div>`;
 }
 async function updEmp(id, patch){ const { error } = await sb.from('employees').update(patch).eq('id', id); if(error) toast(errText(error)); else toast('Сохранено'); }
@@ -707,15 +735,18 @@ document.addEventListener('click', async e => {
   else if(d.dec){ const l=S.cart[+d.dec]; if(l.qty>1) l.qty--; syncPays(); render(); }
   else if(d.del){ S.cart.splice(+d.del,1); syncPays(); render(); }
   else if(d.dt){ S.discType=d.dt; syncPays(); render(); }
-  else if(d.pay){ const k=d.pay; if(k in S.pays) delete S.pays[k]; else S.pays[k] = k==='bonus' ? Math.min(maxBonus(), Math.max(0, totals().total-paid())) : Math.max(0, totals().total-paid()); syncPays(); render(); }
+  else if(d.pay==='certificate' && !('certificate' in S.pays)){ S.pays.certificate=0; S.cert=null; S.certCode=''; S.certQ=''; render(); await loadCertList(); render(); }
+  else if(d.pay){ const k=d.pay; if(k in S.pays){ delete S.pays[k]; if(k==='certificate'){ S.cert=null; S.certCode=''; } } else S.pays[k] = k==='bonus' ? Math.min(maxBonus(), Math.max(0, totals().total-paid())) : Math.max(0, totals().total-paid()); syncPays(); render(); }
   else if(t.id==='cust-find') lookupCustomer();
   else if(t.id==='cust-clear'){ S.cust=null; S.phone=''; S.custMsg=''; delete S.pays.bonus; syncPays(); render(); }
   else if(t.id==='cust-create'){
     const p = normPhone(S.phone); const { error } = await sb.rpc('customer_upsert', { p_phone:p, p_name:$('#new-name').value, p_birthday:$('#new-bd').value||null });
     if(error) return toast(errText(error)); toast('Клиент создан'); lookupCustomer();
   }
-  else if(t.id==='cert-check'){ if(S.certCode.trim()) checkCert(S.certCode.trim()); }
-  else if(t.id==='clear'){ S.cart=[]; S.disc=0; S.pays={}; S.certCode=''; render(); }
+  else if(d.ldt){ const [i,v]=d.ldt.split(':'); S.cart[+i].dt=v; syncPays(); render(); }
+  else if(d.certpick){ const c=(S.certList||[]).find(x=>x.code===d.certpick); if(c){ S.cert=c; S.certCode=c.code; const other=Object.entries(S.pays).filter(([k])=>k!=='certificate').reduce((a,[,v])=>a+(+v||0),0); S.pays.certificate=Math.max(0,Math.min(+c.balance, totals().total-other)); syncPays(); render(); } }
+  else if(t.id==='cert-change'){ S.cert=null; S.certCode=''; S.pays.certificate=0; syncPays(); render(); }
+  else if(t.id==='clear'){ S.cart=[]; S.disc=0; S.pays={}; S.certCode=''; S.cert=null; S.certQ=''; render(); }
   else if(t.id==='checkout') checkout();
   else if(t.id==='sq-go'){ await loadSales(); render(); }
   else if(d.ret) openReturn(d.ret);
@@ -725,6 +756,7 @@ document.addEventListener('click', async e => {
   else if(d.ck){ document.querySelectorAll('#ck-kind button').forEach(b=>b.setAttribute('aria-pressed', b===t)); }
   else if(t.id==='c-sell') sellCert();
   else if(d.eact){ updEmp(d.eact, { active:t.checked }); }
+  else if(d.estores){ const [eid, sid] = d.estores.split(':'); const e = S.emps.find(x=>x.id===eid); if(e){ const cur = new Set(e.store_ids||(e.home_store_id?[e.home_store_id]:[])); t.checked ? cur.add(+sid) : cur.delete(+sid); e.store_ids=[...cur].sort((a,b)=>a-b); updEmp(eid, { store_ids: e.store_ids }); } }
   else if(d.sgroup){ const g=d.sgroup; S.sel = S.stores.filter(st => g==='all' || st.brand===g || st.city===g).map(st=>st.id); onSelChange(); }
   else if(d.sone){ const id=+d.sone; selStores(); S.sel = t.checked ? [...new Set([...S.sel, id])] : S.sel.filter(x=>x!==id); if(!S.sel.length) S.sel=[id]; onSelChange(); }
   else if(d.anmode){ S.anMode=d.anmode; render(); await loadAnalytics(); render(); }
@@ -760,11 +792,12 @@ document.addEventListener('change', e => {
 document.addEventListener('input', e => {
   const t = e.target, d = t.dataset;
   if(t.id==='q'){ S.q = t.value; clearTimeout(searchTimer); searchTimer = setTimeout(doSearch, 200); }
-  else if(d.ldisc!=null){ S.cart[+d.ldisc].disc = Math.max(0,+t.value||0); syncPays(); render(); }
+  else if(d.ldisc!=null){ S.cart[+d.ldisc].dv = Math.max(0,+t.value||0); syncPays(); render(); }
   else if(t.id==='disc'){ S.disc = Math.max(0,+t.value||0); syncPays(); render(); }
   else if(t.id==='phone'){ S.phone = t.value; if(normPhone(t.value) && t.value.replace(/\D/g,'').length>=10){ clearTimeout(searchTimer); searchTimer=setTimeout(lookupCustomer, 300); } }
   else if(d.pamt){ S.pays[d.pamt] = Math.max(0,+t.value||0); if(d.pamt==='bonus') S.pays.bonus = Math.min(S.pays.bonus, maxBonus()); render(); }
   else if(t.id==='cert-code'){ S.certCode = t.value; }
+  else if(t.id==='cert-q'){ S.certQ = t.value; render(); }
   else if(t.id==='dq'){ S.dq=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ S.dfound=searchCatalog(S.dq); render(); }, 200); }
   else if(d.dqty!=null){ S.doc.items[+d.dqty].qty = Math.max(1,+t.value||1); }
   else if(d.dcost!=null){ S.doc.items[+d.dcost].cost = t.value===''?null:Math.max(0,+t.value); }
