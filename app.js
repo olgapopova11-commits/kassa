@@ -1,4 +1,4 @@
-/* Касса MOON и Sunshine — пробная версия. Данные: Supabase. */
+/* Silver — касса и учёт MOON и Sunshine. Данные: Supabase. */
 'use strict';
 const SB_URL = 'https://ottuadjdksxipfjytlyv.supabase.co';
 const SB_KEY = 'sb_publishable_OyN1810CuHrR9Ys0VTSExA_XY-nO7zo';
@@ -137,7 +137,8 @@ async function tgLogin(mode){
 }
 function renderLogin(mode='in', msg=''){
   $('#app').innerHTML = `<div class="login card">
-    <h2>${mode==='in'?'Вход в кассу':'Регистрация сотрудника'}</h2>
+    <div class="brand-login" style="font-weight:800;font-size:26px;letter-spacing:.04em">Silver</div>
+    <h2>${mode==='in'?'Вход':'Регистрация сотрудника'}</h2>
     ${mode==='in'?`<button class="btn primary" id="lg-tg">✈️ Войти через Telegram</button><p class="meta">Для сотрудников, которых менеджер добавил по номеру телефона.</p><div class="label">или по почте</div>`:''}
     ${mode==='up'?'<input id="lg-name" placeholder="Имя и фамилия" autocomplete="name"><input id="lg-phone" placeholder="Телефон, который указал менеджер" inputmode="tel" autocomplete="tel">':''}
     <input id="lg-email" type="email" placeholder="Почта" autocomplete="username">
@@ -225,7 +226,7 @@ function renderNav(){
 function renderHeader(){
   const h = $('#hdr'); if(!h) return;
   const q = queue();
-  h.innerHTML = `<span class="brand">MOON · Sunshine</span>
+  h.innerHTML = `<span class="brand">Silver</span>
     <span class="who"><span class="net ${navigator.onLine?'':'off'}">${navigator.onLine?'онлайн':'нет интернета'}</span>
     ${q.length?`<span class="chip warn">в очереди: ${q.length}</span>`:''}
     <span>${esc(S.me.full_name)} · ${ROLE[S.me.role]}</span>${!canEdit(S.store)?`<span class="chip warn" title="${isViewer()?'Можно смотреть всё, изменения недоступны':'Этот магазин в другом городе: можно смотреть, менять нельзя'}">только просмотр</span>`:''}${S.me.telegram?'':'<button id="tg-link" title="Получать уведомления и входить через Telegram">Привязать Telegram</button>'}<button id="logout">Выйти</button></span>`;
@@ -1282,6 +1283,7 @@ const PY = { month: new Date().toISOString().slice(0,7), data:null, open:null, s
 async function loadPay(){
   const [y,m] = PY.month.split('-').map(Number), from = `${PY.month}-01`, to = new Date(Date.UTC(y, m, 0)).toISOString().slice(0,10);
   PY.data = null;
+  if(!PY.rules){ const { data } = await sb.rpc('get_pay_rules'); PY.rules = data || {}; }
   const jobs = [ sb.rpc('payroll', { p_from:from, p_to:to, p_stores: isBoss() ? selStores() : null }) ];
   const tabel = S.me && ['owner','manager'].includes(S.me.role);
   if(tabel){ PY.store = PY.store || S.store; jobs.push(sb.rpc('work_hours_list', { p_store:PY.store, p_day:PY.day })); if(!S.emps) jobs.push(loadEmps()); }
@@ -1319,7 +1321,7 @@ function renderPay(){
   </div><div>
    ${tabel?`<div class="card stack"><b>Табель часов</b>
      <div class="row" style="flex-wrap:wrap;justify-content:flex-start"><select id="py-store">${S.stores.map(s=>`<option value="${s.id}" ${+PY.store===s.id?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select><input type="date" id="py-day" value="${PY.day}"></div>
-     <span class="meta">${esc(payRuleText(((D&&D.flatMap(e=>e.days).find(x=>x.store===+PY.store))||{}).rule))}</span>
+     <span class="meta">Правило: ${esc(payRuleText((PY.rules||{})[String(PY.store)]))}</span>
      ${(PY.sheet||[]).length?`<table><tbody>${PY.sheet.map(w=>`<tr><td>${esc(w.name)}${w.kind==='dress'?' <span class="chip">переодевание</span>':''}</td>
        <td><input class="small" type="number" min="0" max="24" step="0.5" value="${w.hours}" data-pyh="${w.employee}:${w.kind}" inputmode="decimal"> ч</td>
        <td><button class="btn small" data-pydel="${w.employee}:${w.kind}">✕</button></td></tr>`).join('')}</tbody></table>`:'<span class="meta">На этот день в табеле никого нет. Тот, кто открывает смену, попадает в табель автоматически.</span>'}
