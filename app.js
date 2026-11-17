@@ -101,9 +101,37 @@ async function loadStock(ids){
 }
 
 /* ---------- вход ---------- */
+const FN_URL = 'https://ottuadjdksxipfjytlyv.supabase.co/functions/v1/tg';
+async function fnCall(body, auth){
+  const headers = { 'Content-Type':'application/json', apikey:'sb_publishable_OyN1810CuHrR9Ys0VTSExA_XY-nO7zo' };
+  if(auth){ const { data:{ session } } = await sb.auth.getSession(); if(session) headers.Authorization = 'Bearer '+session.access_token; }
+  const r = await fetch(FN_URL, { method:'POST', headers, body: JSON.stringify(body) });
+  return r.json();
+}
+async function tgLogin(mode){
+  const st = await fnCall({ action:'login_start', mode }, mode==='link');
+  if(st.error) return toast(st.error);
+  window.open(st.url, '_blank');
+  modal(`<h2>${mode==='link'?'Привязка Telegram':'Вход через Telegram'}</h2>
+    <p>Откроется бот. Нажмите в нём <b>«Start»</b>${mode==='login'?', а если попросит — <b>«Поделиться номером»</b>':''}. Потом вернитесь сюда.</p>
+    <p><a href="${esc(st.url)}" target="_blank" rel="noopener">Если бот не открылся — нажмите здесь</a></p>
+    <p class="meta" id="tg-wait">Ждём подтверждения…</p><div class="row"><button class="btn" data-close>Отмена</button></div>`);
+  const t0 = Date.now();
+  while(Date.now()-t0 < 15*60e3 && document.getElementById('tg-wait')){
+    await new Promise(r=>setTimeout(r, 2500));
+    const p = await fnCall({ action:'login_poll', nonce: st.nonce });
+    if(p.pending) continue;
+    closeModal();
+    if(p.error) return toast(p.error);
+    if(p.linked){ toast('Telegram привязан — уведомления будут приходить в бот'); return; }
+    if(p.token_hash){ const { error } = await sb.auth.verifyOtp({ token_hash:p.token_hash, type:'magiclink' }); if(error) return toast('Не удалось войти: '+errText(error)); return boot(); }
+    return;
+  }
+}
 function renderLogin(mode='in', msg=''){
   $('#app').innerHTML = `<div class="login card">
     <h2>${mode==='in'?'Вход в кассу':'Регистрация сотрудника'}</h2>
+    ${mode==='in'?`<button class="btn primary" id="lg-tg">✈️ Войти через Telegram</button><p class="meta">Для сотрудников, которых менеджер добавил по номеру телефона.</p><div class="label">или по почте</div>`:''}
     ${mode==='up'?'<input id="lg-name" placeholder="Имя и фамилия" autocomplete="name">':''}
     <input id="lg-email" type="email" placeholder="Почта" autocomplete="username">
     <input id="lg-pass" type="password" placeholder="Пароль (не меньше 6 символов)" autocomplete="${mode==='in'?'current-password':'new-password'}">
@@ -113,6 +141,7 @@ function renderLogin(mode='in', msg=''){
     <p class="meta">Новый сотрудник регистрируется сам, а менеджер включает ему доступ и назначает магазин.</p>
   </div>`;
   $('#lg-switch').onclick = () => renderLogin(mode==='in'?'up':'in');
+  if($('#lg-tg')) $('#lg-tg').onclick = () => tgLogin('login');
   $('#lg-go').onclick = async () => {
     const email = $('#lg-email').value.trim(), password = $('#lg-pass').value;
     if(mode==='in'){
@@ -167,9 +196,10 @@ function renderHeader(){
     <select id="store-sel" aria-label="Магазин">${S.stores.map(s=>`<option value="${s.id}" ${s.id===S.store?'selected':''}>${esc(BRAND[s.brand]+' · '+s.city+', '+s.address)}</option>`).join('')}</select>
     <span class="who"><span class="net ${navigator.onLine?'':'off'}">${navigator.onLine?'онлайн':'нет интернета'}</span>
     ${q.length?`<span class="chip warn">в очереди: ${q.length}</span>`:''}
-    <span>${esc(S.me.full_name)} · ${ROLE[S.me.role]}</span><button id="logout">Выйти</button></span>`;
+    <span>${esc(S.me.full_name)} · ${ROLE[S.me.role]}</span>${S.me.telegram?'':'<button id="tg-link" title="Получать уведомления и входить через Telegram">Привязать Telegram</button>'}<button id="logout">Выйти</button></span>`;
   $('#store-sel').onchange = e => { S.store = +e.target.value; ls.set('kassa_store', S.store); S.cust = null; S.bonusSpend = 0; if(S.phone) lookupCustomer(); render(); };
   $('#logout').onclick = async () => { await sb.auth.signOut(); location.reload(); };
+  if($('#tg-link')) $('#tg-link').onclick = () => tgLogin('link');
 }
 function render(){
   document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === S.view));
@@ -879,9 +909,15 @@ async function siteSet(key, pid, status){
 /* ---------- сотрудники ---------- */
 async function loadEmps(){ const { data } = await sb.from('employees').select('*').order('created_at'); S.emps = data || []; }
 function renderEmps(){
-  $('#main').innerHTML = `<h2>Сотрудники</h2><p class="meta">Сотрудник регистрируется сам на странице входа. Здесь включите доступ, роль и магазин.</p>
+  $('#main').innerHTML = `<h2>Сотрудники</h2>
+    <div class="card stack" style="margin-bottom:12px"><b>Добавить сотрудника по телефону</b>
+      <div class="row" style="flex-wrap:wrap;justify-content:flex-start">
+        <input id="ne-phone" placeholder="+7 7__ ___ __ __" inputmode="tel"><input id="ne-name" placeholder="Имя и фамилия" style="flex:1;min-width:160px">
+        <select id="ne-role">${Object.entries(ROLE).filter(([k])=>k!=='owner'||S.me.role==='owner').map(([k,v])=>`<option value="${k}" ${k==='consultant'?'selected':''}>${v}</option>`).join('')}</select></div>
+      <div>${S.allStores.map(s=>`<label class="meta" style="margin-right:12px;white-space:nowrap"><input type="checkbox" class="ne-store" value="${s.id}"> ${esc(BRAND[s.brand]+' · '+s.address)}</label>`).join('')}</div>
+      <div class="row"><span class="meta">Сотрудник входит кнопкой «Войти через Telegram» и делится этим же номером в боте — пароль не нужен.</span><button class="btn primary" id="ne-add">Добавить</button></div></div>
     <div class="scroll"><table><thead><tr><th>Имя</th><th>Роль</th><th>Основной магазин</th><th>Доступ к магазинам</th><th>Вход</th></tr></thead><tbody>
-    ${S.emps.map(e=>`<tr><td>${esc(e.full_name)}</td>
+    ${S.emps.map(e=>`<tr><td>${esc(e.full_name)}<br><span class="meta">${esc(e.phone||'')}${e.telegram_id?' · Telegram ✓':''}${!e.auth_user_id?' · ещё не входил':''}</span></td>
       <td><select data-erole="${e.id}">${Object.entries(ROLE).map(([k,v])=>`<option value="${k}" ${e.role===k?'selected':''}>${v}</option>`).join('')}</select></td>
       <td><select data-estore="${e.id}"><option value="">—</option>${S.allStores.map(s=>`<option value="${s.id}" ${e.home_store_id===s.id?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select></td>
       <td>${['owner','manager'].includes(e.role)?'<span class="meta">все магазины</span>':S.allStores.map(s=>{ const ids=e.store_ids||(e.home_store_id?[e.home_store_id]:[]);
@@ -948,6 +984,9 @@ document.addEventListener('click', async e => {
   else if(d.nmlink||d.nmunlink){ const key=d.nmlink||d.nmunlink, [site,uid]=key.split(':');
     const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product: d.nmlink?S.nm.ed.id:null, p_status: d.nmlink?'confirmed':'rejected' });
     if(error) toast(errText(error)); else { toast(d.nmlink?'Связано с сайтом':'Отвязано'); S.nm.sq=''; S.nm.sfound=[]; await loadNom(); const fr=S.nm.data.rows.find(r=>r.id===S.nm.ed.id); if(fr) nmOpen(fr); else render(); } }
+  else if(t.id==='ne-add'){ const ids=[...document.querySelectorAll('.ne-store:checked')].map(x=>+x.value);
+    const { error } = await sb.rpc('employee_add', { p_phone:$('#ne-phone').value, p_name:$('#ne-name').value, p_role:$('#ne-role').value, p_store_ids:ids });
+    if(error) toast(errText(error)); else { toast('Сотрудник добавлен'); await loadEmps(); render(); } }
   else if(d.reqcap!=null){ const l=S.cart[+d.reqcap]; if(!l) return; t.disabled=true;
     const { error } = await sb.rpc('request_capitalize', { p_store:S.store, p_product:l.pid, p_qty:+d.need||1, p_note:'Пробивали на кассе' });
     if(error) { toast(errText(error)); t.disabled=false; } else { (S.reqSent ||= {})[l.pid+':'+S.store]=true; toast('Запрос отправлен менеджеру'); render(); } }
