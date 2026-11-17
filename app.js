@@ -694,17 +694,31 @@ function periodRange(){
 async function loadAnalytics(){ return S.anMode==='stock' ? loadStockAn() : loadSalesAn(); }
 async function loadSalesAn(){
   const [from, to] = periodRange(), ids = selStores();
-  const { data, error } = await sb.rpc('sales_analytics', { p_stores: ids, p_from: from.toISOString(), p_to: to.toISOString() });
-  if(error){ toast(errText(error)); S.an = null; return; }
-  const A = { ...data, clients: { size: data.clients }, byProd: Object.fromEntries((data.byProd||[]).map((p,i)=>[i,p])) };
+  const len = to - from, pFrom = new Date(from - len - 1000), pTo = new Date(from - 1000);
+  const [cur, prev] = await Promise.all([
+    sb.rpc('sales_analytics', { p_stores: ids, p_from: from.toISOString(), p_to: to.toISOString() }),
+    sb.rpc('sales_analytics', { p_stores: ids, p_from: pFrom.toISOString(), p_to: pTo.toISOString() })
+  ]);
+  if(cur.error){ toast(errText(cur.error)); S.an = null; return; }
+  S.an = normAn(cur.data);
+  S.anPrev = prev.error ? null : normAn(prev.data);
+  S.anPrevRange = [pFrom, pTo];
+}
+function normAn(data){
+  const A = { ...data, clients: { size: +data.clients }, byProd: Object.fromEntries((data.byProd||[]).map((p,i)=>[i,p])) };
   for(const v of Object.values(A.byStore)) for(const k of ['revenue','checks','returns']) v[k] = +v[k];
   for(const k of Object.keys(A.byPay)) A.byPay[k] = +A.byPay[k];
   for(const k of Object.keys(A.byDay)) A.byDay[k] = +A.byDay[k];
   for(const k of ['revenue','checks','returns','returnsSum','discounts','certSold','items']) A[k] = +A[k];
-  S.an = A;
+  return A;
 }
-function renderAnalytics(){ return S.anMode==='stock' ? renderStockAn() : renderSalesAn(); }
-const anModeHtml = () => `<div class="seg" style="display:inline-flex;margin-bottom:10px"><button data-anmode="sales" aria-pressed="${S.anMode==='sales'}">Продажи</button><button data-anmode="stock" aria-pressed="${S.anMode==='stock'}">Остатки</button></div>`;
+/* изменение к предыдущему периоду: dir 1 — рост хорошо, -1 — рост плохо, 0 — нейтрально */
+function deltaHtml(cur, prev, dir, prevText){
+  if(!prev) return `<span class="meta" title="В предыдущем периоде данных нет" style="font-size:12px;white-space:nowrap">нет сравнения</span>`;
+  const r = Math.round((cur - prev) / Math.abs(prev) * 100);
+  const col = r===0 || dir===0 ? 'var(--muted)' : ((r>0) === (dir>0) ? 'var(--ok)' : 'var(--bad)');
+  return `<span title="Предыдущий период: ${esc(prevText)}" style="font-size:13px;font-weight:600;color:${col};white-space:nowrap">${r>0?'▲ +':r<0?'▼ ':''}${r}%</span>`;
+}
 /* график выручки: группировка по дням / неделям / месяцам, подписи дат */
 const MON = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
 const shortNum = v => v>=1e6 ? (v/1e6).toFixed(v>=1e7?0:1).replace('.',',')+' млн' : v>=1e3 ? Math.round(v/1e3)+' тыс' : String(Math.round(v));
@@ -730,14 +744,14 @@ function revenueChart(days){
       <div style="flex:1;min-width:0">
         <div style="position:relative;display:flex;align-items:flex-end;gap:${bars.length>40?2:4}px;height:150px;border-bottom:1px solid var(--line,#ddd)">
           <div title="Среднее: ${fmt(avg)}" style="position:absolute;left:0;right:0;bottom:${Math.round(avg/max*150)}px;border-top:1px dashed currentColor;opacity:.25"></div>
-          ${bars.map(x=>`<div title="${esc(x.tip)}: ${fmt(x.v)}" style="flex:1 1 0;min-width:0;background:var(--accent);opacity:.85;height:${Math.max(2,Math.round(x.v/max*150))}px;border-radius:3px 3px 0 0"></div>`).join('')}
+          ${bars.map((x,i)=>`<div class="rcol ${i<bars.length/3?'l':i>=bars.length*2/3?'r':''}"><div class="rbar" style="height:${Math.max(2,Math.round(x.v/max*150))}px"><span class="rtip">${esc(x.tip)}<b>${fmt(x.v)}</b></span></div></div>`).join('')}
         </div>
         <div style="display:flex;gap:${bars.length>40?2:4}px;margin-top:4px">
           ${bars.map((x,i)=>`<div class="meta" style="flex:1 1 0;min-width:0;font-size:10px;text-align:center;white-space:nowrap;overflow:visible">${i%every===0?esc(x.lab):''}</div>`).join('')}
         </div>
       </div>
     </div>
-    <div class="meta" style="font-size:11px;margin-top:6px">Пунктир — среднее: ${fmt(avg)}${mode!=='day'?` за ${mode==='week'?'неделю':'месяц'}`:' в день'}. Наведите на столбик — точная сумма.</div>
+    <div class="meta" style="font-size:11px;margin-top:6px">Пунктир — среднее: ${fmt(avg)}${mode!=='day'?` за ${mode==='week'?'неделю':'месяц'}`:' в день'}. Наведите на столбик, чтобы увидеть сумму.</div>
   </div>`;
 }
 function renderSalesAn(){
@@ -748,9 +762,18 @@ function renderSalesAn(){
     <div class="filters">${periods.map(([k,t])=>`<button class="btn small ${S.period===k?'primary':''}" data-period="${k}">${t}</button>`).join('')}
       ${S.period==='custom'?`<input type="date" id="an-from" value="${S.from}"><input type="date" id="an-to" value="${S.to}"><button class="btn small" id="an-go">Показать</button>`:''}</div>
     ${!A?'<div class="empty">Загружаем…</div>':`
+    ${S.anPrevRange?`<div class="meta" style="font-size:12px;margin:-4px 0 8px">Сравнение с периодом ${S.anPrevRange.map(d=>d.toLocaleString('ru-RU',S.period==='today'?{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}:{day:'numeric',month:'short',year:'numeric'})).join(' — ')}</div>`:''}
     <div class="pays" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr))">
-      ${[['Выручка',fmt(A.revenue)],['Чеков',A.checks],['Средний чек',fmt(A.checks?A.revenue/A.checks:0)],['Продано штук',A.items],['Возвраты',A.returns+' · '+fmt(A.returnsSum)],['Скидки',fmt(A.discounts)],['Клиентов с картой',A.clients.size],['Продано сертификатов',fmt(A.certSold)]]
-        .map(([k,v])=>`<div class="card"><div class="label">${k}</div><div class="total num" style="font-size:20px">${v}</div></div>`).join('')}
+      ${(() => { const P = S.anPrev, avg = x => x && x.checks ? x.revenue/x.checks : 0;
+        return [['Выручка',fmt(A.revenue),A.revenue,P&&P.revenue,1,P&&fmt(P.revenue)],
+          ['Чеков',A.checks,A.checks,P&&P.checks,1,P&&P.checks],
+          ['Средний чек',fmt(avg(A)),avg(A),avg(P),1,P&&fmt(avg(P))],
+          ['Продано штук',A.items,A.items,P&&P.items,1,P&&P.items],
+          ['Возвраты',A.returns+' · '+fmt(A.returnsSum),A.returnsSum,P&&P.returnsSum,-1,P&&(P.returns+' · '+fmt(P.returnsSum))],
+          ['Скидки',fmt(A.discounts),A.discounts,P&&P.discounts,0,P&&fmt(P.discounts)],
+          ['Клиентов с картой',A.clients.size,A.clients.size,P&&P.clients.size,1,P&&P.clients.size],
+          ['Продано сертификатов',fmt(A.certSold),A.certSold,P&&P.certSold,1,P&&fmt(P.certSold)]]
+        .map(([k,v,c,p,dir,pt])=>`<div class="card"><div class="label">${k}</div><div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap"><div class="total num" style="font-size:20px">${v}</div>${deltaHtml(c,p,dir,String(pt??''))}</div></div>`).join(''); })()}
     </div>
     ${days.length?revenueChart(days):''}
     <div class="grid2" style="margin-top:16px"><div>
