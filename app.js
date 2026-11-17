@@ -729,6 +729,8 @@ function deltaHtml(cur, prev, dir, prevText){
   const col = r===0 || dir===0 ? 'var(--muted)' : ((r>0) === (dir>0) ? 'var(--ok)' : 'var(--bad)');
   return `<span title="Предыдущий период: ${esc(prevText)}" style="font-size:13px;font-weight:600;color:${col};white-space:nowrap">${r>0?'▲ +':r<0?'▼ ':''}${r}%</span>`;
 }
+function renderAnalytics(){ return S.anMode==='stock' ? renderStockAn() : renderSalesAn(); }
+const anModeHtml = () => `<div class="seg" style="display:inline-flex;margin-bottom:10px"><button data-anmode="sales" aria-pressed="${S.anMode==='sales'}">Продажи</button><button data-anmode="stock" aria-pressed="${S.anMode==='stock'}">Остатки</button></div>`;
 /* график выручки: группировка по дням / неделям / месяцам, подписи дат */
 const MON = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
 const shortNum = v => v>=1e6 ? (v/1e6).toFixed(v>=1e7?0:1).replace('.',',')+' млн' : v>=1e3 ? Math.round(v/1e3)+' тыс' : String(Math.round(v));
