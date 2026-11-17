@@ -694,24 +694,13 @@ function periodRange(){
 async function loadAnalytics(){ return S.anMode==='stock' ? loadStockAn() : loadSalesAn(); }
 async function loadSalesAn(){
   const [from, to] = periodRange(), ids = selStores();
-  const rows = []; let off = 0;
-  while(true){
-    const { data, error } = await sb.from('sales').select('id,kind,store_id,total,discount_total,created_at,is_certificate_sale,customer_id,sale_items(product_id,qty,total,products(name)),sale_payments(method,amount)')
-      .in('store_id', ids).gte('created_at', from.toISOString()).lte('created_at', to.toISOString()).order('created_at').range(off, off+999);
-    if(error){ toast(errText(error)); break; }
-    rows.push(...data); if(data.length < 1000 || rows.length >= 20000) break; off += 1000;
-  }
-  const A = { revenue:0, checks:0, returns:0, returnsSum:0, discounts:0, certSold:0, items:0, clients:new Set(), byStore:{}, byPay:{}, byProd:{}, byDay:{} };
-  for(const r of rows){
-    const sign = r.kind==='return' ? -1 : 1, st = (A.byStore[r.store_id] ||= { revenue:0, checks:0, returns:0 });
-    if(r.is_certificate_sale){ A.certSold += +r.total; continue; }
-    A.revenue += sign*r.total; st.revenue += sign*r.total;
-    if(r.kind==='return'){ A.returns++; A.returnsSum += +r.total; st.returns++; } else { A.checks++; st.checks++; A.discounts += +r.discount_total; }
-    if(r.customer_id) A.clients.add(r.customer_id);
-    const day = r.created_at.slice(0,10); A.byDay[day] = (A.byDay[day]||0) + sign*r.total;
-    r.sale_payments.forEach(p => { A.byPay[p.method] = (A.byPay[p.method]||0) + sign*p.amount; });
-    r.sale_items.forEach(i => { A.items += sign*i.qty; const p = (A.byProd[i.product_id] ||= { name:i.products?i.products.name:'', qty:0, sum:0 }); p.qty += sign*i.qty; p.sum += sign*i.total; });
-  }
+  const { data, error } = await sb.rpc('sales_analytics', { p_stores: ids, p_from: from.toISOString(), p_to: to.toISOString() });
+  if(error){ toast(errText(error)); S.an = null; return; }
+  const A = { ...data, clients: { size: data.clients }, byProd: Object.fromEntries((data.byProd||[]).map((p,i)=>[i,p])) };
+  for(const v of Object.values(A.byStore)) for(const k of ['revenue','checks','returns']) v[k] = +v[k];
+  for(const k of Object.keys(A.byPay)) A.byPay[k] = +A.byPay[k];
+  for(const k of Object.keys(A.byDay)) A.byDay[k] = +A.byDay[k];
+  for(const k of ['revenue','checks','returns','returnsSum','discounts','certSold','items']) A[k] = +A[k];
   S.an = A;
 }
 function renderAnalytics(){ return S.anMode==='stock' ? renderStockAn() : renderSalesAn(); }
@@ -739,7 +728,7 @@ function renderSalesAn(){
       <h2>Топ товаров</h2><div class="scroll"><table><thead><tr><th>Товар</th><th>Шт.</th><th>Сумма</th></tr></thead><tbody>
       ${Object.values(A.byProd).sort((a,b)=>b.sum-a.sum).slice(0,20).map(p=>`<tr><td>${esc(p.name)}</td><td class="num">${p.qty}</td><td class="num">${fmt(p.sum)}</td></tr>`).join('') || '<tr><td colspan="3" class="meta">—</td></tr>'}</tbody></table></div>
     </div></div>
-    <p class="meta">Пока считается по чекам, пробитым в новой кассе. После переноса истории из Wipon здесь будут и прошлые продажи.</p>`}`;
+    <p class="meta">Считается по всем чекам: новой кассы и истории из Wipon с 1 января 2026.</p>`}`;
 }
 
 /* ---------- аналитика остатков ---------- */
