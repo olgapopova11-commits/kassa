@@ -14,7 +14,7 @@ const S = {
   cart:[], discType:'pct', disc:0, pays:{}, certCode:'',
   phone:'', cust:null, custMsg:'', bonusSpend:0,
   sales:[], salesQ:'', stockQ:'', stockRows:[], certs:[], emps:[], busy:false,
-  sel:null, period:'30', from:'', to:'', an:null,
+  sel:null, period:'30', from:'', to:'', an:null, stockSort:'total',
 };
 
 /* ---------- утилиты ---------- */
@@ -361,18 +361,32 @@ function openReturn(id){
 
 /* ---------- остатки ---------- */
 async function loadStockView(){
-  const found = searchCatalog(S.stockQ).slice(0,50);
-  await loadStock(found.map(p=>p.id));
-  S.stockRows = found;
+  const sortCol = S.stockSort === 'total' ? null : +S.stockSort;
+  if(S.stockQ.trim()){
+    const found = searchCatalog(S.stockQ).slice(0,100);
+    await loadStock(found.map(p=>p.id));
+    const q = p => { const st = S.stock[p.id]||{}; return sortCol ? (st[sortCol]||0) : S.stores.reduce((a,x)=>a+(st[x.id]||0),0); };
+    S.stockRows = found.sort((a,b)=>q(b)-q(a));
+  } else {
+    const { data, error } = await sb.rpc('stock_top', { p_sort_store: sortCol, p_stores: null, p_limit: 200, p_offset: 0 });
+    if(error) return toast(errText(error));
+    const byId = new Map(S.catalog.map(a=>[a[0],a]));
+    S.stockRows = (data||[]).map(r => { S.stock[r.product_id] = Object.fromEntries(Object.entries(r.per_store).map(([k,v])=>[+k,v]));
+      const a = byId.get(r.product_id); return a ? prodObj(a) : { id:r.product_id, name:'(архив)', barcode:'', price:0 }; });
+  }
 }
 function renderStock(){
+  const sortCol = S.stockSort === 'total' ? null : +S.stockSort;
+  const th = (key, label) => `<th><button class="btn small" data-ssort="${key}" style="${String(S.stockSort)===String(key)?'background:var(--ink);color:var(--surface)':''}">${label} ↓</button></th>`;
   $('#main').innerHTML = `<h2>Остатки по магазинам</h2>
-    <div class="filters"><input id="stq" style="flex:1" placeholder="Название, штрихкод или артикул" value="${esc(S.stockQ)}"><button class="btn" id="stq-go">Найти</button></div>
-    ${S.stockRows.length?`<div class="scroll"><table><thead><tr><th>Товар</th>${S.stores.map(s=>`<th>${esc(BRAND[s.brand])}<br>${esc(s.address)}</th>`).join('')}<th>Всего</th><th></th></tr></thead><tbody>
-    ${S.stockRows.map(p=>{ const st=S.stock[p.id]||{}; const qs=S.stores.map(s=>st[s.id]||0);
-      return `<tr><td><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)} · ${fmt(p.price)}</span></td>${qs.map(n=>`<td class="num" style="${n?'':'color:var(--muted)'}">${n}</td>`).join('')}
-      <td class="num"><b>${qs.reduce((a,b)=>a+b,0)}</b></td><td><button class="btn small" data-hist="${p.id}">История</button></td></tr>`}).join('')}</tbody></table></div>`
-    : '<div class="empty">Найдите товар, чтобы увидеть остатки во всех 7 магазинах</div>'}`;
+    <div class="filters"><input id="stq" style="flex:1" placeholder="Название, штрихкод или артикул (пусто — все товары)" value="${esc(S.stockQ)}"><button class="btn" id="stq-go">Найти</button>
+      <select id="stsort"><option value="total" ${S.stockSort==='total'?'selected':''}>Сортировать: всего по сети</option>${S.stores.map(st=>`<option value="${st.id}" ${String(S.stockSort)===String(st.id)?'selected':''}>Сортировать: ${esc(BRAND[st.brand]+' · '+st.address)}</option>`).join('')}</select></div>
+    <p class="meta">${S.stockQ.trim()?'Найденные товары':'Топ-200 товаров по остатку'}, по убыванию ${sortCol?'в магазине '+esc(storeName(sortCol)):'по всей сети'}. Нажмите на заголовок магазина, чтобы отсортировать по нему.</p>
+    ${S.stockRows.length?`<div class="scroll"><table><thead><tr><th>Товар</th>${S.stores.map(st=>th(st.id, esc(BRAND[st.brand])+'<br>'+esc(st.address))).join('')}${th('total','Всего')}<th></th></tr></thead><tbody>
+    ${S.stockRows.map(p=>{ const st=S.stock[p.id]||{}; const qs=S.stores.map(x=>st[x.id]||0);
+      return `<tr><td><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)} · ${fmt(p.price)}</span></td>${qs.map((n,i)=>`<td class="num" style="${n?'':'color:var(--muted)'};${S.stores[i].id===sortCol?'background:var(--soft)':''}">${n}</td>`).join('')}
+      <td class="num" style="${sortCol?'':'background:var(--soft)'}"><b>${qs.reduce((a,b)=>a+b,0)}</b></td><td><button class="btn small" data-hist="${p.id}">История</button></td></tr>`}).join('')}</tbody></table></div>`
+    : '<div class="empty">Загружаем остатки…</div>'}`;
 }
 async function openHistory(pid){
   const p = prodObj(S.catalog.find(x=>x[0]===pid));
@@ -545,6 +559,7 @@ document.addEventListener('click', async e => {
   else if(d.eact){ updEmp(d.eact, { active:t.checked }); }
   else if(d.sgroup){ const g=d.sgroup; S.sel = S.stores.filter(st => g==='all' || st.brand===g || st.city===g).map(st=>st.id); onSelChange(); }
   else if(d.sone){ const id=+d.sone; selStores(); S.sel = t.checked ? [...new Set([...S.sel, id])] : S.sel.filter(x=>x!==id); if(!S.sel.length) S.sel=[id]; onSelChange(); }
+  else if(d.ssort){ S.stockSort = d.ssort; await loadStockView(); render(); }
   else if(d.period){ S.period=d.period; if(d.period!=='custom'){ S.an=null; render(); await loadAnalytics(); } render(); }
   else if(t.id==='an-go'){ S.from=$('#an-from').value; S.to=$('#an-to').value; S.an=null; render(); await loadAnalytics(); render(); }
 });
@@ -552,6 +567,7 @@ document.addEventListener('change', e => {
   const t = e.target, d = t.dataset;
   if(d.erole) updEmp(d.erole, { role:t.value });
   if(d.estore) updEmp(d.estore, { home_store_id: t.value ? +t.value : null });
+  if(t.id==='stsort'){ S.stockSort = t.value; loadStockView().then(render); }
 });
 document.addEventListener('input', e => {
   const t = e.target, d = t.dataset;
@@ -577,6 +593,7 @@ document.addEventListener('click', async e => {
   if(S.view==='sales'){ await loadSales(); render(); }
   if(S.view==='certs'){ await loadCerts(); render(); }
   if(S.view==='emps'){ await loadEmps(); render(); }
+  if(S.view==='stock' && !S.stockRows.length){ await loadStockView(); render(); }
   if(S.view==='analytics'){ S.an=null; render(); await loadAnalytics(); render(); }
 });
 
