@@ -110,4 +110,4 @@ th{font-size:12px;color:var(--muted);font-weight:500;text-transform:uppercase;le
 .rcol:hover .rtip{display:block}
 
 /* роль «Просмотр»: кнопки изменений скрыты */
-body.readonly #main .btn.primary:not([data-trok]):not([data-period]):not([data-shdays]):not([data-sgroup]), body.readonly #main [data-ret], body.readonly #main input[type=file]{display:none!important}
+body.readonly #main .btn.primary:not([data-trok]):not([data-period]):not([data-shdays]):not([data-sgroup]):not([data-reqst]):not([data-wmode]):not([data-cfst]):not([data-sagroup]):not([data-stsite]):not([data-ststatus]), body.readonly #main [data-ret], body.readonly #main input[type=file]{display:none!important}
