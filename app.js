@@ -394,19 +394,15 @@ function openReturn(id){
 
 /* ---------- остатки ---------- */
 async function loadStockView(){
-  const byName = S.stockSort === 'name', sortCol = (S.stockSort === 'total' || byName) ? null : +S.stockSort, dir = S.stockDir === 'asc' ? 1 : -1;
-  if(S.stockQ.trim()){
-    const found = searchCatalog(S.stockQ).slice(0,100);
-    await loadStock(found.map(p=>p.id));
-    const q = p => { const st = S.stock[p.id]||{}; return sortCol ? (st[sortCol]||0) : S.allStores.reduce((a,x)=>a+(st[x.id]||0),0); };
-    S.stockRows = byName ? found.sort((a,b)=>dir*-1*a.name.localeCompare(b.name,'ru')) : found.sort((a,b)=>dir*(q(a)-q(b)));
-  } else {
-    const { data, error } = await sb.rpc('stock_top2', { p_sort_store: sortCol, p_order: byName ? (S.stockDir==='asc'?'name_desc':'name_asc') : S.stockDir, p_limit: 200, p_offset: 0 });
-    if(error) return toast(errText(error));
-    const byId = new Map(S.catalog.map(a=>[a[0],a]));
-    S.stockRows = (data||[]).map(r => { S.stock[r.product_id] = Object.fromEntries(Object.entries(r.per_store).map(([k,v])=>[+k,v]));
-      const a = byId.get(r.product_id); return a ? prodObj(a) : { id:r.product_id, name:'(архив)', barcode:'', price:0 }; });
-  }
+  const byName = S.stockSort === 'name', sortCol = (S.stockSort === 'total' || byName) ? null : +S.stockSort;
+  if(!S.fopts){ const { data } = await sb.rpc('filter_options'); S.fopts = data || { categories:[], materials:[], colors:[] }; }
+  const f = S.stockF || (S.stockF = {}), flt = {};
+  ['category','material','color'].forEach(k => { if(f[k]) flt[k] = f[k]; });
+  const { data, error } = await sb.rpc('stock_top3', { p_sort_store: sortCol, p_order: byName ? (S.stockDir==='asc'?'name_desc':'name_asc') : S.stockDir, p_filter: flt, p_q: S.stockQ.trim(), p_limit: 300, p_offset: 0 });
+  if(error) return toast(errText(error));
+  const byId = new Map(S.catalog.map(a=>[a[0],a]));
+  S.stockRows = (data||[]).map(r => { S.stock[r.product_id] = Object.fromEntries(Object.entries(r.per_store).map(([k,v])=>[+k,v]));
+    const a = byId.get(r.product_id); return a ? prodObj(a) : { id:r.product_id, name:'(нет в кэше — обновите страницу)', barcode:'', price:0 }; });
 }
 function renderStock(){
   const sortCol = (S.stockSort === 'total' || S.stockSort === 'name') ? null : +S.stockSort;
@@ -414,9 +410,11 @@ function renderStock(){
   const arrow = key => !act(key) ? '↕' : key==='name' ? (S.stockDir==='asc'?'Я→А':'А→Я') : (S.stockDir==='asc'?'↑':'↓');
   const th = (key, label) => `<th><button class="btn small" data-ssort="${key}" style="${act(key)?'background:var(--ink);color:var(--surface)':''}">${label} ${arrow(key)}</button></th>`;
   $('#main').innerHTML = `<h2>Остатки по магазинам</h2>
-    <div class="filters"><input id="stq" style="flex:1" placeholder="Название, штрихкод или артикул (пусто — все товары)" value="${esc(S.stockQ)}"><button class="btn" id="stq-go">Найти</button>
-      <select id="stsort"><option value="total" ${S.stockSort==='total'?'selected':''}>Сортировать: всего по сети</option>${S.allStores.map(st=>`<option value="${st.id}" ${String(S.stockSort)===String(st.id)?'selected':''}>Сортировать: ${esc(BRAND[st.brand]+' · '+st.address)}</option>`).join('')}</select></div>
-    <p class="meta">${S.stockQ.trim()?'Найденные товары':'200 товаров'}: ${S.stockSort==='name'?'по названию':(S.stockDir==='asc'?'от меньшего остатка к большему':'от большего остатка к меньшему')+' '+(sortCol?'в магазине '+esc(storeName(sortCol)):'по всей сети')}. Нажмите на заголовок столбца, чтобы сортировать по нему; повторное нажатие — в обратную сторону.${S.stockDir==='asc'&&S.stockSort!=='name'?' Товары с нулевым остатком не показываются.':''}</p>
+    <div class="filters"><input id="stq" style="flex:1;min-width:200px" placeholder="Название, штрихкод или артикул" value="${esc(S.stockQ)}">
+      ${(()=>{ const o=S.fopts||{categories:[],materials:[],colors:[]}, f=S.stockF||{}; const sel=(k,ph,items)=>`<select data-stf="${k}" aria-label="${ph}"><option value="">${ph}</option>${items.map(([v,t])=>`<option value="${esc(v)}" ${String(f[k]||'')===String(v)?'selected':''}>${esc(t)}</option>`).join('')}</select>`;
+        return sel('category','Все категории',(o.categories||[]).map(c=>[c.id,c.name])) + sel('material','Все материалы',(o.materials||[]).map(m=>[m,m])) + sel('color','Все цвета',(o.colors||[]).map(m=>[m,m]))
+          + (Object.values(f).some(Boolean)?'<button class="btn small" id="stf-clear">Сбросить фильтры</button>':''); })()}</div>
+    <p class="meta">${S.stockQ.trim()||Object.values(S.stockF||{}).some(Boolean)?'Найдено '+S.stockRows.length+(S.stockRows.length===300?' (показаны первые 300)':''):'300 товаров'}: ${S.stockSort==='name'?'по названию':(S.stockDir==='asc'?'от меньшего остатка к большему':'от большего остатка к меньшему')+' '+(sortCol?'в магазине '+esc(storeName(sortCol)):'по всей сети')}. Нажмите на заголовок столбца, чтобы сортировать по нему; повторное нажатие — в обратную сторону.${S.stockDir==='asc'&&S.stockSort!=='name'?' Товары с нулевым остатком не показываются.':''}</p>
     ${S.stockRows.length?`<div class="scroll"><table><thead><tr>${th('name','Товар')}${S.allStores.map(st=>th(st.id, esc(BRAND[st.brand])+'<br>'+esc(st.address))).join('')}${th('total','Всего')}<th></th></tr></thead><tbody>
     ${S.stockRows.map(p=>{ const st=S.stock[p.id]||{}; const qs=S.allStores.map(x=>st[x.id]||0);
       return `<tr><td><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)} · ${fmt(p.price)}</span></td>${qs.map((n,i)=>`<td class="num" style="${n?'':'color:var(--muted)'};${S.allStores[i].id===sortCol?'background:var(--soft)':''}">${n}</td>`).join('')}
@@ -933,6 +931,7 @@ document.addEventListener('click', async e => {
   else if(t.id==='sq-go'){ await loadSales(); render(); }
   else if(d.ret) openReturn(d.ret);
   else if(t.id==='stq-go'){ await loadStockView(); render(); }
+  else if(t.id==='stf-clear'){ S.stockF={}; await loadStockView(); render(); }
   else if(d.hist) openHistory(d.hist);
   else if(t.id==='cc-go'){ const v=$('#cc').value.trim(); if(v) checkCert(v); }
   else if(d.ck){ document.querySelectorAll('#ck-kind button').forEach(b=>b.setAttribute('aria-pressed', b===t)); }
@@ -991,6 +990,7 @@ document.addEventListener('change', async e => {
   const t = e.target, d = t.dataset;
   if(d.erole) updEmp(d.erole, { role:t.value });
   if(d.estore) updEmp(d.estore, { home_store_id: t.value ? +t.value : null });
+  if(d.stf){ (S.stockF ||= {})[d.stf]=t.value; await loadStockView(); render(); }
   if(t.id==='cf-store'){ S.cf.store=t.value; await loadCerts(); render(); }
   if(t.id==='nm-cat'){ S.nm.cat=t.value; S.nm.off=0; render(); await loadNom(); render(); }
   if(t.id==='nm-arch'){ S.nm.arch=t.checked; S.nm.off=0; render(); await loadNom(); render(); }
