@@ -49,6 +49,7 @@ async function onSelChange(){
   if(S.view==='sales') await loadSales();
   if(S.view==='analytics') await loadAnalytics();
   if(S.view==='shifts') await loadShifts();
+  if(S.view==='cash') await loadCash();
   render();
 }
 function normPhone(v){ let d=String(v||'').replace(/\D/g,''); if(d.length===11&&(d[0]==='7'||d[0]==='8')) d=d.slice(1); if(d.length===10) return '+7'+d; return null; }
@@ -137,13 +138,13 @@ function renderLogin(mode='in', msg=''){
   $('#app').innerHTML = `<div class="login card">
     <h2>${mode==='in'?'Вход в кассу':'Регистрация сотрудника'}</h2>
     ${mode==='in'?`<button class="btn primary" id="lg-tg">✈️ Войти через Telegram</button><p class="meta">Для сотрудников, которых менеджер добавил по номеру телефона.</p><div class="label">или по почте</div>`:''}
-    ${mode==='up'?'<input id="lg-name" placeholder="Имя и фамилия" autocomplete="name">':''}
+    ${mode==='up'?'<input id="lg-name" placeholder="Имя и фамилия" autocomplete="name"><input id="lg-phone" placeholder="Телефон, который указал менеджер" inputmode="tel" autocomplete="tel">':''}
     <input id="lg-email" type="email" placeholder="Почта" autocomplete="username">
     <input id="lg-pass" type="password" placeholder="Пароль (не меньше 6 символов)" autocomplete="${mode==='in'?'current-password':'new-password'}">
     ${msg?`<div class="${/ошиб|не /i.test(msg)?'warn':'okmsg'}">${esc(msg)}</div>`:''}
     <button class="btn primary" id="lg-go">${mode==='in'?'Войти':'Зарегистрироваться'}</button>
     <button class="btn" id="lg-switch">${mode==='in'?'Я новый сотрудник':'У меня уже есть вход'}</button>
-    <p class="meta">Новый сотрудник регистрируется сам, а менеджер включает ему доступ и назначает магазин.</p>
+    <p class="meta">Зарегистрироваться можно только с номером телефона, который менеджер заранее добавил во вкладке «Сотрудники».</p>
   </div>`;
   $('#lg-switch').onclick = () => renderLogin(mode==='in'?'up':'in');
   if($('#lg-tg')) $('#lg-tg').onclick = () => tgLogin('login');
@@ -156,7 +157,8 @@ function renderLogin(mode='in', msg=''){
     } else {
       const full_name = $('#lg-name').value.trim();
       if(!full_name) return renderLogin('up','Укажите имя');
-      const { error } = await sb.auth.signUp({ email, password, options:{ data:{ full_name }, emailRedirectTo: location.href.split('#')[0] } });
+      const phone = ($('#lg-phone')||{}).value||''; if(phone.replace(/\D/g,'').length<10) return renderLogin('up','Укажите телефон, который добавил менеджер');
+      const { error } = await sb.auth.signUp({ email, password, options:{ data:{ full_name, phone }, emailRedirectTo: location.href.split('#')[0] } });
       if(error) return renderLogin('up', 'Ошибка регистрации: '+errText(error));
       renderLogin('in', 'Готово. Подтвердите почту по ссылке из письма, потом войдите. Доступ включит менеджер.');
     }
@@ -183,12 +185,12 @@ async function boot(){
   S.store = ls.get('kassa_store', null) || (me.store_ids||[])[0] || (S.stores[0]||{}).id;
   if(!S.stores.some(s=>s.id===S.store)) S.store = (S.stores[0]||{}).id;
   { const { data } = await sb.rpc('get_tab_access'); S.tabAccess = data || {}; }
-  renderShell(); await loadCatalog(); render(); flushQueue(); subscribeReqs();
+  renderShell(); await loadPosShift(); await loadCatalog(); render(); flushQueue(); subscribeReqs();
 }
 
 /* ---------- каркас ---------- */
 function renderShell(){
-  const tabs = [['pos','Продажа'],['shifts','Смены'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты']];
+  const tabs = [['pos','Продажа'],['shifts','Смены'],['cash','Расходы'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты']];
   if(isBoss()) { tabs.splice(1,0,['analytics','Аналитика']); tabs.push(['bonus','Бонусные карты']); tabs.push(['nom','Номенклатура']); tabs.push(['site','Сайт']); tabs.push(['emps','Сотрудники']); }
   // настройка владельца: какие вкладки видит каждая роль
   const acc = (S.tabAccess||{})[S.me.role];
@@ -209,7 +211,7 @@ function renderHeader(){
     <span class="who"><span class="net ${navigator.onLine?'':'off'}">${navigator.onLine?'онлайн':'нет интернета'}</span>
     ${q.length?`<span class="chip warn">в очереди: ${q.length}</span>`:''}
     <span>${esc(S.me.full_name)} · ${ROLE[S.me.role]}</span>${!canEdit(S.store)?`<span class="chip warn" title="${isViewer()?'Можно смотреть всё, изменения недоступны':'Этот магазин в другом городе: можно смотреть, менять нельзя'}">только просмотр</span>`:''}${S.me.telegram?'':'<button id="tg-link" title="Получать уведомления и входить через Telegram">Привязать Telegram</button>'}<button id="logout">Выйти</button></span>`;
-  $('#store-sel').onchange = e => { S.store = +e.target.value; ls.set('kassa_store', S.store); S.cust = null; S.bonusSpend = 0; if(S.phone) lookupCustomer(); renderHeader(); render(); if(S.view==='shifts') loadShifts().then(render); };
+  $('#store-sel').onchange = e => { S.store = +e.target.value; ls.set('kassa_store', S.store); S.cust = null; S.bonusSpend = 0; if(S.phone) lookupCustomer(); renderHeader(); render(); loadPosShift().then(render); if(S.view==='shifts') loadShifts().then(render); if(S.view==='cash') loadCash().then(render); };
   $('#logout').onclick = async () => { await sb.auth.signOut(); location.reload(); };
   if($('#tg-link')) $('#tg-link').onclick = () => tgLogin('link');
 }
@@ -217,7 +219,7 @@ function render(){
   document.body.classList.toggle('readonly', !canEdit(S.store));
   document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === S.view));
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -256,9 +258,10 @@ function renderPos(){
   const t = totals(), keys = Object.keys(S.pays), diff = t.total - paid();
   const brand = store().brand;
   const needCode = 'certificate' in S.pays && !S.certCode.trim();
-  const canPay = S.cart.length && keys.length && Math.abs(diff) < 1 && !needCode && !S.busy;
+  const shOpen = S.posShift && S.posShift[S.store];
+  const canPay = S.cart.length && keys.length && Math.abs(diff) < 1 && !needCode && !S.busy && shOpen !== false;
   const c = S.cust;
-  $('#main').innerHTML = `<div class="grid2">
+  $('#main').innerHTML = `${shOpen===false?`<div class="card row" style="margin-bottom:12px;border-color:var(--bad);flex-wrap:wrap"><span><b>Смена не открыта.</b> Чтобы пробивать чеки, откройте смену и пересчитайте наличные в кассе.</span><button class="btn primary" id="go-shift">Открыть смену</button></div>`:''}<div class="grid2">
    <div>
      <div class="row"><h2>Товары</h2><span class="meta">${S.catalog.length.toLocaleString('ru-RU')} в каталоге</span></div>
      <div class="row"><input id="q" style="flex:1" placeholder="Штрихкод, артикул или название" value="${esc(S.q)}" autocomplete="off"><button class="btn" id="q-add">Добавить</button></div>
@@ -311,7 +314,7 @@ function renderPos(){
      ${keys.length&&Math.abs(diff)>=1?`<div class="warn num">${diff>0?'Не хватает '+fmt(diff):'Лишние '+fmt(-diff)}</div>`:''}
      ${needCode?'<div class="warn">Выберите сертификат из списка</div>':''}
      <div class="row"><button class="btn" id="clear" ${S.cart.length?'':'disabled'}>Очистить</button>
-       <button class="btn primary" id="checkout" ${canPay?'':'disabled'}>${S.busy?'Проводим…':'Провести чек'}</button></div>
+       <button class="btn primary" id="checkout" ${canPay?'':'disabled'} ${shOpen===false?'title="Сначала откройте смену"':''}>${S.busy?'Проводим…':'Провести чек'}</button></div>
    </div></div>`;
 }
 async function loadCertList(){
@@ -379,6 +382,7 @@ function showReceipt(s, number, offline){
   modal(`<h2>${offline?'Нет интернета — чек сохранён':'Чек проведён'}</h2>
     ${offline?'<p class="warn">Чек отправится в базу автоматически, когда появится интернет.</p>':''}
     <div class="receipt">${esc(txt)}</div>
+    <p class="meta">Отчёт уже отправлен в Telegram. Если нужно — сфотографируйте этот экран вместе с отчётом терминала.</p>
     <div class="row"><button class="btn" data-close>Закрыть</button><button class="btn primary" id="print">Печать</button></div>`);
   $('#print').onclick = () => { $('#paper').textContent = txt; window.print(); };
 }
@@ -841,6 +845,11 @@ function renderSalesAn(){
 }
 
 /* ---------- смены ---------- */
+async function loadPosShift(){
+  if(!navigator.onLine || !S.store) return;
+  const { data, error } = await sb.rpc('shift_current', { p_store:S.store });
+  if(!error){ (S.posShift ||= {})[S.store] = !!data; }
+}
 async function loadShifts(){
   if(!navigator.onLine) return;
   const days = S.shDays || 7, to = new Date(), from = new Date(); from.setHours(0,0,0,0); from.setDate(from.getDate()-(days-1));
@@ -849,7 +858,8 @@ async function loadShifts(){
     sb.rpc('shifts_list', { p_stores: isBoss() ? selStores() : [S.store], p_from: from.toISOString(), p_to: to.toISOString() })
   ]);
   if(cur.error) toast(errText(cur.error));
-  S.shift = cur.data || null; S.shifts = list.data || []; S.shLoaded = true;
+  S.shift = cur.data || null; S.shifts = list.data || []; S.shLoaded = true; (S.posShift ||= {})[S.store] = !!S.shift;
+  if(!S.shift){ const { data } = await sb.rpc('shift_prev_closing', { p_store:S.store }); S.prevClosing = data; }
 }
 const tm = d => d ? new Date(d).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
 function diffHtml(v){ v=+v||0; const c = Math.abs(v)<1 ? 'var(--ok)' : 'var(--bad)'; return `<b style="color:${c}">${v>0?'+':''}${fmt(v)}</b>${Math.abs(v)<1?'':v>0?' <span class="meta">излишек</span>':' <span class="meta">недостача</span>'}`; }
@@ -864,8 +874,12 @@ function shiftReportHtml(r, opening, closing){
     ${Object.entries(r.byPay||{}).sort((a,b)=>b[1]-a[1]).map(([k,v])=>row(PAY[k]||k, fmt(v))).join('') || row('Оплат нет','—')}
     <tr><td colspan="2" class="meta" style="padding-top:10px">Наличные в кассе</td></tr>
     ${row('На начало смены', fmt(opening))}${row('Наличными за смену', fmt(r.cashNet))}${row('Должно быть', '<b>'+fmt(r.cashExpected)+'</b>')}
+    ${(r.cashIn||r.cashOut)?row('Внесено в кассу', '+'+fmt(r.cashIn||0))+row('Расходы из кассы', '−'+fmt(r.cashOut||0)):''}
     ${closing!=null ? row('Фактически', fmt(closing)) + row('Расхождение', diffHtml(closing - r.cashExpected)) : ''}
+    <tr><td colspan="2" class="meta" style="padding-top:10px">Карта / Kaspi QR (терминал)</td></tr>
+    ${row('По системе', fmt(r.cardNet||0))}${r.closingCard!=null ? row('По терминалу', fmt(r.closingCard)) + row('Расхождение', diffHtml(r.closingCard - (r.cardNet||0))) : ''}
   </tbody></table>
+  ${(r.moves||[]).length?`<table style="margin-top:8px"><tbody><tr><td colspan="2" class="meta">Расходы и внесения</td></tr>${r.moves.map(m=>row(esc(m.cat)+(m.collector?' <span class="meta">· '+esc(m.collector)+'</span>':'')+(m.comment?'<br><span class="meta">'+esc(m.comment)+'</span>':'')+(m.status==='pending'?' <span class="chip warn">ждёт подтверждения</span>':m.status==='rejected'?' <span class="chip zero">не подтверждено</span>':''), (m.dir==='in'?'+':'−')+fmt(m.amount))).join('')}</tbody></table>`:''}
   ${(r.byEmployee||[]).length>1 || ((r.byEmployee||[])[0]||{}).name!=='—' ? `<table style="margin-top:8px"><tbody><tr><td colspan="2" class="meta">По продавцам</td></tr>${r.byEmployee.map(e=>row(esc(e.name)+' <span class="meta">· '+e.checks+' чек.</span>', fmt(e.revenue))).join('')}</tbody></table>` : ''}
   </div></div>`;
 }
@@ -875,7 +889,11 @@ function shiftText(sh, r){
   L.push(pad('Выручка', fmt(r.revenue)), pad('Чеков', String(r.checks)), pad('Средний чек', fmt(r.checks?r.revenue/r.checks:0)), pad('Продано штук', String(r.items)), pad('Возвраты', r.returns+' / '+fmt(r.returnsSum)), pad('Скидки', fmt(r.discounts)), pad('Бонусов начислено', fmt(r.bonusEarned)), pad('Бонусов использовано', fmt(r.bonusSpent)), pad('Сертификатов продано', fmt(r.certSold)), '-'.repeat(w));
   Object.entries(r.byPay||{}).forEach(([k,v]) => L.push(pad(PAY[k]||k, fmt(v))));
   L.push('-'.repeat(w), pad('Наличные на начало', fmt(sh.opening_cash)), pad('Наличными за смену', fmt(r.cashNet)), pad('Должно быть', fmt(r.cashExpected)));
+  if(r.cashIn||r.cashOut) L.push(pad('Внесено', fmt(r.cashIn||0)), pad('Расходы', fmt(r.cashOut||0)));
   if(sh.closing_cash!=null) L.push(pad('Фактически', fmt(sh.closing_cash)), pad('Расхождение', fmt(sh.closing_cash - r.cashExpected)));
+  L.push('-'.repeat(w), pad('Карта/QR по системе', fmt(r.cardNet||0)));
+  if(r.closingCard!=null) L.push(pad('По терминалу', fmt(r.closingCard)), pad('Расхождение', fmt(r.closingCard - (r.cardNet||0))));
+  (r.moves||[]).forEach(m => L.push(pad((m.dir==='in'?'+ ':'- ')+m.cat, fmt(m.amount))));
   if(sh.note) L.push('', 'Комментарий: '+sh.note);
   return L.join('\n');
 }
@@ -885,13 +903,16 @@ function renderShifts(){
   if(!S.shLoaded) cur = '<div class="empty">Загружаем…</div>';
   else if(!sh) cur = `<div class="card stack"><div><b>${st}</b> · <span class="chip zero">смена закрыта</span></div>
       ${ro ? '<p class="meta">Открыть смену может сотрудник магазина.</p>' : `<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px">
-        <label class="meta">Наличные в кассе на начало, ₸ <input id="sh-open-cash" type="number" min="0" inputmode="numeric" placeholder="0" style="width:140px"></label>
-        <button class="btn primary" id="sh-open">Открыть смену</button></div>`}</div>`;
+        <label class="meta">Наличные в кассе на начало, ₸ <input id="sh-open-cash" type="number" min="0" inputmode="numeric" placeholder="${S.prevClosing!=null?Math.round(S.prevClosing):'0'}" style="width:140px"></label>
+        <input id="sh-open-note" placeholder="Причина, если сумма не сходится" style="flex:1;min-width:180px">
+        <button class="btn primary" id="sh-open">Открыть смену</button></div>
+        ${S.prevClosing!=null?`<p class="meta" style="margin:0">На закрытии прошлой смены в кассе было <b>${fmt(S.prevClosing)}</b>. Пересчитайте наличные — сумма должна совпасть.</p>`:''}`}</div>`;
   else cur = `<div class="card stack"><div class="row" style="flex-wrap:wrap;gap:8px"><div><b>${st}</b> · <span class="chip ok">смена №${sh.number} открыта</span>
         <div class="meta">с ${tm(sh.opened_at)}${sh.opened_by_name?' · открыл(а) '+esc(sh.opened_by_name):''}</div></div><button class="btn small" id="sh-refresh">Обновить цифры</button></div>
       ${shiftReportHtml(sh.summary, sh.opening_cash, null)}
       ${ro ? '' : `<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;border-top:1px solid var(--line);padding-top:10px">
         <label class="meta">Наличные в кассе фактически, ₸ <input id="sh-close-cash" type="number" min="0" inputmode="numeric" placeholder="${Math.round(sh.summary.cashExpected)}" style="width:150px"></label>
+        <label class="meta">По терминалу (карта + Kaspi QR), ₸ <input id="sh-close-card" type="number" min="0" inputmode="numeric" placeholder="${Math.round(sh.summary.cardNet||0)}" style="width:150px"></label>
         <input id="sh-note" placeholder="Комментарий (необязательно)" style="flex:1;min-width:180px">
         <button class="btn primary" id="sh-close">Закрыть смену</button></div>`}</div>`;
   const days = [[1,'Сегодня'],[7,'7 дней'],[30,'30 дней']];
@@ -918,12 +939,14 @@ function showShiftReport(x){
 document.addEventListener('click', async e => {
   const t = e.target.closest('button'); if(!t || S.view!=='shifts') return;
   const d = t.dataset;
-  if(t.id==='sh-open'){ t.disabled = true; const { error } = await sb.rpc('shift_open', { p_store:S.store, p_cash: +($('#sh-open-cash').value||0) });
+  if(t.id==='sh-open'){ t.disabled = true; if(false){} const v0 = $('#sh-open-cash').value; if(v0===''){ toast('Пересчитайте наличные и введите сумму'); t.disabled=false; $('#sh-open-cash').focus(); return; }
+    const { error } = await sb.rpc('shift_open', { p_store:S.store, p_cash: +v0, p_note: ($('#sh-open-note')||{}).value||null });
     if(error) toast(errText(error)); else toast('Смена открыта'); await loadShifts(); render(); }
   else if(t.id==='sh-refresh'){ await loadShifts(); render(); }
   else if(t.id==='sh-close'){
     const v = $('#sh-close-cash').value; if(v===''){ toast('Пересчитайте наличные в кассе и введите сумму'); $('#sh-close-cash').focus(); return; }
-    t.disabled = true; const { error } = await sb.rpc('shift_close', { p_shift:S.shift.id, p_cash:+v, p_note:$('#sh-note').value });
+    const vc = $('#sh-close-card').value; if(vc===''){ toast('Введите сумму по терминалу из отчёта терминала'); $('#sh-close-card').focus(); return; }
+    t.disabled = true; const { error } = await sb.rpc('shift_close', { p_shift:S.shift.id, p_cash:+v, p_note:$('#sh-note').value, p_card:+vc });
     if(error){ toast(errText(error)); t.disabled = false; return; }
     const id = S.shift.id; await loadShifts(); render(); const x = S.shifts.find(z=>z.id===id); if(x) showShiftReport(x); }
   else if(d.shrep){ const x = S.shifts.find(z=>z.id===d.shrep); if(x) showShiftReport(x); }
@@ -1095,6 +1118,65 @@ async function siteSet(key, pid, status){
 }
 
 /* ---------- сотрудники ---------- */
+/* ---------- расходы и внесения ---------- */
+const CS = { dir:'out', cat:'', amount:'', comment:'', collector:'', photo:null, photoUrl:'', busy:false, cats:null, list:null, days:7 };
+async function loadCash(){
+  if(!CS.cats){ const { data } = await sb.from('cash_categories').select('direction,name,sort').order('sort'); CS.cats = data || []; }
+  const to = new Date(), from = new Date(); from.setHours(0,0,0,0); from.setDate(from.getDate()-(CS.days-1));
+  const [lst] = await Promise.all([ sb.rpc('cash_moves_list', { p_stores: isBoss() ? selStores() : [S.store], p_from: from.toISOString(), p_to: to.toISOString() }), loadPosShift() ]);
+  if(lst.error) toast(errText(lst.error)); CS.list = lst.data || [];
+}
+async function cashPhoto(file){
+  if(!file) return; CS.busy = true; render();
+  try{
+    const img = await createImageBitmap(file); const k = Math.min(1, 1600/Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.round(img.width*k); c.height = Math.round(img.height*k); c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
+    const path = `${S.store}/${new Date().toISOString().slice(0,10)}/${uuid()}.jpg`;
+    const { error } = await sb.storage.from('cash-photos').upload(path, blob, { contentType:'image/jpeg' });
+    if(error) throw error;
+    CS.photo = path; CS.photoUrl = URL.createObjectURL(blob);
+  }catch(err){ toast('Фото не загрузилось: '+errText(err)); }
+  CS.busy = false; render();
+}
+async function openCashPhoto(path){
+  const { data, error } = await sb.storage.from('cash-photos').createSignedUrl(path, 600);
+  if(error) return toast(errText(error));
+  modal(`<img src="${esc(data.signedUrl)}" alt="Фото" style="max-width:100%;border-radius:10px"><div class="row"><button class="btn" data-close>Закрыть</button></div>`);
+}
+function renderCash(){
+  const ro = isViewer(), open = S.posShift && S.posShift[S.store], inc = CS.cat.trim().toLowerCase()==='инкассация';
+  const cats = (CS.cats||[]).filter(c=>c.direction===CS.dir);
+  const ST = { ok:'', pending:'<span class="chip warn">ждёт подтверждения</span>', confirmed:'<span class="chip ok">подтверждено</span>', rejected:'<span class="chip zero">не подтверждено</span>' };
+  $('#main').innerHTML = `<h2>Расходы и внесения</h2>
+  <div class="grid2"><div>
+   ${ro?'':open===false?`<div class="card row" style="flex-wrap:wrap;border-color:var(--bad)"><span>Смена не открыта — расходы записываются в открытую смену.</span><button class="btn primary" id="go-shift">Открыть смену</button></div>`:`<div class="card stack">
+    <div class="seg" style="display:inline-flex;align-self:flex-start"><button data-csdir="out" aria-pressed="${CS.dir==='out'}">➖ Расход из кассы</button><button data-csdir="in" aria-pressed="${CS.dir==='in'}">➕ Внесение в кассу</button></div>
+    <div class="label">${esc(storeName(S.store))}</div>
+    <div class="filters" style="margin:0">${cats.map(c=>`<button class="btn small ${CS.cat===c.name?'primary':''}" data-cscat="${esc(c.name)}">${esc(c.name)}</button>`).join('')}</div>
+    <input id="cs-cat" placeholder="Или своя категория" value="${esc(CS.cat)}">
+    <input id="cs-amount" type="number" min="1" inputmode="numeric" placeholder="Сумма, ₸" value="${esc(CS.amount)}">
+    ${inc?`<input id="cs-collector" placeholder="Кто забирает деньги (имя, должность) *" value="${esc(CS.collector)}">`:''}
+    <input id="cs-comment" placeholder="${CS.dir==='in'?'Комментарий: на что деньги (например, оплата закупа — что именно)':CS.cat==='Закуп'?'Что именно закупили':'Комментарий'}" value="${esc(CS.comment)}">
+    <label class="stack" style="gap:4px"><span class="label">Фото ${inc?'записи в тетради / расписки — обязательно':'чека (по желанию)'}</span>
+      <input type="file" id="cs-photo" accept="image/*" capture="environment"></label>
+    ${CS.busy?'<span class="meta">Загружаем фото…</span>':CS.photoUrl?`<img src="${CS.photoUrl}" alt="" style="max-width:160px;border-radius:8px">`:''}
+    ${inc?'<p class="meta" style="margin:0">Инкассация: запишите сумму и имя в тетрадь, сфотографируйте запись. Уведомление с фото сразу уйдёт владельцу в Telegram — пока там не нажмут «Деньги получены», инкассация отмечена как неподтверждённая.</p>':''}
+    <button class="btn primary" id="cs-save" ${CS.busy?'disabled':''}>${CS.dir==='in'?'Записать внесение':'Записать расход'}</button>
+   </div>`}
+  </div><div>
+   <h2>Журнал</h2>${isBoss()?storeFilterHtml():''}
+   <div class="filters">${[[1,'Сегодня'],[7,'7 дней'],[30,'30 дней']].map(([k,v])=>`<button class="btn small ${CS.days===k?'primary':''}" data-csdays="${k}">${v}</button>`).join('')}</div>
+   ${!CS.list?'<div class="empty">Загружаем…</div>':!CS.list.length?'<div class="empty">Записей нет</div>':`<div class="scroll"><table><tbody>
+     ${CS.list.map(m=>`<tr><td class="num">${tm(m.created_at)}${isBoss()?`<br><span class="meta">${esc(storeName(m.store_id))}</span>`:''}</td>
+       <td><b>${esc(m.category)}</b> ${ST[m.status]||''}${m.collector?`<br><span class="meta">забирает: ${esc(m.collector)}</span>`:''}${m.comment?`<br><span class="meta">${esc(m.comment)}</span>`:''}<br><span class="meta">${esc(m.by||'')}${m.confirmed_by_name?' · проверил(а) '+esc(m.confirmed_by_name):''}</span></td>
+       <td class="num" style="color:${m.direction==='in'?'var(--ok)':'var(--bad)'}">${m.direction==='in'?'+':'−'}${fmt(m.amount)}</td>
+       <td>${m.photo_path?`<button class="btn small" data-csph="${esc(m.photo_path)}">Фото</button>`:''}
+         ${m.status==='pending'&&isBoss()&&!ro?`<button class="btn small primary" data-csok="${m.id}">Получено</button><button class="btn small" data-csno="${m.id}">Нет</button>`:''}</td></tr>`).join('')}
+     </tbody></table></div>`}
+  </div></div>`;
+}
+
 /* ---------- бонусные карты ---------- */
 const BK = { brand:'sunshine', q:'', filter:'bonus', sort:'balance', off:0, stats:null, list:null, cur:null, card:null };
 const KIND = { earn:'Начисление за покупку', spend:'Списание в чеке', birthday:'День рождения', import:'Перенос из Sagi', manual:'Ручная корректировка', burn:'Сгорание', return:'Возврат' };
@@ -1149,7 +1231,7 @@ function renderBonus(){
 }
 
 /* ---------- доступ к вкладкам по ролям ---------- */
-const ALL_TABS = [['pos','Продажа'],['analytics','Аналитика'],['shifts','Смены'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты'],['bonus','Бонусные карты'],['nom','Номенклатура'],['site','Сайт'],['emps','Сотрудники']];
+const ALL_TABS = [['pos','Продажа'],['analytics','Аналитика'],['shifts','Смены'],['cash','Расходы'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты'],['bonus','Бонусные карты'],['nom','Номенклатура'],['site','Сайт'],['emps','Сотрудники']];
 const BOSS_ONLY = ['analytics','bonus','nom','site','emps'];
 function defaultTabs(role){ const boss = ['manager','viewer'].includes(role);
   return ALL_TABS.map(([v])=>v).filter(v => (boss || !BOSS_ONLY.includes(v)) && !(role==='viewer' && (v==='pos'||v==='emps'))); }
@@ -1240,6 +1322,16 @@ document.addEventListener('click', async e => {
   else if(d.nmlink||d.nmunlink){ const key=d.nmlink||d.nmunlink, [site,uid]=key.split(':');
     const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product: d.nmlink?S.nm.ed.id:null, p_status: d.nmlink?'confirmed':'rejected' });
     if(error) toast(errText(error)); else { toast(d.nmlink?'Связано с сайтом':'Отвязано'); S.nm.sq=''; S.nm.sfound=[]; await loadNom(); const fr=S.nm.data.rows.find(r=>r.id===S.nm.ed.id); if(fr) nmOpen(fr); else render(); } }
+  else if(d.csdir){ CS.dir=d.csdir; CS.cat=''; render(); }
+  else if(d.cscat!=null){ CS.cat=d.cscat; render(); }
+  else if(d.csdays){ CS.days=+d.csdays; await loadCash(); render(); }
+  else if(d.csph){ openCashPhoto(d.csph); }
+  else if(d.csok||d.csno){ const { error } = await sb.rpc('cash_move_confirm', { p_id:d.csok||d.csno, p_ok:!!d.csok }); if(error) toast(errText(error)); else { toast(d.csok?'Подтверждено':'Отмечено: не получено'); await loadCash(); render(); } }
+  else if(t.id==='cs-save'){ t.disabled=true;
+    const { error } = await sb.rpc('cash_move_add', { p_store:S.store, p_direction:CS.dir, p_category:CS.cat, p_amount:+CS.amount, p_comment:CS.comment, p_collector:CS.collector, p_photo:CS.photo });
+    if(error){ toast(errText(error)); t.disabled=false; return; }
+    toast(CS.dir==='in'?'Внесение записано':'Расход записан'); Object.assign(CS, { cat:'', amount:'', comment:'', collector:'', photo:null, photoUrl:'', cats:null }); await loadCash(); render(); }
+  else if(t.id==='go-shift'){ S.view='shifts'; render(); await loadShifts(); render(); }
   else if(d.bkbrand){ BK.brand=d.bkbrand; BK.off=0; BK.cur=null; BK.card=null; render(); await loadBonus(); render(); }
   else if(d.bkopen){ await openBonusClient(d.bkopen); }
   else if(d.bkpage){ BK.off=Math.max(0,BK.off+50*(+d.bkpage)); render(); await loadBonus(); render(); }
@@ -1297,6 +1389,7 @@ document.addEventListener('change', async e => {
   if(d.stf){ (S.stockF ||= {})[d.stf]=t.value; await loadStockView(); render(); }
   if(d.acc){ const [r,v]=d.acc.split(':'); const A={...(S.tabAccess||{})}; const cur=new Set(Array.isArray(A[r])?A[r]:defaultTabs(r)); t.checked?cur.add(v):cur.delete(v);
     A[r]=ALL_TABS.map(([x])=>x).filter(x=>cur.has(x)); const { error } = await sb.rpc('set_tab_access', { p:A }); if(error){ toast(errText(error)); t.checked=!t.checked; } else { S.tabAccess=A; toast('Сохранено'); } }
+  if(t.id==='cs-photo'){ cashPhoto(t.files[0]); }
   if(t.id==='bk-filter'){ BK.filter=t.value; BK.off=0; render(); await loadBonus(); render(); }
   if(t.id==='bk-sort'){ BK.sort=t.value; BK.off=0; render(); await loadBonus(); render(); }
   if(t.id==='cf-store'){ S.cf.store=t.value; await loadCerts(); render(); }
@@ -1318,6 +1411,8 @@ document.addEventListener('input', e => {
   else if(d.pamt){ S.pays[d.pamt] = Math.max(0,+t.value||0); if(d.pamt==='bonus') S.pays.bonus = Math.min(S.pays.bonus, maxBonus()); render(); }
   else if(t.id==='cert-code'){ S.certCode = t.value; }
   else if(t.id==='cert-q'){ S.certQ = t.value; render(); }
+  else if(t.id==='cs-cat'){ CS.cat=t.value; }
+  else if(t.id==='cs-amount'){ CS.amount=t.value; } else if(t.id==='cs-comment'){ CS.comment=t.value; } else if(t.id==='cs-collector'){ CS.collector=t.value; }
   else if(t.id==='bk-q'){ BK.q=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ BK.off=0; await loadBonus(); render(); }, 400); }
   else if(t.id==='cf-q'){ S.cf.q=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ await loadCerts(); render(); }, 400); }
   else if(t.id==='nm-q'){ S.nm.q=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ S.nm.off=0; await loadNom(); render(); }, 400); }
@@ -1351,6 +1446,7 @@ document.addEventListener('click', async e => {
   if(S.view==='site'){ render(); await loadSite(); render(); }
   if(S.view==='nom'){ render(); await loadNom(); render(); }
   if(S.view==='bonus'){ render(); await loadBonus(); render(); }
+  if(S.view==='cash'){ render(); await loadCash(); render(); }
   if(S.view==='analytics'){ S.an=null; render(); await loadAnalytics(); render(); }
 });
 
