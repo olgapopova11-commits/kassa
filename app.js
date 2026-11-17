@@ -15,7 +15,7 @@ const S = {
   cart:[], discType:'pct', disc:0, pays:{}, certCode:'', cert:null, certQ:'', certList:null,
   phone:'', cust:null, custMsg:'', bonusSpend:0,
   sales:[], salesQ:'', stockQ:'', stockRows:[], certs:[], emps:[], busy:false,
-  sel:null, period:'30', from:'', to:'', an:null, anMode:'sales', sa:null, saGroup:'category', saFilter:{}, saItems:null, saKey:null, stockSort:'total', wmode:null, doc:null, dq:'', dfound:[], audit:null, auditRows:[], whList:[], trList:[],
+  sel:null, period:'30', from:'', to:'', an:null, anMode:'sales', sa:null, saGroup:'category', saFilter:{}, saItems:null, saKey:null, stockSort:'total', wmode:null, st:{ site:'moon', status:'review', q:'', off:0, data:null, open:null, cands:null, cq:'', cfound:[] }, doc:null, dq:'', dfound:[], audit:null, auditRows:[], whList:[], trList:[],
 };
 
 /* ---------- утилиты ---------- */
@@ -73,7 +73,7 @@ setInterval(flushQueue, 60000);
 
 /* ---------- каталог (кэш на устройстве для быстрого поиска и офлайна) ---------- */
 async function loadCatalog(force){
-  const cached = ls.get('kassa_catalog2', null);
+  const cached = ls.get('kassa_catalog3', null);
   if(cached && !force){ S.catalog = cached.items; S.catalogAt = cached.at; }
   if(!navigator.onLine) return;
   if(cached && !force && Date.now() - cached.at < 6*3600e3) return;
@@ -81,12 +81,12 @@ async function loadCatalog(force){
   while(true){
     const { data, error } = await sb.from('products').select('id,barcode,sku,name,price,archived,photo_url').eq('archived', false).order('name').range(from, from+999);
     if(error) { toast('Каталог не загрузился: '+errText(error)); return; }
-    data.forEach(p => items.push([p.id, p.barcode, p.sku||'', p.name, Number(p.price)]));
+    data.forEach(p => items.push([p.id, p.barcode, p.sku||'', p.name, Number(p.price), p.photo_url||'']));
     if(data.length < 1000) break; from += 1000;
   }
-  S.catalog = items; S.catalogAt = Date.now(); ls.set('kassa_catalog2', {at:S.catalogAt, items});
+  S.catalog = items; S.catalogAt = Date.now(); ls.set('kassa_catalog3', {at:S.catalogAt, items});
 }
-const prodObj = a => ({ id:a[0], barcode:a[1], sku:a[2], name:a[3], price:a[4] });
+const prodObj = a => ({ id:a[0], barcode:a[1], sku:a[2], name:a[3], price:a[4], photo_url:a[5]||null });
 function searchCatalog(q){
   q = q.trim().toLowerCase(); if(!q) return [];
   const exact = S.catalog.filter(p => p[1] === q || p[2].toLowerCase() === q);
@@ -154,7 +154,7 @@ async function boot(){
 /* ---------- каркас ---------- */
 function renderShell(){
   const tabs = [['pos','Продажа'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты']];
-  if(isBoss()) { tabs.splice(1,0,['analytics','Аналитика']); tabs.push(['emps','Сотрудники']); }
+  if(isBoss()) { tabs.splice(1,0,['analytics','Аналитика']); tabs.push(['site','Сайт']); tabs.push(['emps','Сотрудники']); }
   $('#app').innerHTML = `<header id="hdr"></header><main id="main"></main>
     <nav class="tabs" role="tablist">${tabs.map(([v,t])=>`<button role="tab" data-view="${v}">${t}</button>`).join('')}</nav>`;
   document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => { S.view = b.dataset.view; render(); scrollTo(0,0); });
@@ -174,7 +174,7 @@ function renderHeader(){
 function render(){
   document.querySelectorAll('nav.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.view === S.view));
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, analytics:renderAnalytics, wh:renderWh })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, analytics:renderAnalytics, wh:renderWh, site:renderSite })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -696,6 +696,54 @@ function renderStockAn(){
     <p class="meta">Материал и цвет взяты из Google-таблицы товаров, а где их там нет — из названия. Товары без материала стоят в строке «Не указан».</p>`}`;
 }
 
+/* ---------- сайт ↔ база ---------- */
+const SITE_ST = [['review','Проверить'],['auto','Связано автоматически'],['confirmed','Подтверждено'],['none','Без пары'],['rejected','Нет в базе']];
+const SITE_NAME = { moon:'mooncollection.kz', sunshine:'sunshinejewelry.kz' };
+async function loadSite(){
+  const f = S.st; f.data = null;
+  const { data, error } = await sb.rpc('site_list', { p_site:f.site, p_status:f.status, p_q:f.q.trim(), p_offset:f.off, p_limit:50 });
+  if(error){ toast(errText(error)); f.data = { rows:[], counts:{} }; } else f.data = data;
+}
+function siteImg(u){ return u ? `<img class="thumb" style="width:64px;height:64px" src="${esc(thumbUrl(u))}" data-full="${esc(u)}" alt="" loading="lazy" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : '<span class="thumb" style="width:64px;height:64px"></span>'; }
+function renderSite(){
+  const f = S.st, D = f.data, cnt = k => (D && D.counts && D.counts[f.site+':'+k]) || 0;
+  $('#main').innerHTML = `<h2>Сайт ↔ база товаров</h2>
+    <p class="meta">Слева карточка с сайта, справа товар из базы, с которым она связана. Через эту связь на сайт пойдут остатки, а в кассу — фото.</p>
+    <div class="filters">${Object.entries(SITE_NAME).map(([k,v])=>`<button class="btn small ${f.site===k?'primary':''}" data-stsite="${k}">${v}</button>`).join('')}</div>
+    <div class="filters">${SITE_ST.map(([k,v])=>`<button class="btn small ${f.status===k?'primary':''}" data-ststatus="${k}">${v} · ${cnt(k)}</button>`).join('')}
+      <input id="st-q" placeholder="Поиск: название или штрихкод" value="${esc(f.q)}" style="flex:1;min-width:200px"></div>
+    ${!D?'<div class="empty">Загружаем…</div>':!D.rows.length?'<div class="empty">Здесь пусто</div>':D.rows.map(r=>{ const key=r.site+':'+r.uid, open=f.open===key;
+      return `<div class="card" style="margin-bottom:8px">
+      <div class="grid2" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:center">
+        <div class="row" style="justify-content:flex-start;align-items:flex-start">${siteImg(r.photo)}<div><b>${esc(r.title)}</b><br><span class="meta">${esc(r.part||'')}</span><br><span class="num">${fmt(r.price)}</span>
+          ${r.url?` · <a href="${esc(r.url)}" target="_blank" rel="noopener">на сайте</a>`:''}</div></div>
+        <div class="row" style="justify-content:flex-start;align-items:flex-start">${r.product_id?`${siteImg(r.p_photo)}<div><b>${esc(r.p_name)}</b><br><span class="meta num">${esc(r.p_barcode)}</span><br>
+          <span class="num" style="${+r.p_price!==+r.price?'color:var(--bad)':''}">${fmt(r.p_price)}${+r.p_price!==+r.price?' — цена отличается':''}</span>${r.score!=null&&r.status!=='confirmed'?` <span class="chip">сходство ${Math.round(r.score*100)}%</span>`:''}</div>`
+          :'<div class="meta">Не связан с базой</div>'}</div>
+      </div>
+      <div class="row" style="justify-content:flex-end;flex-wrap:wrap;margin-top:8px">
+        ${r.product_id&&r.status!=='confirmed'?`<button class="btn small primary" data-stok="${key}" data-pid="${r.product_id}">Верно</button>`:''}
+        <button class="btn small" data-stopen="${key}">${open?'Скрыть':'Выбрать другой товар'}</button>
+        ${r.status!=='rejected'?`<button class="btn small" data-stno="${key}">Нет в базе</button>`:''}
+      </div>
+      ${open?`<div class="cust stack" style="margin-top:8px">
+        <span class="label">Похожие товары в базе</span>
+        ${!f.cands?'<div class="meta">Ищем…</div>':f.cands.map(c=>`<button class="prod" data-stpick="${key}" data-pid="${c.product_id}">${thumb({photo_url:c.photo})}<span><b>${esc(c.name)}</b><br><span class="meta num">${esc(c.barcode)} · сходство ${Math.round(c.sim*100)}%</span></span><span class="price num">${fmt(c.price)}</span></button>`).join('')}
+        <span class="label">Или найдите вручную</span>
+        <input id="st-cq" placeholder="Штрихкод или название из базы" value="${esc(f.cq)}" autocomplete="off">
+        ${f.cfound.slice(0,10).map(p=>`<button class="prod" data-stpick="${key}" data-pid="${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}</span></span><span class="price num">${fmt(p.price)}</span></button>`).join('')}
+      </div>`:''}
+    </div>`; }).join('')}
+    ${D&&(f.off||D.rows.length===50)?`<div class="row"><button class="btn" data-stpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-stpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`;
+}
+async function siteSet(key, pid, status){
+  const [site, uid] = key.split(':');
+  const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product:pid||null, p_status:status });
+  if(error) return toast(errText(error));
+  toast(status==='confirmed'?'Связь подтверждена':'Отмечено: нет в базе');
+  S.st.open=null; S.st.cands=null; await loadSite(); render();
+}
+
 /* ---------- сотрудники ---------- */
 async function loadEmps(){ const { data } = await sb.from('employees').select('*').order('created_at'); S.emps = data || []; }
 function renderEmps(){
@@ -759,6 +807,14 @@ document.addEventListener('click', async e => {
   else if(d.estores){ const [eid, sid] = d.estores.split(':'); const e = S.emps.find(x=>x.id===eid); if(e){ const cur = new Set(e.store_ids||(e.home_store_id?[e.home_store_id]:[])); t.checked ? cur.add(+sid) : cur.delete(+sid); e.store_ids=[...cur].sort((a,b)=>a-b); updEmp(eid, { store_ids: e.store_ids }); } }
   else if(d.sgroup){ const g=d.sgroup; S.sel = S.stores.filter(st => g==='all' || st.brand===g || st.city===g).map(st=>st.id); onSelChange(); }
   else if(d.sone){ const id=+d.sone; selStores(); S.sel = t.checked ? [...new Set([...S.sel, id])] : S.sel.filter(x=>x!==id); if(!S.sel.length) S.sel=[id]; onSelChange(); }
+  else if(d.stsite){ S.st.site=d.stsite; S.st.off=0; S.st.open=null; render(); await loadSite(); render(); }
+  else if(d.ststatus){ S.st.status=d.ststatus; S.st.off=0; S.st.open=null; render(); await loadSite(); render(); }
+  else if(d.stpage){ S.st.off=Math.max(0,S.st.off+50*(+d.stpage)); S.st.open=null; render(); await loadSite(); render(); window.scrollTo(0,0); }
+  else if(d.stok){ await siteSet(d.stok, d.pid, 'confirmed'); }
+  else if(d.stpick){ await siteSet(d.stpick, d.pid, 'confirmed'); }
+  else if(d.stno){ await siteSet(d.stno, null, 'rejected'); }
+  else if(d.stopen){ if(S.st.open===d.stopen){ S.st.open=null; render(); } else { S.st.open=d.stopen; S.st.cands=null; S.st.cq=''; S.st.cfound=[]; render();
+      const [site,uid]=d.stopen.split(':'); const { data } = await sb.rpc('site_candidates', { p_site:site, p_uid:+uid }); S.st.cands=data||[]; render(); } }
   else if(d.anmode){ S.anMode=d.anmode; render(); await loadAnalytics(); render(); }
   else if(d.sagroup){ S.saGroup=d.sagroup; render(); await loadStockAn(); render(); }
   else if(d.safilter!=null){ e.stopPropagation(); S.saFilter={...S.saFilter, [S.saGroup]:d.safilter}; S.saGroup = S.saGroup==='category'?'material':'category'; render(); await loadStockAn(); render(); }
@@ -798,6 +854,8 @@ document.addEventListener('input', e => {
   else if(d.pamt){ S.pays[d.pamt] = Math.max(0,+t.value||0); if(d.pamt==='bonus') S.pays.bonus = Math.min(S.pays.bonus, maxBonus()); render(); }
   else if(t.id==='cert-code'){ S.certCode = t.value; }
   else if(t.id==='cert-q'){ S.certQ = t.value; render(); }
+  else if(t.id==='st-q'){ S.st.q=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ S.st.off=0; await loadSite(); render(); }, 400); }
+  else if(t.id==='st-cq'){ S.st.cq=t.value; S.st.cfound=searchCatalog(t.value); render(); }
   else if(t.id==='dq'){ S.dq=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ S.dfound=searchCatalog(S.dq); render(); }, 200); }
   else if(d.dqty!=null){ S.doc.items[+d.dqty].qty = Math.max(1,+t.value||1); }
   else if(d.dcost!=null){ S.doc.items[+d.dcost].cost = t.value===''?null:Math.max(0,+t.value); }
@@ -821,6 +879,7 @@ document.addEventListener('click', async e => {
   if(S.view==='emps'){ await loadEmps(); render(); }
   if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); }
   if(S.view==='stock' && !S.stockRows.length){ await loadStockView(); render(); }
+  if(S.view==='site'){ render(); await loadSite(); render(); }
   if(S.view==='analytics'){ S.an=null; render(); await loadAnalytics(); render(); }
 });
 
