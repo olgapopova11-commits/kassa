@@ -212,7 +212,8 @@ async function boot(){
   if(!S.stores.some(s=>s.id===S.store)) S.store = (S.stores[0]||{}).id;
   { const [a, e] = await Promise.all([sb.rpc('get_tab_access'), sb.rpc('get_tab_edit')]); S.tabAccess = a.data || {}; S.tabEdit = e.data || {}; }
   const ph1688 = location.hash.startsWith('#ph=') ? location.hash.slice(4) : null; if(ph1688) try{ history.replaceState(null,'','#po'); }catch(_){}
-  renderShell(); await loadPosShift(); if(S.view!=='pos') render(); if(ph1688) importPhotos1688(ph1688); await loadCatalog(); loadPromos().then(()=>{ if(S.view==='pos') render(); }); render(); flushQueue(); subscribeReqs(); if(S.view!=='pos') loadView();
+  const sup1688 = location.hash.startsWith('#sup=') ? location.hash.slice(5) : null; if(sup1688) try{ history.replaceState(null,'','#po'); }catch(_){}
+  renderShell(); await loadPosShift(); if(S.view!=='pos') render(); if(ph1688) importPhotos1688(ph1688); if(sup1688) importSuppliers(sup1688); await loadCatalog(); loadPromos().then(()=>{ if(S.view==='pos') render(); }); render(); flushQueue(); subscribeReqs(); if(S.view!=='pos') loadView();
 }
 
 /* ---------- каркас ---------- */
@@ -1918,6 +1919,27 @@ document.addEventListener('click', async e => { const t = e.target.closest('butt
 
 document.addEventListener('click', e => { if(S.view!=='po') return; const t = e.target.closest('button[data-poopen]'); if(!t) return; PO.openO = PO.openO || {}; PO.openO[t.dataset.poopen] = !PO.openO[t.dataset.poopen]; render(); });
 
+/* ---------- закуп: группы «что дозаказать» и справочник поставщиков ---------- */
+document.addEventListener('click', async e => { if(S.view!=='po') return; const t = e.target.closest('button'); if(!t) return; const d = t.dataset;
+  if('poscat' in d){ PO.scat = d.poscat; render(); }
+  else if(t.id==='po-supmore'){ PO.supLim = (PO.supLim||100) + 100; render(); }
+  else if(d.supoq){ const s = (PO.sups||[]).find(x=>x.name===d.supoq); PO.mode = 'orders'; PO.filter = 'all'; PO.oq = s ? (s.name) : ''; PO.list = null; render(); await loadPo(); render(); }
+  else if(d.supedit){ const s = (PO.sups||[]).find(x=>x.name===d.supedit); if(!s) return;
+    modal(`<div class="row"><h3 style="margin:0">Поставщик</h3><button class="btn small" data-close>✕</button></div>
+      <div class="stack" style="gap:8px;margin-top:10px"><span class="meta">${esc(noZh(s.ru)||'')}${s.login?' · '+esc(s.login):''}</span>
+      <label class="stack" style="gap:2px"><span class="label">Как называем у себя</span><input id="sp-alias" value="${esc(s.alias||noZh(s.ru)||'')}" placeholder="например, «Мейди — серьги смола»"></label>
+      <label class="stack" style="gap:2px"><span class="label">Ссылка на магазин</span><input id="sp-shop" value="${esc(s.shop_url||s.url||'')}" placeholder="https://…"></label>
+      <label class="stack" style="gap:2px"><span class="label">Контакт (WeChat, телефон, менеджер)</span><input id="sp-contact" value="${esc(s.contact||'')}"></label>
+      <label class="stack" style="gap:2px"><span class="label">Заметки</span><textarea id="sp-notes" rows="3">${esc(s.notes||'')}</textarea></label>
+      <div class="row"><span></span><button class="btn primary" id="sp-save" data-name="${esc(s.name)}">Сохранить</button></div></div>`); }
+  else if(t.id==='sp-save'){ const { error } = await sb.rpc('supplier_save', { p:{ name:t.dataset.name, alias:$('#sp-alias').value, shop_url:$('#sp-shop').value, contact:$('#sp-contact').value, notes:$('#sp-notes').value } });
+    if(error) return toast(errText(error)); closeModal(); toast('Сохранено'); const r = await sb.rpc('suppliers_list'); PO.sups = r.data||PO.sups; render(); }
+});
+document.addEventListener('toggle', e => { const t = e.target; if(S.view!=='po' || !t.dataset || !t.dataset.posgrp) return; PO.sopen = PO.sopen || {}; PO.sopen[t.dataset.posgrp] = t.open; }, true);
+document.addEventListener('input', e => { if(S.view!=='po') return; const t = e.target; if(t.id!=='po-sq' && t.id!=='po-supq') return;
+  if(t.id==='po-sq') PO.sq = t.value; else PO.supq = t.value; clearTimeout(PO.qt); PO.qt = setTimeout(()=>{ render(); const i = $('#'+t.id); if(i){ i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 300); });
+async function importSuppliers(raw){ try{ const p = JSON.parse(decodeURIComponent(raw)); const { data, error } = await sb.rpc('suppliers_import', { p }); if(error) throw error; toast('Магазины поставщиков добавлены: '+data); }catch(e){ toast('Поставщики не загрузились: '+errText(e)); } }
+
 function loadScriptOnce(src){ return new Promise((ok,no)=>{ if(document.querySelector(`script[src="${src}"]`)) return ok(); const el=document.createElement('script'); el.src=src; el.onload=ok; el.onerror=no; document.head.appendChild(el); }); }
 async function sagiImport(file){
   const brand = BK.brand; BK.imp = 'Читаем файл…'; render();
@@ -2000,11 +2022,12 @@ async function loadPo(){
   if(!PO.fx){ const r = await sb.rpc('fx_current'); PO.fx = r.data || {}; }
   if(PO.mode==='orders'){ const { data, error } = await sb.rpc('po_list', { p_status: PO.filter==='all'?null:PO.filter }); if(error) toast(errText(error)); PO.list = data||[]; }
   if(PO.mode==='suggest'){ const { data, error } = await sb.rpc('po_suggest', { p_days:30 }); if(error) toast(errText(error)); PO.sug = data||[]; }
+  if(PO.mode==='sup'){ const { data, error } = await sb.rpc('suppliers_list'); if(error) toast(errText(error)); PO.sups = data||[]; }
   if(PO.mode==='an'){ const now = new Date(), iso = x => x.toLocaleDateString('sv-SE'); const from = PO.anPer==='month' ? new Date(now.getFullYear(), now.getMonth(), 1) : PO.anPer==='q' ? new Date(now.getFullYear(), now.getMonth()-2, 1) : new Date(now.getFullYear(), 0, 1);
     const { data, error } = await sb.rpc('po_analytics', { p_from: iso(from), p_to: iso(now) }); if(error) toast(errText(error)); PO.an = data||{}; }
 }
 function renderPo(){
-  const modes = [['orders','Заказы'],['new','Новый заказ'],['suggest','Что дозаказать'],['an','Аналитика закупа']].filter(([k])=>poEdit() || k!=='new');
+  const modes = [['orders','Заказы'],['new','Новый заказ'],['suggest','Что дозаказать'],['sup','Поставщики'],['an','Аналитика закупа']].filter(([k])=>poEdit() || k!=='new');
   const head = `<div class="row" style="flex-wrap:wrap"><h2>Закуп</h2><span class="row" style="gap:6px">${(PO.list||[]).some(o=>(o.supplier&&/[\u4e00-\u9fff]/.test(o.supplier)&&!o.supplier_ru)||(o.items||[]).some(i=>i.supplier_title&&!i.title_ru))?`<button class="btn small" id="po-tr">🌐 Перевести названия на русский</button>`:''}${poEdit()?`<label class="btn small" style="cursor:pointer">⬆ Загрузить заказы из Китая (Excel)<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label>`:''}</span></div>
   ${PO.imp?`<div class="card meta" style="margin-bottom:8px">${esc(PO.imp)}</div>`:''}
   <div class="seg" style="display:inline-flex;margin-bottom:10px">${modes.map(([k,v])=>`<button data-pomode="${k}" aria-pressed="${PO.mode===k}">${v}</button>`).join('')}</div>`;
@@ -2061,12 +2084,30 @@ function renderPo(){
         <button class="btn primary" id="po-save" ${d.items.length?'':'disabled'}>Оформить заказ</button></div></div>`;
   }
   if(PO.mode==='suggest'){
-    const L = PO.sug;
-    body = `<p class="meta">Все товары, которые продавались за последние 30 дней и которых по сети не хватит на следующие 30 дней, — по скорости продаж, сверху самые ходовые. Учтено то, что уже заказано и едет. Если товар не нужен или сезон прошёл — просто не заказывайте его.</p>
-    ${!L?'<div class="empty">Считаем…</div>':!L.length?'<div class="empty">Всего хватает</div>':`<div class="scroll"><table><thead><tr><th></th><th>Товар</th><th>Продано за 30 дн.</th><th>Остаток</th><th>Заказано / в пути</th><th>Дозаказать</th><th></th></tr></thead><tbody>
-      ${L.map(p=>`<tr><td>${thumb(p)}</td><td>${esc(p.name)}<br><span class="meta num">${esc(p.barcode)}${p.cost?' · закуп '+fmt(p.cost):''}</span>${p.purchase_url?` · <a href="${esc(p.purchase_url)}" target="_blank" rel="noopener" class="meta">ссылка</a>`:''}</td>
-        <td class="num">${p.sold30}</td><td class="num" ${p.stock<=0?'style="color:var(--bad)"':''}>${p.stock}${p.days_left!=null?`<br><span class="meta">хватит на ${p.days_left} дн.</span>`:''}</td><td class="num">${p.incoming||'—'}</td><td class="num"><b>${p.need}</b></td>
-        <td>${poEdit()?`<button class="btn small" data-posug="${p.id}" data-need="${p.need}" data-cost="${p.cost??''}">В заказ</button>`:''}</td></tr>`).join('')}</tbody></table></div>`}`;
+    const A = PO.sug, q = (PO.sq||'').trim().toLowerCase(), cat = PO.scat||'';
+    const cats = A ? [...A.reduce((m,p)=>m.set(p.cat,(m.get(p.cat)||0)+1), new Map())].sort((a,b)=>b[1]-a[1]) : [];
+    const L = A && A.filter(p => (!cat || p.cat===cat) && (!q || q.split(/\s+/).every(w => (p.name+' '+p.barcode).toLowerCase().includes(w))));
+    const groups = L ? [...L.reduce((m,p)=>{ (m.get(p.cat) || m.set(p.cat, []).get(p.cat)).push(p); return m; }, new Map())] : [];
+    const row = p => `<tr><td>${thumb(p)}</td><td>${esc(p.name)}<br><span class="meta num">${esc(p.barcode)}${p.cost?' · закуп '+fmt(p.cost):''}</span>${p.purchase_url?` · <a href="${esc(p.purchase_url)}" target="_blank" rel="noopener" class="meta">у поставщика ↗</a>`:''}</td>
+        <td class="num">${p.sold30}</td><td class="num" ${p.stock<=0?'style="color:var(--bad)"':''}>${p.stock}${p.days_left!=null?`<br><span class="meta">на ${p.days_left} дн.</span>`:''}</td><td class="num">${p.incoming||'—'}</td><td class="num"><b>${p.need}</b></td>
+        <td>${poEdit()?`<button class="btn small" data-posug="${p.id}" data-need="${p.need}" data-cost="${p.cost??''}">В заказ</button>`:''}</td></tr>`;
+    body = `<p class="meta" style="margin:0 0 8px">Товары, которые продавались за 30 дней и которых не хватит на следующие 30 дней (с учётом того, что уже едет). Выберите категорию или найдите по слову — например «краб», «кольцо», «жемчуг».</p>
+    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:8px"><input id="po-sq" type="search" placeholder="🔍 Слово из названия или штрихкод" value="${esc(PO.sq||'')}" style="flex:1;min-width:220px" autocomplete="off"></div>
+    ${A?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:10px"><button class="btn small ${!cat?'primary':''}" data-poscat="">Все (${A.length})</button>${cats.map(([c,n])=>`<button class="btn small ${cat===c?'primary':''}" data-poscat="${esc(c)}">${esc(c)} (${n})</button>`).join('')}</div>`:''}
+    ${!A?'<div class="empty">Считаем…</div>':!L.length?'<div class="empty">Ничего не найдено</div>':groups.map(([c,ps])=>`<details class="card" style="margin-bottom:8px;padding:8px 12px" ${groups.length===1||(PO.sopen||{})[c]?'open':''} data-posgrp="${esc(c)}"><summary style="cursor:pointer;font-weight:600">${esc(c)} <span class="meta">· ${ps.length} поз. · дозаказать ${ps.reduce((a,p)=>a+(+p.need||0),0)} шт.</span></summary>
+      <div class="scroll" style="margin-top:6px"><table><thead><tr><th></th><th>Товар</th><th>Продано 30 дн.</th><th>Остаток</th><th>Едет</th><th>Дозаказать</th><th></th></tr></thead><tbody>${ps.map(row).join('')}</tbody></table></div></details>`).join('')}`;
+  }
+  if(PO.mode==='sup'){
+    const A = PO.sups, q = (PO.supq||'').trim().toLowerCase();
+    const nm = s => s.alias || noZh(s.ru) || noZh(s.login) || s.name;
+    const L = A && A.filter(s => !q || [s.name, s.ru, s.alias, s.login, s.contact, s.notes].filter(Boolean).join(' ').toLowerCase().includes(q));
+    body = `<p class="meta" style="margin:0 0 8px">Все поставщики из заказов. Нажмите ✎, чтобы дать понятное название, записать контакт и заметки. «Магазин ↗» открывает магазин поставщика.</p>
+    <div class="row" style="margin-bottom:8px"><input id="po-supq" type="search" placeholder="🔍 Поиск поставщика" value="${esc(PO.supq||'')}" style="flex:1" autocomplete="off"></div>
+    ${!A?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Не найдено</div>':`<div class="scroll"><table><thead><tr><th>Поставщик</th><th>Заказов</th><th>Последний</th><th>Сумма</th><th></th></tr></thead><tbody>
+      ${L.slice(0, PO.supLim||100).map(s=>`<tr><td><b>${esc(nm(s))}</b>${s.alias&&noZh(s.ru)?`<br><span class="meta">${esc(s.ru)}</span>`:''}${nm(s)===s.name?' <span class="meta">(перевода ещё нет)</span>':''}${s.contact?`<br><span class="meta">📞 ${esc(s.contact)}</span>`:''}${s.notes?`<br><span class="meta">${esc(s.notes)}</span>`:''}</td>
+        <td class="num">${s.orders}${s.open?`<br><span class="meta">в пути ${s.open}</span>`:''}</td><td class="num">${dshort(s.last)}</td><td class="num">${fmt(s.goods)}</td>
+        <td style="white-space:nowrap">${s.shop_url||s.url?`<a class="btn small" href="${esc(s.shop_url||s.url)}" target="_blank" rel="noopener">Магазин ↗</a> `:''}<button class="btn small" data-supoq="${esc(s.name)}" title="Заказы этого поставщика">Заказы</button> ${poEdit()?`<button class="btn small" data-supedit="${esc(s.name)}">✎</button>`:''}</td></tr>`).join('')}</tbody></table></div>
+      ${L.length>(PO.supLim||100)?`<button class="btn" id="po-supmore" style="width:100%;margin-top:6px">Показать ещё (${L.length-(PO.supLim||100)})</button>`:''}`}`;
   }
   if(PO.mode==='an'){
     const A = PO.an, n = v => (+v||0).toLocaleString('ru-RU');
