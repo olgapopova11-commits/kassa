@@ -10,7 +10,7 @@ const ROLE = { owner:'Владелец', manager:'Менеджер', consultant:
 const BRAND = { moon:'MOON', sunshine:'Sunshine' };
 
 const S = {
-  me:null, stores:[], store:null, view:(location.hash.slice(1).replace(/[^a-z]/g,'')||'pos'), catalog:[], catalogAt:null,
+  me:null, stores:[], store:null, view:(location.hash.startsWith('#ph=')?'po':(location.hash.slice(1).replace(/[^a-z]/g,'')||'pos')), catalog:[], catalogAt:null,
   q:'', found:[], stock:{},
   cf:{ st:'active', q:'', store:'' }, cart:[], discType:'pct', disc:0, pays:{}, certCode:'', cert:null, certQ:'', certList:null,
   phone:'', cust:null, custMsg:'', bonusSpend:0,
@@ -58,7 +58,7 @@ async function onSelChange(){
 function normPhone(v){ let d=String(v||'').replace(/\D/g,''); if(d.length===11&&(d[0]==='7'||d[0]==='8')) d=d.slice(1); if(d.length===10) return '+7'+d; return null; }
 function toast(t){ const el=document.createElement('div'); el.className='toast'; el.textContent=t; document.body.append(el); setTimeout(()=>el.remove(),3200); }
 const ls = { get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } }, set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)) }catch(e){} } };
-const thumbUrl = u => u.replace('static.tildacdn.pro/','thumb.tildacdn.pro/').replace(/\/([^/]+)$/,'/-/resize/120x/$1');
+const thumbUrl = u => /alicdn\.com/.test(u) ? u.replace(/(_\d+x\d+.*)?$/,'_160x160.jpg') : u.replace('static.tildacdn.pro/','thumb.tildacdn.pro/').replace(/\/([^/]+)$/,'/-/resize/120x/$1');
 // увеличенное фото при наведении на миниатюру (на телефоне — по касанию и удержанию)
 (() => {
   let box;
@@ -211,7 +211,8 @@ async function boot(){
   S.store = ls.get('kassa_store', null) || (me.store_ids||[])[0] || (S.stores[0]||{}).id;
   if(!S.stores.some(s=>s.id===S.store)) S.store = (S.stores[0]||{}).id;
   { const [a, e] = await Promise.all([sb.rpc('get_tab_access'), sb.rpc('get_tab_edit')]); S.tabAccess = a.data || {}; S.tabEdit = e.data || {}; }
-  renderShell(); await loadPosShift(); if(S.view!=='pos') render(); await loadCatalog(); loadPromos().then(()=>{ if(S.view==='pos') render(); }); render(); flushQueue(); subscribeReqs(); if(S.view!=='pos') loadView();
+  const ph1688 = location.hash.startsWith('#ph=') ? location.hash.slice(4) : null; if(ph1688) try{ history.replaceState(null,'','#po'); }catch(_){}
+  renderShell(); await loadPosShift(); if(S.view!=='pos') render(); if(ph1688) importPhotos1688(ph1688); await loadCatalog(); loadPromos().then(()=>{ if(S.view==='pos') render(); }); render(); flushQueue(); subscribeReqs(); if(S.view!=='pos') loadView();
 }
 
 /* ---------- каркас ---------- */
@@ -2083,7 +2084,7 @@ document.addEventListener('change', async e => { if(S.view==='me' && e.target.id
 
 /* ---------- административный штат (видит только владелец) ---------- */
 const AD = { month: new Date().toISOString().slice(0,7), list:null };
-const AD_F = [['bonus','Премия'],['deduction','Удержание'],['paid_cash','Выплачено наличными'],['paid_card','Выплачено на карту']];
+const AD_F = [['bonus','Премия'],['paid_cash','Выплачено наличными'],['paid_card','Выплачено на карту']];
 async function loadAdm(){ AD.list = null; const { data, error } = await sb.rpc('admin_pay_list', { p_month: AD.month+'-01' }); if(error) toast(errText(error)); AD.list = data || []; }
 const adCalc = a => { const due = (+a.accrued||0) + (+a.bonus||0) - (+a.deduction||0), card = a.all_card ? due : (+a.official_card||0), paid = (+a.paid_cash||0) + (+a.paid_card||0);
   return { due, card, cash: due - card, paid, rest: due - paid, cost: due + (+a.tax||0) }; };
@@ -2093,16 +2094,16 @@ function renderAdm(){
   const num = (a,k,w=100) => `<input class="small" type="number" min="0" inputmode="numeric" value="${+a[k]||''}" data-adf="${a.id}:${k}" style="width:${w}px">`;
   $('#main').innerHTML = `<div class="row"><h2>Административный штат</h2><label class="meta">Месяц <input type="month" id="ad-month" value="${AD.month}"></label></div>
   <p class="meta">🔒 Эту вкладку видите только вы. Официальная часть на карту считается по единому платежу (${ep}% от официальной ставки): работнику на руки ставка минус удержанная доля (ОПВ, ВОСМС, ИПН), налоги целиком платит компания. Остаток до управленческой суммы — наличными. Суммы сохраняются сразу при вводе.</p>
-  ${!L?'<div class="empty">Загружаем…</div>':`<div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Как считается</th><th>Начислено</th>${AD_F.slice(0,2).map(([,t])=>`<th>${t}</th>`).join('')}<th>К выплате</th><th>Офиц. ставка</th><th>На карту офиц.</th><th>Наличными</th>${AD_F.slice(2).map(([,t])=>`<th>${t}</th>`).join('')}<th>Остаток</th><th>Налоги ЕП</th><th></th></tr></thead><tbody>
+  ${!L?'<div class="empty">Загружаем…</div>':`<div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Как считается</th><th>Начислено</th>${AD_F.slice(0,1).map(([,t])=>`<th>${t}</th>`).join('')}<th>К выплате</th><th>Офиц. ставка</th><th>На карту офиц.</th><th>Наличными</th>${AD_F.slice(1).map(([,t])=>`<th>${t}</th>`).join('')}<th>Остаток</th><th>Налоги ЕП</th><th></th></tr></thead><tbody>
     ${L.map((a,n)=>{ const c = C[n]; return `<tr><td><input value="${esc(a.name)}" data-adf="${a.id}:name" style="min-width:130px"><br><input value="${esc(a.position||'')}" data-adf="${a.id}:position" placeholder="должность" class="small" style="min-width:130px">${a.note?`<br><span class="meta">${esc(a.note)}</span>`:''}</td>
       <td><select data-adf="${a.id}:rule"><option value="fixed" ${a.rule!=='pct'?'selected':''}>оклад</option><option value="pct" ${a.rule==='pct'?'selected':''}>% от продаж</option></select><br>
         ${a.rule==='pct'?`${num(a,'pct',60)} % · <span class="meta">${(a.pct_stores||[1,2,3,6]).map(id=>esc((S.allStores.find(x=>x.id===id)||{}).address||id)).join(', ')}<br>продажи ${fmt(a.sales)}</span>`:num(a,'salary',110)}</td>
-      <td class="num"><b>${fmt(a.accrued)}</b></td><td>${num(a,'bonus')}</td><td>${num(a,'deduction')}</td><td class="num"><b>${fmt(c.due)}</b></td>
+      <td class="num"><b>${fmt(a.accrued)}</b></td><td>${num(a,'bonus')}</td><td class="num"><b>${fmt(c.due)}</b></td>
       <td>${num(a,'official_base',100)}<br><label class="meta"><input type="checkbox" data-adf="${a.id}:all_card" ${a.all_card?'checked':''}> всё на карту</label></td>
       <td class="num">${fmt(c.card)}</td><td class="num">${fmt(c.cash)}</td><td>${num(a,'paid_cash')}</td><td>${num(a,'paid_card')}</td>
       <td class="num" style="color:${c.rest<0?'var(--bad)':c.rest>0?'inherit':'var(--ok)'}"><b>${c.rest<0?'переплата '+fmt(-c.rest):fmt(c.rest)}</b></td><td class="num">${fmt(a.tax)}</td>
       <td><button class="btn small" data-addel="${a.id}" title="Удалить">✕</button></td></tr>`; }).join('') || `<tr><td colspan="14" class="meta">В этом месяце пока никого нет — нажмите «Перенести с прошлого месяца» или добавьте сотрудника</td></tr>`}
-    ${L.length>1?`<tr><td><b>Итого</b></td><td></td><td class="num">${fmt(L.reduce((t,a)=>t+(+a.accrued||0),0))}</td><td></td><td></td><td class="num"><b>${fmt(sum('due'))}</b></td><td></td><td class="num">${fmt(sum('card'))}</td><td class="num">${fmt(sum('cash'))}</td><td></td><td></td><td class="num"><b>${fmt(sum('rest'))}</b></td><td class="num">${fmt(L.reduce((t,a)=>t+(+a.tax||0),0))}</td><td></td></tr>`:''}</tbody></table></div>
+    ${L.length>1?`<tr><td><b>Итого</b></td><td></td><td class="num">${fmt(L.reduce((t,a)=>t+(+a.accrued||0),0))}</td><td></td><td class="num"><b>${fmt(sum('due'))}</b></td><td></td><td class="num">${fmt(sum('card'))}</td><td class="num">${fmt(sum('cash'))}</td><td></td><td></td><td class="num"><b>${fmt(sum('rest'))}</b></td><td class="num">${fmt(L.reduce((t,a)=>t+(+a.tax||0),0))}</td><td></td></tr>`:''}</tbody></table></div>
   <p class="meta">Расход компании на административный штат за месяц: <b>${fmt(sum('cost'))}</b> (выплаты ${fmt(sum('due'))} + налоги ${fmt(L.reduce((t,a)=>t+(+a.tax||0),0))}).</p>`}
   <div class="card stack" style="margin-top:14px"><b>Добавить сотрудника</b>
     <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px"><input id="ad-name" placeholder="Имя и фамилия"><input id="ad-pos" placeholder="Должность: бухгалтер, менеджер, СММ…"><input id="ad-sal" type="number" min="0" inputmode="numeric" placeholder="оклад, ₸" style="width:130px">
@@ -2264,4 +2265,16 @@ async function translate1688(){
     }
     PO.imp = `Переведено названий: ${done}.`; PO.list = null; await loadPo(); render();
   }catch(e){ PO.imp = 'Перевод не получился: '+errText(e)+'. Нажмите «Перевести» ещё раз.'; render(); }
+}
+
+
+/* ---------- фото позиций из кабинета 1688 (передаются ссылкой после сбора на странице заказов 1688) ---------- */
+async function importPhotos1688(raw){
+  try{
+    const data = JSON.parse(decodeURIComponent(raw)); // [[номер заказа, offer, [фото...]], ...]
+    const rows = data.map(([o,f,i])=>({ o, f, i: i.map(u => u.startsWith('http') ? u : 'https://'+u) }));
+    let n = 0;
+    for(let k=0; k<rows.length; k+=150){ const { data:d, error } = await sb.rpc('po_photos_set', { p: rows.slice(k, k+150) }); if(error) throw error; n += +d||0; }
+    toast(`Фото из 1688 добавлены к ${n} позициям заказов`); PO.list = null; if(S.view==='po'){ await loadPo(); render(); }
+  }catch(e){ toast('Фото из 1688 не загрузились: '+errText(e)); }
 }
