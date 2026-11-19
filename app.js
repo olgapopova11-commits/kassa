@@ -1437,7 +1437,7 @@ async function loadPo(){
 }
 function renderPo(){
   const modes = [['orders','Заказы'],['new','Новый заказ'],['suggest','Что дозаказать'],['an','Аналитика закупа']].filter(([k])=>poEdit() || k!=='new');
-  const head = `<div class="row" style="flex-wrap:wrap"><h2>Закуп</h2>${poEdit()?`<label class="btn small" style="cursor:pointer">⬆ Загрузить заказы из 1688<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label>`:''}</div>
+  const head = `<div class="row" style="flex-wrap:wrap"><h2>Закуп</h2><span class="row" style="gap:6px">${(PO.list||[]).some(o=>(o.items||[]).some(i=>i.supplier_title&&!i.title_ru))?`<button class="btn small" id="po-tr">🌐 Перевести названия на русский</button>`:''}${poEdit()?`<label class="btn small" style="cursor:pointer">⬆ Загрузить заказы из 1688<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label>`:''}</span></div>
   ${PO.imp?`<div class="card meta" style="margin-bottom:8px">${esc(PO.imp)}</div>`:''}
   <div class="seg" style="display:inline-flex;margin-bottom:10px">${modes.map(([k,v])=>`<button data-pomode="${k}" aria-pressed="${PO.mode===k}">${v}</button>`).join('')}</div>`;
   let body = '';
@@ -1453,6 +1453,7 @@ function renderPo(){
         <div class="row" style="flex-wrap:wrap"><span class="meta">${units} шт. · товар ${fmt(goods)}${o.currency&&o.currency!=='KZT'?' (курс заказа '+o.currency+' '+(+o.rate).toFixed(2)+')':''}${+o.cargo?' · доставка по Китаю '+(+o.cargo).toLocaleString('ru-RU')+' '+(CUR[o.currency]||'₸'):''} · +${o.delivery_pct??10}% доставка до Казахстана</span>
           <span>${poEdit()&&o.status==='ordered'?`<button class="btn small" data-postatus="${o.id}:transit">Отправлен — в пути</button>`:''}
           ${isBoss()&&!isViewer()&&['ordered','transit'].includes(o.status)&&!(PO.rcv&&PO.rcv.id===o.id)?`<button class="btn small primary" data-poreceive="${o.id}">Получить на склад</button>`:''}
+          ${isBoss()&&!isViewer()&&['ordered','transit'].includes(o.status)?`<button class="btn small" data-poarch="${o.id}" title="Товар давно на складе и уже учтён — закрыть заказ, не добавляя остатки">Уже на складе</button>`:''}
           ${poEdit()&&['ordered','transit'].includes(o.status)?`<button class="btn small" data-postatus="${o.id}:cancelled">Отменить</button>`:''}</span></div></div>`; }).join('')}`;
   }
   if(PO.mode==='new'){
@@ -1741,6 +1742,8 @@ document.addEventListener('click', async e => {
   else if(d.postatus){ const [id, st] = d.postatus.split(':'); const { error } = await sb.rpc('po_set_status', { p_id:id, p_status:st }); if(error) return toast(errText(error)); toast(st==='transit'?'Отмечено: в пути':'Заказ отменён'); await loadPo(); render(); }
   else if(d.poreceive){ const o = (PO.list||[]).find(x=>x.id===d.poreceive); PO.rcv = { id:d.poreceive, rate: o && o.currency!=='KZT' ? (+o.rate_now||+o.rate||'') : 1, qty:{} }; render(); }
   else if(t.id==='po-rcv-cancel'){ PO.rcv = null; render(); }
+  else if(t.id==='po-tr'){ translate1688(); }
+  else if(d.poarch){ if(t.dataset.sure!=='1'){ t.dataset.sure='1'; t.textContent='Закрыть без приёмки?'; return; } const { error } = await sb.rpc('po_close_archive', { p_id:d.poarch }); if(error) return toast(errText(error)); toast('Заказ закрыт без оприходования'); await loadPo(); render(); }
   else if(t.id==='po-rcv-ok'){ const r = PO.rcv, o = (PO.list||[]).find(x=>x.id===r.id); t.disabled=true;
     const items = (o.items||[]).map(i=>({ item_id:i.item_id, qty: r.qty[i.item_id]!=null ? +r.qty[i.item_id] : i.qty }));
     const { error } = await sb.rpc('po_receive', { p_id:r.id, p_items:items, p_rate: o.currency==='KZT' ? 1 : +r.rate, p_store: +(r.store||o.store||S.store) });
@@ -2170,7 +2173,9 @@ document.addEventListener('click', async e => {
 function poItemRow(o, i){
   const cur = CUR[o.currency||'KZT'] || '₸', open = ['ordered','transit'].includes(o.status), canLink = open && (poEdit() || (isBoss() && !isViewer()));
   const lnk = PO.lnk && PO.lnk.item===i.item_id;
-  return `<tr><td>${thumb(i)}</td><td>${i.product_id?`<b>${esc(i.name)}</b><br><span class="meta num">${esc(i.barcode||'')}</span>`:`<span class="chip zero">не связан с базой</span> ${esc(i.supplier_title||'')}`}
+  const cands = !i.product_id && canLink ? (i.candidates||[]) : [];
+  return `<tr><td>${thumb(i)}</td><td>${i.product_id?`<b>${esc(i.name)}</b><br><span class="meta num">${esc(i.barcode||'')}</span>${i.title_ru?`<br><span class="meta">у поставщика: ${esc(i.title_ru)}</span>`:''}`:`<span class="chip zero">не связан с базой</span> <b>${esc(i.title_ru||i.supplier_title||'')}</b>${i.title_ru?`<br><span class="meta" lang="zh">${esc(i.supplier_title)}</span>`:''}`}
+      ${cands.length?`<div class="meta" style="margin-top:4px">По этой же ссылке в базе ${cands.length===1?'есть товар':'есть товары'} — выберите нужный вариант:</div><div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:4px">${cands.map(p=>`<button class="btn small" data-polink="${i.item_id}:${p.id}" style="display:flex;gap:6px;align-items:center">${thumb(p)}<span style="text-align:left">${esc(p.name)}<br><span class="meta num">${esc(p.barcode)}</span></span></button>`).join('')}</div>`:''}
       ${i.spec?`<br><span class="meta">вариант: ${esc(i.spec)}</span>`:''}${i.purchase_url?` · <a href="${esc(i.purchase_url)}" target="_blank" rel="noopener" class="meta">у поставщика</a>`:''}
       ${canLink&&!i.product_id&&i.suggest?`<br><button class="btn small primary" data-polink="${i.item_id}:${i.suggest.id}">Связать с «${esc(i.suggest.name)}»</button>`:''}
       ${canLink&&!lnk?`<br><button class="btn small" data-polinkopen="${i.item_id}">${i.product_id?'Изменить связь':'Найти в базе'}</button>`:''}
@@ -2228,4 +2233,21 @@ async function import1688(file){
     PO.imp = `Готово: новых заказов ${tot.new}, обновлено ${tot.updated}. Позиций ${tot.items}, из них сразу связано с базой ${tot.linked}. Остальные свяжите при приёмке — Silver запомнит связь для следующих заказов.`;
     PO.mode = 'orders'; PO.filter = 'open'; PO.list = null; await loadPo(); render();
   }catch(e){ PO.imp = 'Не загрузилось: '+errText(e); render(); }
+}
+// перевод китайских названий на русский — встроенным переводчиком Chrome (бесплатно, прямо на компьютере)
+async function translate1688(){
+  const titles = [...new Set((PO.list||[]).flatMap(o=>(o.items||[]).filter(i=>i.supplier_title&&!i.title_ru).map(i=>i.supplier_title)))];
+  if(!titles.length) return toast('Все названия уже переведены');
+  if(!('Translator' in self)){ PO.imp = 'Перевод работает в браузере Google Chrome на компьютере. Откройте Silver в Chrome и нажмите кнопку ещё раз.'; return render(); }
+  try{
+    PO.imp = 'Готовим переводчик Chrome (первый раз скачивается языковой пакет)…'; render();
+    const tr = await Translator.create({ sourceLanguage:'zh', targetLanguage:'ru', monitor(m){ m.addEventListener('downloadprogress', e => { PO.imp = `Скачиваем переводчик: ${Math.round(e.loaded*100)}%`; render(); }); } });
+    let buf = [], done = 0;
+    for(const t of titles){
+      let ru = ''; try{ ru = await tr.translate(t.replace(/^[A-Za-z]{0,3}\d{3,}[A-Za-z0-9-]*\s*/,'')); }catch(_){}
+      if(ru) buf.push({ title:t, ru: ru.replace(/\s+/g,' ').trim() }); done++;
+      if(buf.length>=40 || done===titles.length){ await sb.rpc('po_titles_ru', { p: buf }); buf = []; PO.imp = `Переводим названия: ${done} из ${titles.length}…`; render(); }
+    }
+    PO.imp = `Переведено названий: ${done}.`; PO.list = null; await loadPo(); render();
+  }catch(e){ PO.imp = 'Перевод не получился: '+errText(e)+'. Нажмите «Перевести» ещё раз.'; render(); }
 }
