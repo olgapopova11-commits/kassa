@@ -226,6 +226,7 @@ function renderShell(){
   if(['owner','viewer'].includes(S.me.role)) tabs.push(['profit','Рентабельность']);
   if(['owner','manager','purchaser','viewer','accountant'].includes(S.me.role)) tabs.push(['po','Закуп']);
   tabs.push(['promo','Акции']);
+  if(['owner','manager','purchaser','viewer'].includes(S.me.role)) tabs.push(['content','Контент']);
   if(isBoss()) tabs.push(['flow','Путь товара']);
   if(S.me.role==='owner') tabs.push(['adm','Административный штат']);
   if(isViewer()){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pos' && (v!=='emps' || S.me.role==='accountant'))); if(!S.view || S.view==='pos' || (S.view==='emps' && S.me.role!=='accountant')) S.view = 'analytics'; }
@@ -238,7 +239,7 @@ function renderShell(){
 }
 // вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
 const GROUPS = [['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['flow','stock','wh','po','nom','site']],
-  ['clients','💳','Клиенты',['promo','bonus','certs']],['analytics','📈','Аналитика',['analytics','profit']],['team','👥','Сотрудники',['me','emps','pay','adm']]];
+  ['clients','💳','Клиенты',['promo','content','bonus','certs']],['analytics','📈','Аналитика',['analytics','profit']],['team','👥','Сотрудники',['me','emps','pay','adm']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 function renderNav(){
   const tabs = S.tabs || [], has = v => tabs.some(t => t[0]===v), title = v => (tabs.find(t=>t[0]===v)||[])[1];
@@ -270,7 +271,7 @@ function render(){
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -1548,7 +1549,7 @@ function wiponUpHtml(kind){
         <select id="wu-store-${kind}">${kind==='sales'?`<option value="" ${!WU.storeSales?'selected':''}>Магазин определить автоматически</option>`:`<option value="" ${!WU.store?'selected':''}>Магазин определить автоматически</option>`}${S.allStores.map(x=>`<option value="${x.id}" ${x.id===(kind==='sales'?WU.storeSales:WU.store)?'selected':''}>${esc(BRAND[x.brand]+' · '+x.city+', '+x.address)}</option>`).join('')}</select>
         ${kind==='stock'?`<label class="meta"><input type="checkbox" id="wu-zero" checked> товары, которых нет в файле, обнулить</label>`:''}
         <label class="btn small primary" style="cursor:pointer">Выбрать файлы Excel (можно сразу все 7)<input type="file" id="wu-file-${kind}" accept=".xlsx,.xls,.csv" multiple hidden></label></div>
-      <span class="meta">${kind==='sales'?'Магазин Silver определяет сам — по продавцу в Wipon и по уже загруженным чекам.':'Склад Silver определяет сам — сравнивает остатки в файле с остатками каждого магазина и выбирает самый похожий.'} Если не получится, напишет, и тогда выберите магазин вручную и загрузите тот файл ещё раз.</span>
+      <span class="meta">${kind==='sales'?'Магазин Silver определяет сам по продавцу в файле: «Мун А» — MOON Алматы, «Мун» — MOON Астана; если не понял — по уже загруженным чекам.':'Склад Silver берёт из самого файла: «Мун А» — MOON Алматы, «Мун» — MOON Астана, Sunshine — по адресу склада.'} Если не получится, напишет, и тогда выберите магазин вручную и загрузите тот файл ещё раз.</span>
       ${WU.open===kind&&WU.msg?`<div class="cust">${WU.msg}</div>`:''}</div></details>`;
 }
 function wuNorm(h){ return String(h==null?'':h).toLowerCase().replace(/\s+/g,' ').trim(); }
@@ -1563,7 +1564,20 @@ async function wuRead(file){
   const A = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, raw:true, defval:null });
   const hi = A.slice(0, 25).findIndex(r => (r||[]).some(c => /штрих/.test(wuNorm(c))));
   if(hi < 0) throw new Error('В файле не нашлась колонка со штрихкодом — это точно выгрузка из Wipon?');
-  return { H: A[hi].map(wuNorm), rows: A.slice(hi+1).filter(r => r && r.some(c => c!=null && c!=='')) };
+  const H = A[hi].map(wuNorm), rows = A.slice(hi+1).filter(r => r && r.some(c => c!=null && c!==''));
+  const wc = H.findIndex(h => /склад|магазин|точка/.test(h));
+  const head = A.slice(0, hi).flat().filter(c => c!=null && c!=='').map(String);
+  const col = wc>=0 ? [...new Set(rows.slice(0, 50).map(r => r[wc]).filter(Boolean).map(String))] : [];
+  return { H, rows, place: [...col, ...head, wb.SheetNames[0]].join(' | '), fname: file.name };
+}
+// Склад по тексту внутри файла: «Мун А» = MOON Алматы, «Мун» = MOON Астана, Sunshine — по адресу
+function wuStoreFromText(t){
+  const s = ' ' + String(t||'').toLowerCase().replace(/ё/g,'е').replace(/[_.,;:()"«»\-]+/g,' ').replace(/\s+/g,' ') + ' ';
+  const W = '(?![а-яa-z])';
+  if(new RegExp('(мун|moon)\\s*(а|a)'+W).test(s) || /(мун|moon)\s*алмат/.test(s)) return 6;
+  if(/(мун|moon)\s*астан/.test(s) || new RegExp('(мун|moon)'+W).test(s)) return 7;
+  const A = [[1,/курмангаз/],[2,/толе\s*би/],[3,/гагарин/],[4,/республик/],[5,/достык/]];
+  const hit = A.filter(([,r]) => r.test(s)); return hit.length===1 ? hit[0][0] : null;
 }
 async function wuImportMany(kind, files){
   const sel = $('#wu-store-'+kind).value; if(sel && files.length>1) toast('Файлов несколько — магазин для каждого Silver определит сам'); if(kind==='sales') WU.storeSales = sel ? +sel : null; else WU.store = sel ? +sel : null; WU.open = kind; const out = [];
@@ -1573,7 +1587,7 @@ async function wuImportMany(kind, files){
 async function wuImport(kind, file, forceStore){
   let store = forceStore || null; const zero = !!($('#wu-zero')||{}).checked; WU.open = kind; WU.msg = (WU.pre||'')+'Читаем файл…'; render();
   try{
-    const { H, rows } = await wuRead(file), name = c => c>=0 ? H[c] : '—';
+    const { H, rows, place, fname } = await wuRead(file), name = c => c>=0 ? H[c] : '—';
     if(kind==='sales'){
       const K = { no: wuCol(H, [h=>/продаж/.test(h)&&/(номер|№|id)/.test(h), h=>/чек/.test(h)&&/(номер|№)/.test(h), 'номер', '№'], ['фиск']), emp: wuCol(H, ['продавец','сотрудник','кассир']),
         at: wuCol(H, ['дата']), pay: wuCol(H, ['оплат']), nm: wuCol(H, ['наимен','товар','назван'], ['штрих','катег','колич']), cat: wuCol(H, ['категор']), bc: wuCol(H, ['штрих']),
@@ -1584,6 +1598,10 @@ async function wuImport(kind, file, forceStore){
         .filter(r => r.no && r.at);
       if(!R.length) throw new Error('В файле нет строк продаж');
       const nos = [...new Set(R.map(r=>r.no))], dates = R.map(r=>r.at).sort();
+      if(!store){ const emps = [...new Set(R.map(r=>r.emp).filter(Boolean).map(String))];
+        const byTxt = [...new Set(emps.map(wuStoreFromText).filter(Boolean))];
+        if(byTxt.length===1){ store = byTxt[0]; WU.pre = (WU.pre||'') + `${esc(storeName(store))} (по продавцу «${esc(emps.join(', '))}») — `; }
+      }
       if(!store){ const emps = [...new Set(R.map(r=>r.emp).filter(Boolean).map(String))];
         const { data:det, error:de } = await sb.rpc('wipon_detect_store', { p_nos: nos.slice(0, 3000), p_emps: emps }); if(de) throw de;
         if(!det || !det.store) throw new Error(`не удалось понять, какой это магазин (продавцы в файле: ${esc(emps.join(', ')||'не указаны')}). Выберите магазин в списке и загрузите этот файл ещё раз.`);
@@ -1604,10 +1622,9 @@ async function wuImport(kind, file, forceStore){
       const R = rows.map(r => ({ bc: String(r[K.bc]??'').trim(), name: K.nm>=0 ? r[K.nm] : null, qty: wuNum(r[K.qty]), cost: K.cost>=0 ? wuNum(r[K.cost]) || null : null, price: K.price>=0 ? wuNum(r[K.price]) || null : null, cat: K.cat>=0 ? r[K.cat] : null }))
         .filter(r => r.bc);
       if(!R.length) throw new Error('В файле нет строк с товарами');
-      if(!store){ const { data:det, error:de } = await sb.rpc('wipon_stock_detect', { p_rows: R.map(r=>({ bc:r.bc, qty:r.qty })) }); if(de) throw de;
-        const sc = (det && det.scores) || [], a = sc[0], b = sc[1];
-        if(!a || a.exact < 10 || (b && a.exact < b.exact * 1.5)) throw new Error('не удалось уверенно понять, какой это склад. Выберите магазин в списке и загрузите этот файл ещё раз.');
-        store = a.store; WU.pre = (WU.pre||'') + `${esc(storeName(store))} (определён по остаткам: совпало ${a.exact} позиций) — `; }
+      if(!store){ store = wuStoreFromText(place) || wuStoreFromText(fname);
+        if(!store) throw new Error(`в файле не написано, какой это склад${place.trim()?` (нашли текст: «${esc(place.slice(0,120))}»)`:''}. Выберите магазин в списке и загрузите этот файл ещё раз.`);
+        WU.pre = (WU.pre||'') + `${esc(storeName(store))} (склад указан в файле) — `; }
       WU.msg = (WU.pre||'')+`нашли ${R.length} позиций, ${R.reduce((a,r)=>a+r.qty,0)} шт. Обновляем остатки…`; render();
       const { data, error } = await sb.rpc('wipon_stock_import', { p_store:store, p_rows:R, p_zero_missing: zero });
       if(error) throw error;
@@ -1622,6 +1639,91 @@ document.addEventListener('change', async e => { const id = e.target.id||'';
   const m = id.match(/^wu-file-(sales|stock)$/); if(m && e.target.files[0]){ const F = [...e.target.files]; e.target.value=''; wuImportMany(m[1], F); }
   if(id==='wu-store-sales') WU.storeSales = e.target.value ? +e.target.value : null; else if(id==='wu-store-stock') WU.store = e.target.value ? +e.target.value : null; });
 document.addEventListener('toggle', e => { const d = e.target; if(d.dataset && d.dataset.wuopen){ WU.open = d.open ? d.dataset.wuopen : (WU.open===d.dataset.wuopen ? null : WU.open); } }, true);
+/* ---------- контент-план: идеи → пост → дата выкладки ---------- */
+const CT = { brand:'moon', list:null, ai:null, busy:'', add:false };
+const CT_FMT = { reels:'Рилс', carousel:'Карусель', stories:'Сторис', photo:'Фото' };
+const ctEdit = () => S.me && ['owner','manager','purchaser'].includes(S.me.role);
+const ctLocal = v => v ? new Date(v).toLocaleString('sv-SE',{ timeZone:'Asia/Almaty' }).slice(0,16).replace(' ','T') : '';
+const ctNice = v => v ? new Date(v).toLocaleString('ru-RU',{ timeZone:'Asia/Almaty', weekday:'short', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : 'дата не выбрана';
+async function loadContent(){
+  const [l, st] = await Promise.all([ sb.rpc('content_list', { p_brand:CT.brand }), CT.ai===null ? sb.functions.invoke('content', { body:{ action:'status' } }) : null ]);
+  if(l.error) toast(errText(l.error)); CT.list = l.data || [];
+  if(st) CT.ai = !!(st.data && st.data.ai);
+}
+async function ctAI(body){
+  const { data, error } = await sb.functions.invoke('content', { body });
+  if(error){ let m = error.message; try{ const j = await error.context.json(); m = j.error || m; }catch(_){} throw new Error(m==='no_key' ? 'ИИ ещё не подключён — нужен ключ Anthropic' : m); }
+  return data;
+}
+function ctProducts(c){ return (c.products||[]).length ? `<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-top:6px">${c.products.map(p=>`<span class="row" style="gap:6px;border:1px solid var(--line);border-radius:10px;padding:4px 8px 4px 4px">${thumb(p)}<span style="font-size:13px">${esc(p.name)}<br><span class="meta">${fmt(p.price)} · в наличии ${p.stock}</span></span></span>`).join('')}</div>` : ''; }
+function ctCard(c){
+  const ed = ctEdit(), chip = `<span class="chip">${CT_FMT[c.format]||c.format}</span>${c.source==='ai'?' <span class="chip ok">ИИ</span>':c.source==='data'?' <span class="chip">из данных</span>':''}`;
+  if(c.status==='idea') return `<div class="card" style="margin-bottom:8px"><div class="row" style="flex-wrap:wrap"><b>${esc(c.title)}</b><span>${chip}</span></div>
+    ${c.publish_at?`<div class="meta">предложено на ${ctNice(c.publish_at)}</div>`:''}<div style="margin-top:4px">${esc(c.idea||'')}</div>${ctProducts(c)}
+    ${ed?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-top:8px">
+      <button class="btn small primary" data-ctgen="${c.id}" ${CT.ai?'':'disabled title="Нужен ключ ИИ"'}>${CT.busy===c.id?'Пишем…':'✨ Написать пост'}</button>
+      <button class="btn small" data-ctst="${c.id}:draft">✍ Написать вручную</button><button class="btn small" data-ctst="${c.id}:rejected">✕ Не нужно</button></div>`:''}</div>`;
+  if(c.status==='draft' && ed) return `<div class="card stack" style="margin-bottom:8px;gap:6px"><div class="row" style="flex-wrap:wrap"><input data-ctf="${c.id}:title" value="${esc(c.title)}" style="flex:1;font-weight:600"><span>${chip}</span></div>
+    <span class="meta">${esc(c.idea||'')}</span>${ctProducts(c)}
+    <label class="stack" style="gap:2px"><span class="label">Текст поста</span><textarea data-ctf="${c.id}:caption" rows="7" placeholder="Подпись к посту">${esc(c.caption||'')}</textarea></label>
+    <label class="stack" style="gap:2px"><span class="label">Что снять</span><textarea data-ctf="${c.id}:shot_list" rows="4">${esc(c.shot_list||'')}</textarea></label>
+    <label class="stack" style="gap:2px"><span class="label">Хэштеги</span><input data-ctf="${c.id}:hashtags" value="${esc(c.hashtags||'')}"></label>
+    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
+      <label class="meta">Формат <select data-ctf="${c.id}:format">${Object.entries(CT_FMT).map(([k,v])=>`<option value="${k}" ${c.format===k?'selected':''}>${v}</option>`).join('')}</select></label>
+      <label class="meta">Дата и время выкладки <input type="datetime-local" data-ctf="${c.id}:publish_at" value="${ctLocal(c.publish_at)}"></label></div>
+    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
+      <button class="btn small primary" data-ctok="${c.id}">✅ Утвердить и поставить в план</button>
+      <button class="btn small" data-ctgen="${c.id}" ${CT.ai?'':'disabled title="Нужен ключ ИИ"'}>${CT.busy===c.id?'Пишем…':(c.caption?'✨ Переписать ИИ':'✨ Написать ИИ')}</button>
+      <button class="btn small" data-ctcopy="${c.id}">Копировать текст</button><button class="btn small" data-ctst="${c.id}:rejected">✕ Убрать</button></div></div>`;
+  return '';
+}
+function renderContent(){
+  const L = CT.list, by = st => (L||[]).filter(c=>c.status===st), plan = (L||[]).filter(c=>['approved','posted'].includes(c.status)).sort((a,b)=>String(a.publish_at).localeCompare(String(b.publish_at)));
+  $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap"><h2>Контент-план</h2><div class="seg">${[['moon','MOON'],['sunshine','Sunshine']].map(([k,v])=>`<button data-ctbrand="${k}" aria-pressed="${CT.brand===k}">${v}</button>`).join('')}</div></div>
+  ${ctEdit()?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:10px">
+    <button class="btn primary" id="ct-ai" ${CT.ai?'':'disabled'}>${CT.busy==='ideas'?'Думаем…':'✨ Идеи ИИ на неделю'}</button>
+    <button class="btn" id="ct-data">${CT.busy==='data'?'Собираем…':'💡 Идеи из данных Silver'}</button>
+    <button class="btn" id="ct-add">+ Своя идея</button></div>`:''}
+  ${CT.ai===false?`<div class="card meta" style="margin-bottom:10px">✨ ИИ пока не подключён. «Идеи из данных Silver» и ручные посты уже работают. Чтобы ИИ сам писал идеи и тексты, владелец добавляет ключ Anthropic в Supabase → Edge Functions → Secrets под именем ANTHROPIC_API_KEY.</div>`:''}
+  ${CT.add?`<div class="card stack" style="margin-bottom:10px;gap:6px"><b>Своя идея</b><input id="ct-n-title" placeholder="Коротко: о чём пост"><textarea id="ct-n-idea" rows="2" placeholder="Что снять, зачем"></textarea>
+    <div class="row" style="justify-content:flex-start;gap:6px"><select id="ct-n-fmt">${Object.entries(CT_FMT).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select><button class="btn small primary" id="ct-n-save">Добавить</button><button class="btn small" id="ct-n-cancel">Отмена</button></div></div>`:''}
+  ${!L?'<div class="empty">Загружаем…</div>':`<div class="grid2"><div>
+    <h3>💡 Идеи (${by('idea').length})</h3>${by('idea').map(ctCard).join('') || '<div class="empty">Идей пока нет — нажмите «Идеи из данных Silver» или «Идеи ИИ»</div>'}
+    ${by('draft').length?`<h3 style="margin-top:14px">✍ Посты в работе (${by('draft').length})</h3>${by('draft').map(ctCard).join('')}`:''}
+  </div><div>
+    <h3>📅 План выкладки</h3>
+    ${plan.length?`<div class="scroll"><table><tbody>${plan.map(c=>`<tr><td class="num" style="white-space:nowrap">${ctNice(c.publish_at)}</td><td><b>${esc(c.title)}</b> <span class="chip">${CT_FMT[c.format]||c.format}</span><br>
+      <span class="meta">${esc((c.caption||'').slice(0,120))}${(c.caption||'').length>120?'…':''}</span>${c.posted_url?`<br><a href="${esc(c.posted_url)}" target="_blank" rel="noopener">пост в Instagram</a>`:''}</td>
+      <td>${c.status==='posted'?'<span class="chip ok">выложено</span>':`<span class="chip warn">ждёт</span>`}<br>${ctEdit()?`<button class="btn small" data-ctcopy="${c.id}">Текст</button>${c.status!=='posted'?` <button class="btn small" data-ctdone="${c.id}">✓ Выложено</button> <button class="btn small" data-ctst="${c.id}:draft">Править</button>`:''}`:''}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Утверждённых постов пока нет</div>'}
+  </div></div>`}`;
+}
+document.addEventListener('click', async e => {
+  if(S.view!=='content') return; const t = e.target.closest('button'); if(!t) return; const d = t.dataset;
+  const find = id => (CT.list||[]).find(x=>x.id===id);
+  try{
+    if(d.ctbrand){ CT.brand = d.ctbrand; CT.list = null; render(); await loadContent(); render(); }
+    else if(t.id==='ct-add'){ CT.add = true; render(); }
+    else if(t.id==='ct-n-cancel'){ CT.add = false; render(); }
+    else if(t.id==='ct-n-save'){ const title = $('#ct-n-title').value.trim(); if(!title) return toast('Напишите, о чём пост');
+      const { error } = await sb.rpc('content_save', { p:{ brand:CT.brand, title, idea:$('#ct-n-idea').value, format:$('#ct-n-fmt').value, status:'idea' } }); if(error) throw error; CT.add = false; await loadContent(); render(); }
+    else if(t.id==='ct-data'){ CT.busy = 'data'; render(); const { data, error } = await sb.rpc('content_suggest', { p_brand:CT.brand }); CT.busy = ''; if(error) throw error; toast('Новых идей: '+data); await loadContent(); render(); }
+    else if(t.id==='ct-ai'){ CT.busy = 'ideas'; render(); const r = await ctAI({ action:'ideas', brand:CT.brand, count:7 }).finally(()=>{ CT.busy=''; }); toast('ИИ предложил идей: '+(r.created||0)); await loadContent(); render(); }
+    else if(d.ctgen){ CT.busy = d.ctgen; render(); await ctAI({ action:'post', brand:CT.brand, id:d.ctgen }).finally(()=>{ CT.busy=''; }); toast('Пост написан — проверьте и утвердите'); await loadContent(); render(); }
+    else if(d.ctst){ const [id, st] = d.ctst.split(':'); const { error } = await sb.rpc('content_save', { p:{ id, status:st } }); if(error) throw error; await loadContent(); render(); }
+    else if(d.ctok){ const c = find(d.ctok); if(!c.publish_at) return toast('Поставьте дату и время выкладки'); if(!(c.caption||'').trim()) return toast('Напишите текст поста');
+      const { error } = await sb.rpc('content_save', { p:{ id:c.id, status:'approved' } }); if(error) throw error; toast('Пост утверждён и стоит в плане'); await loadContent(); render(); }
+    else if(d.ctdone){ const { error } = await sb.rpc('content_save', { p:{ id:d.ctdone, status:'posted' } }); if(error) throw error; toast('Отмечено: выложено'); await loadContent(); render(); }
+    else if(d.ctcopy){ const c = find(d.ctcopy); const txt = (c.caption||'') + (c.hashtags ? '\n\n'+c.hashtags : ''); try{ await navigator.clipboard.writeText(txt); toast('Текст скопирован'); }catch(_){ toast('Не удалось скопировать — выделите текст вручную'); } }
+  }catch(err){ CT.busy=''; toast(errText(err)); render(); }
+});
+document.addEventListener('change', async e => {
+  if(S.view!=='content') return; const t = e.target, f = t.dataset.ctf; if(!f) return; const [id, k] = f.split(':');
+  let v = t.value; if(k==='publish_at') v = v ? v + ':00+05:00' : '';
+  const { error } = await sb.rpc('content_save', { p:{ id, [k]: v } }); if(error) return toast(errText(error));
+  const c = (CT.list||[]).find(x=>x.id===id); if(c) c[k] = k==='publish_at' ? (v||null) : v;
+  if(k==='format' || k==='publish_at') render(); else toast('Сохранено');
+});
+
 function loadScriptOnce(src){ return new Promise((ok,no)=>{ if(document.querySelector(`script[src="${src}"]`)) return ok(); const el=document.createElement('script'); el.src=src; el.onload=ok; el.onerror=no; document.head.appendChild(el); }); }
 async function sagiImport(file){
   const brand = BK.brand; BK.imp = 'Читаем файл…'; render();
@@ -2268,6 +2370,7 @@ async function loadView(){
   if(S.view==='profit'){ render(); await loadProfit(); render(); }
   if(S.view==='po'){ render(); await loadPo(); render(); }
   if(S.view==='promo'){ render(); await loadPromos(); render(); }
+  if(S.view==='content'){ render(); await loadContent(); render(); }
   if(S.view==='me'){ render(); await loadMe(); render(); }
   if(S.view==='adm'){ render(); await loadAdm(); render(); }
   if(S.view==='flow'){ render(); await loadFlow(); render(); }
