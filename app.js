@@ -234,7 +234,7 @@ function renderShell(){
   renderHeader();
 }
 // вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
-const GROUPS = [['home','🔔','Внимание',['attn']],['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['flow','stock','wh','po','nom','site']],
+const GROUPS = [['home','🔔','Внимание',['attn']],['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['flow','stock','wh','po','nom','photo','site']],
   ['clients','💳','Клиенты',['promo','content','bonus','certs']],['analytics','📈','Аналитика',['analytics','profit']],['team','👥','Сотрудники',['me','emps','cons','pay','adm']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 function renderNav(){
@@ -267,7 +267,7 @@ function render(){
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, attn:renderAttn })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, attn:renderAttn, photo:renderPhoto })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -1805,7 +1805,10 @@ document.addEventListener('click', async e => { if(S.view!=='wh') return; const 
 document.addEventListener('change', e => { const t = e.target; if(S.view!=='wh' || !t.dataset || !t.dataset.rcc) return; const [rid, pid] = t.dataset.rcc.split(':'); S.trc = S.trc || {}; S.trc[rid] = S.trc[rid] || {}; S.trc[rid][pid] = t.value===''?null:+t.value; render(); });
 
 /* ---------- «Требует внимания»: всё, что ждёт действия, на одном экране ---------- */
-async function loadAttn(){ const { data, error } = await sb.rpc('attention'); if(error) toast(errText(error)); S.attn = data || {}; }
+async function loadAttn(){ const { data, error } = await sb.rpc('attention'); if(error) toast(errText(error)); S.attn = data || {};
+  if(S.me.role==='owner'){ try{ const { data:dirs } = await sb.storage.from('backups').list('', { limit:100, sortBy:{ column:'name', order:'desc' } });
+    const days = (dirs||[]).map(d=>d.name).filter(n=>/^\d{4}-\d{2}-\d{2}$/.test(n)).sort().reverse(); S.attn.backups = days;
+    if(days[0]){ const r = await sb.storage.from('backups').download(days[0]+'/_done.json'); if(r.data) S.attn.backupDone = JSON.parse(await r.data.text()); } }catch(_){} } }
 function renderAttn(){
   const A = S.attn; if(!A){ $('#main').innerHTML = '<h2>Требует внимания</h2><div class="empty">Проверяем…</div>'; return; }
   const today = new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'}), dayOf = t => t ? new Date(t).toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'}) : null;
@@ -1824,18 +1827,83 @@ function renderAttn(){
   if(A.cons_nophone) add('warn', `Консультанты без телефона: ${A.cons_nophone}`, 'Без телефона консультант не сможет пользоваться ботом смен и зарплаты.', 'cons', 'Вписать телефоны');
   if(A.cons_notg) add('', `Телефон есть, но бот не подключён: ${A.cons_notg}`, 'Попросите открыть бота и нажать «Поделиться номером».', 'cons', 'Список');
   if(A.nophoto) add('', `Товары в наличии без фото: ${A.nophoto.toLocaleString('ru-RU')}`, 'Без фото товар не выложить на сайт и в Instagram. Начните с ходовых — «Путь товара» покажет их первыми.', 'flow', 'Путь товара');
+  for(const x of (A.site||[])){ const nm = x.site==='moon'?'MOON':'Sunshine', days = x.loaded ? Math.floor((Date.now()-new Date(x.loaded))/864e5) : null;
+    if(x.review) add('warn', `Сайт ${nm}: связи ждут проверки — ${x.review}`, 'Silver нашёл похожий товар в базе, но не уверен. Подтвердите или исправьте связь.', 'site', 'Проверить');
+    if(x.siteonly) add('', `Сайт ${nm}: карточки без привязки к базе — ${x.siteonly}`, 'На сайте есть, в базе не найден. Привяжите к товару или отметьте общий штрихкод.', 'site', 'Связать');
+    if(x.baseonly) add('', `Сайт ${nm}: товары в наличии, которых нет на сайте — ${x.baseonly.toLocaleString('ru-RU')}`, 'Есть в магазинах, но не выставлены на сайте.', 'site', 'Открыть');
+    if(days!=null && days>=2) add('warn', `Данные сайта ${nm} устарели: обновлялись ${days} дн. назад`, 'Каталог сайта загружен '+new Date(x.loaded).toLocaleString('ru-RU',{timeZone:'Asia/Almaty',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'. Пока каталог сайта подгружается в Silver вручную, автообновление — следующий шаг.', 'site', 'Сайт'); }
   const col = { bad:'var(--bad)', warn:'var(--warn,#d90)', '':'var(--line)' };
   $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap"><h2 style="margin:0">Требует внимания</h2><button class="btn small" id="attn-ref">Обновить</button></div>
   <p class="meta" style="margin:4px 0 12px">Всё, что ждёт действия, по вашим магазинам. Когда пункт закрыт — он исчезает отсюда.</p>
   ${items.length ? `<div class="stack" style="gap:8px">${items.sort((a,b)=>({bad:0,warn:1,'':2}[a.lvl]-{bad:0,warn:1,'':2}[b.lvl])).map(i=>`<div class="card row" style="flex-wrap:wrap;gap:10px;border-left:4px solid ${col[i.lvl]}"><div style="flex:1;min-width:220px"><b>${i.title}</b>${i.text?`<br><span class="meta">${i.text}</span>`:''}</div><button class="btn small" data-attngo="${i.view}">${i.btn} →</button></div>`).join('')}</div>`
     : '<div class="card" style="text-align:center;padding:24px">✅ Всё в порядке — ничего не ждёт</div>'}
+  ${(A.site||[]).length?`<div class="card" style="margin-top:14px"><b>Сайты</b><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Сайт</th><th>Каталог обновлён</th><th>Проверить связи</th><th>Без привязки</th><th>Нет на сайте</th></tr></thead><tbody>
+    ${A.site.map(x=>`<tr><td>${x.site==='moon'?'MOON':'Sunshine'}</td><td>${ago(x.loaded)}</td><td class="num">${x.review}</td><td class="num">${x.siteonly}</td><td class="num">${(+x.baseonly).toLocaleString('ru-RU')}</td></tr>`).join('')}</tbody></table></div></div>`:''}
+  ${S.me.role==='owner'?`<div class="card" style="margin-top:14px"><b>🛟 Резервные копии базы</b><p class="meta" style="margin:4px 0">Каждую ночь в 03:00 Silver сохраняет копию всех данных и хранит 7 дней. Видите только вы.</p>
+    ${(A.backups||[]).length?`${A.backupDone?`<div>Последняя полная копия: <b>${new Date(A.backupDone.at).toLocaleString('ru-RU',{timeZone:'Asia/Almaty',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</b> · таблиц ${Object.keys(A.backupDone.tables||{}).length} · строк ${Object.values(A.backupDone.tables||{}).reduce((a,b)=>a+b,0).toLocaleString('ru-RU')}</div>`:'<div class="meta">Копия за сегодня ещё создаётся…</div>'}
+      <div class="row" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px">${A.backups.map(d=>`<button class="btn small" data-bkday="${d}">⬇ ${d.split('-').reverse().join('.')}</button>`).join('')}</div>`:'<div class="meta">Первая копия появится сегодня ночью.</div>'}</div>`:''}
   <div class="card" style="margin-top:14px"><b>Загрузки из Wipon</b><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Магазин</th><th>Продажи</th><th>Остатки</th></tr></thead><tbody>
     ${(A.wipon||[]).map(w=>`<tr><td>${esc(storeName(w.store_id))}</td><td style="color:${dayOf(w.sales)===today?'var(--ok)':'inherit'}">${ago(w.sales)}</td><td>${ago(w.stock)}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
 document.addEventListener('click', async e => { if(S.view!=='attn') return; const t = e.target.closest('button'); if(!t) return;
   if(t.id==='attn-ref'){ S.attn = null; render(); await loadAttn(); render(); }
+  else if(t.dataset.bkday){ const day = t.dataset.bkday; const { data:files } = await sb.storage.from('backups').list(day, { limit:200 }); const paths = (files||[]).map(f=>day+'/'+f.name);
+    const { data:urls, error } = await sb.storage.from('backups').createSignedUrls(paths, 3600); if(error) return toast(errText(error));
+    modal(`<div class="row"><h3 style="margin:0">Копия за ${day.split('-').reverse().join('.')}</h3><button class="btn small" data-close>✕</button></div><p class="meta">Каждая таблица — отдельный файл (сжатый JSON). Ссылки действуют 1 час.</p><div class="stack" style="gap:4px;max-height:60vh;overflow:auto">${(urls||[]).map(u=>`<a href="${esc(u.signedUrl)}" target="_blank" rel="noopener">${esc(u.path.split('/')[1])}</a>`).join('')}</div>`); }
   else if(t.dataset.attngo){ const v = t.dataset.attngo; if(!(S.tabs||[]).some(x=>x[0]===v)) return toast('У вас нет доступа к этой вкладке'); S.view = v; render(); scrollTo(0,0); await loadView(); }
 });
+
+/* ---------- фотосессия: товары в наличии без фото, самые продаваемые первыми ---------- */
+const PH = { store:null, q:'', data:null, i:0, busy:false, done:0 };
+async function loadPhoto(){ if(PH.store===null) PH.store = S.store || ''; const { data, error } = await sb.rpc('photo_queue', { p_store: PH.store ? +PH.store : null, p_q: PH.q || null, p_limit: 60 }); if(error) toast(errText(error)); PH.data = data || { total:0, rows:[] }; PH.i = 0; }
+function renderPhoto(){
+  const D = PH.data, R = (D&&D.rows)||[], p = R[PH.i];
+  $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">📷 Фотосессия</h2>${D?`<span class="meta">без фото в наличии: <b>${D.total.toLocaleString('ru-RU')}</b>${PH.done?` · снято сегодня: <b>${PH.done}</b>`:''}</span>`:''}</div>
+  <p class="meta" style="margin:4px 0 10px">Сначала идут товары, которые чаще продаются. Снимайте на светлом фоне, украшение крупно. Можно отсканировать штрихкод — откроется именно этот товар.</p>
+  <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:10px">
+    <select id="ph-store"><option value="">Все магазины</option>${S.stores.map(x=>`<option value="${x.id}" ${String(PH.store)===String(x.id)?'selected':''}>${esc(BRAND[x.brand]+' · '+x.address)}</option>`).join('')}</select>
+    <input id="ph-q" placeholder="Скан штрихкода или название" value="${esc(PH.q)}" style="flex:1;min-width:200px" autocomplete="off"><button class="btn" id="ph-find">Найти</button>${PH.q?'<button class="btn small" id="ph-clear">Сбросить</button>':''}</div>
+  ${!D?'<div class="empty">Загружаем…</div>':!p?`<div class="card" style="text-align:center;padding:24px">${PH.q?'Такого товара без фото нет — возможно, фото уже есть':'✅ Здесь все товары с фото'}</div>`:`
+  <div class="card stack" style="gap:10px;max-width:560px">
+    <div class="meta">${PH.i+1} из ${R.length}${D.total>R.length?' (показаны первые '+R.length+')':''}</div>
+    <div style="font-size:20px;font-weight:600;line-height:1.25">${esc(p.name)}</div>
+    <div class="row" style="justify-content:flex-start;gap:14px;flex-wrap:wrap"><span class="num" style="font-size:18px">${esc(p.barcode||'')}</span><span><b>${+p.price>0?fmt(p.price):'нет цены'}</b></span><span class="meta">в наличии ${p.stock} · продано за 30 дн. ${p.sold30}</span></div>
+    <label class="btn primary" style="cursor:pointer;text-align:center;padding:16px;font-size:17px">${PH.busy?'Загружаем…':'📷 Снять фото'}<input type="file" id="ph-file" accept="image/*" capture="environment" hidden ${PH.busy?'disabled':''}></label>
+    <div class="row" style="gap:8px"><button class="btn" id="ph-prev" ${PH.i?'':'disabled'}>← Назад</button><button class="btn" id="ph-skip">Пропустить →</button></div>
+  </div>
+  ${R.length>1?`<details style="margin-top:12px"><summary class="meta" style="cursor:pointer">Вся очередь (${R.length})</summary><div class="scroll"><table>${R.map((x,n)=>`<tr style="${n===PH.i?'background:var(--soft)':''}"><td><button class="btn small" data-phgo="${n}" style="border:0;background:none;padding:0;text-align:left">${esc(x.name)}</button></td><td class="num meta">${esc(x.barcode||'')}</td><td class="num">${x.sold30}</td></tr>`).join('')}</table></div></details>`:''}`}`;
+}
+async function photoUpload(file){
+  const p = ((PH.data||{}).rows||[])[PH.i]; if(!file || !p) return;
+  PH.busy = true; render();
+  try{
+    const img = await createImageBitmap(file); const k = Math.min(1, 1200/Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.round(img.width*k); c.height = Math.round(img.height*k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
+    const path = `${p.id}/${Date.now()}.jpg`;
+    const { error } = await sb.storage.from('product-photos').upload(path, blob, { contentType:'image/jpeg', upsert:true }); if(error) throw error;
+    const url = sb.storage.from('product-photos').getPublicUrl(path).data.publicUrl;
+    const r = await sb.rpc('product_photo_set', { p_id:p.id, p_url:url }); if(r.error) throw r.error;
+    const cp = S.catalog && S.catalog.find(x=>x.id===p.id); if(cp) cp.photo_url = url;
+    PH.data.rows.splice(PH.i, 1); PH.data.total--; PH.done++; if(PH.i >= PH.data.rows.length) PH.i = Math.max(0, PH.data.rows.length-1);
+    toast('✅ Фото сохранено — следующий товар');
+    if(!PH.data.rows.length && !PH.q){ PH.busy = false; await loadPhoto(); }
+  }catch(err){ toast('Фото не сохранилось: '+errText(err)); }
+  PH.busy = false; render();
+}
+document.addEventListener('click', async e => { if(S.view!=='photo') return; const t = e.target.closest('button'); if(!t) return; const R = (PH.data&&PH.data.rows)||[];
+  if(t.id==='ph-skip'){ PH.i = Math.min(R.length-1, PH.i+1); render(); }
+  else if(t.id==='ph-prev'){ PH.i = Math.max(0, PH.i-1); render(); }
+  else if(t.id==='ph-find'){ PH.q = $('#ph-q').value.trim(); PH.data = null; render(); await loadPhoto(); render(); }
+  else if(t.id==='ph-clear'){ PH.q = ''; PH.data = null; render(); await loadPhoto(); render(); }
+  else if(t.dataset.phgo){ PH.i = +t.dataset.phgo; render(); scrollTo(0,0); }
+});
+document.addEventListener('change', async e => { if(S.view!=='photo') return; const t = e.target;
+  if(t.id==='ph-file'){ const f = t.files[0]; t.value = ''; photoUpload(f); }
+  else if(t.id==='ph-store'){ PH.store = t.value; PH.data = null; render(); await loadPhoto(); render(); }
+});
+document.addEventListener('keydown', async e => { if(S.view!=='photo' || e.target.id!=='ph-q' || e.key!=='Enter') return; e.preventDefault(); PH.q = e.target.value.trim(); PH.data = null; render(); await loadPhoto(); render(); });
 
 function loadScriptOnce(src){ return new Promise((ok,no)=>{ if(document.querySelector(`script[src="${src}"]`)) return ok(); const el=document.createElement('script'); el.src=src; el.onload=ok; el.onerror=no; document.head.appendChild(el); }); }
 async function sagiImport(file){
@@ -2158,8 +2226,8 @@ document.addEventListener('click', async e => { if(S.view!=='pay') return; const
 
 /* ---------- доступ к вкладкам по ролям ---------- */
 const ALL_TABS = [['pos','Продажа'],['analytics','Аналитика'],['shifts','Смены'],['cash','Расходы'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты'],['bonus','Бонусные карты'],['nom','Номенклатура'],['site','Сайт'],['emps','Сотрудники']];
-const EXTRA_TABS = [['attn','Требует внимания'],['pay','Зарплата'],['cons','Консультанты'],['po','Закуп'],['promo','Акции'],['content','Контент'],['flow','Путь товара'],['profit','Рентабельность']];
-const EXTRA_DEF = { attn:['manager','purchaser','viewer','accountant'], pay:['manager','purchaser','viewer','accountant'], cons:['manager'], po:['manager','purchaser','viewer','accountant'], promo:['manager','purchaser','viewer','accountant'], content:['manager','purchaser','viewer'], flow:['manager','viewer','accountant'], profit:['viewer'] };
+const EXTRA_TABS = [['attn','Требует внимания'],['photo','Фотосессия'],['pay','Зарплата'],['cons','Консультанты'],['po','Закуп'],['promo','Акции'],['content','Контент'],['flow','Путь товара'],['profit','Рентабельность']];
+const EXTRA_DEF = { attn:['manager','purchaser','viewer','accountant'], photo:['manager','purchaser'], pay:['manager','purchaser','viewer','accountant'], cons:['manager'], po:['manager','purchaser','viewer','accountant'], promo:['manager','purchaser','viewer','accountant'], content:['manager','purchaser','viewer'], flow:['manager','viewer','accountant'], profit:['viewer'] };
 ALL_TABS.push(...EXTRA_TABS);
 const BOSS_ONLY = ['analytics','bonus','nom','site','emps'];
 function defaultTabs(role){ const boss = ['manager','viewer','accountant'].includes(role);
@@ -2501,6 +2569,7 @@ async function loadView(){
   if(S.view==='emps'){ await loadEmps(); render(); }
   if(S.view==='cons'){ render(); await loadEmps(); render(); }
   if(S.view==='attn'){ render(); await loadAttn(); render(); }
+  if(S.view==='photo'){ render(); await loadPhoto(); render(); }
   if(S.view==='pay'){ render(); await loadPay(); render(); }
   if(S.view==='profit'){ render(); await loadProfit(); render(); }
   if(S.view==='po'){ render(); await loadPo(); render(); }
