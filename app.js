@@ -228,7 +228,6 @@ function renderShell(){
   tabs.push(['promo','Акции']);
   if(isBoss()) tabs.push(['flow','Путь товара']);
   if(S.me.role==='owner') tabs.push(['adm','Административный штат']);
-  if(!['owner','viewer','accountant'].includes(S.me.role)) tabs.push(['me','Мой кабинет']);
   if(isViewer()){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pos' && (v!=='emps' || S.me.role==='accountant'))); if(!S.view || S.view==='pos' || (S.view==='emps' && S.me.role!=='accountant')) S.view = 'analytics'; }
   if(tabs.length && !tabs.some(([v]) => v===S.view)) S.view = tabs[0][0];
 
@@ -386,6 +385,7 @@ function certPickerHtml(){
       :`<div class="meta">${S.certList.length?'Не найдено':'Активных сертификатов пока нет'}</div>`}</div>`;
 }
 function addToCart(p){
+  if(!(+p.price>0)) return toast('У товара «'+p.name+'» ещё нет розничной цены — попросите менеджера поставить её в «Номенклатуре»');
   const l = S.cart.find(x=>x.pid===p.id);
   if(l) l.qty++; else S.cart.push({ pid:p.id, name:p.name, barcode:p.barcode, price:p.price, cat:p.category_id||null, qty:1, disc:0, dt:'pct', dv:0 });
   syncPays(); render();
@@ -605,6 +605,7 @@ function renderWh(){
     ${m==='writeoff'?`<input id="d-reason" placeholder="Причина списания *" value="${esc(d.reason)}">`:''}
     ${m==='capitalize'||m==='receipt'?`<input id="d-note" placeholder="Комментарий" value="${esc(d.note)}">`:''}
     ${docSearchHtml()}
+    ${(m==='receipt'||m==='capitalize')&&isBoss()&&!isViewer()?(S.dnew?dnewHtml():`<button class="btn small" id="dn-open" style="align-self:flex-start">+ Новый товар (нет в базе)</button>`):''}
     ${d.items.length?`<div class="scroll"><table><thead><tr><th>Товар</th><th>Кол-во</th>${m==='receipt'?'<th>Закуп, ₸</th>':''}<th></th></tr></thead><tbody>
       ${d.items.map((i,n)=>`<tr><td>${esc(i.name)}<br><span class="meta num">${esc(i.barcode)}</span></td>
         <td><input class="small" type="number" min="1" id="dqty-${n}" data-dqty="${n}" value="${i.qty}" inputmode="numeric"></td>
@@ -659,6 +660,35 @@ function renderAudit(head){
         <button class="btn" id="au-close-full">Закрыть полностью (непосчитанные = 0)</button></div>`:'<p class="meta">Закрыть ревизию может менеджер.</p>'}`}
     </div>`;
 }
+function dnewHtml(){
+  const n = S.dnew, cats = S.dnewCats || [];
+  return `<div class="cust stack" style="gap:6px"><b>Новый товар в базу</b><span class="meta">Например, изделие из нашей студии. После сохранения товар сразу встанет в эту приёмку.</span>
+    <input id="dn-name" value="${esc(n.name)}" placeholder="Название *">
+    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
+      <select id="dn-brand">${[['','Бренд *'],['moon','MOON'],['sunshine','Sunshine'],['both','MOON и Sunshine']].map(([k,v])=>`<option value="${k}" ${n.brand===k?'selected':''}>${v}</option>`).join('')}</select>
+      <select id="dn-cat"><option value="">Категория…</option>${cats.map(c=>`<option value="${c.id}" ${String(n.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+      <input id="dn-color" value="${esc(n.color)}" placeholder="цвет" list="dn-colors" style="width:120px"><datalist id="dn-colors">${COLORS_RU.map(c=>`<option value="${c}">`).join('')}</datalist>
+      <input id="dn-mat" value="${esc(n.mat)}" placeholder="материал" list="dn-mats" style="width:130px"><datalist id="dn-mats">${['Серебро 925','Нержавейка','Мед сплав','Пластик','мельхиор','Жемчуг','Кожа','другой'].map(x=>`<option value="${x}">`).join('')}</datalist></div>
+    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
+      <label class="meta">Розничная, ₸ <input id="dn-price" type="number" min="0" inputmode="numeric" value="${esc(n.price)}" placeholder="можно позже" style="width:110px"></label>
+      <label class="meta">Себестоимость, ₸ <input id="dn-cost" type="number" min="0" inputmode="numeric" value="${esc(n.cost)}" style="width:100px"></label>
+      <label class="meta">Штрихкод <input id="dn-bc" value="${esc(n.bc)}" placeholder="пусто — создать" style="width:140px"></label></div>
+    <div class="row" style="justify-content:flex-start"><button class="btn small" id="dn-cancel">Отмена</button><button class="btn small primary" id="dn-save">Создать и добавить в приёмку</button></div></div>`;
+}
+document.addEventListener('click', async e => {
+  if(S.view!=='wh') return; const t = e.target.closest('button'); if(!t) return;
+  if(t.id==='dn-open'){ const q = (S.dq||'').trim(); S.dnew = { name: /^\d{6,}$/.test(q)?'':q, bc: /^\d{6,}$/.test(q)?q:'', brand:'', cat:'', color:'', mat:'', price:'', cost:'' }; render();
+    if(!S.dnewCats){ const { data } = await sb.from('categories').select('id,name').order('name'); S.dnewCats = data||[]; render(); } $('#dn-name') && $('#dn-name').focus(); }
+  else if(t.id==='dn-cancel'){ S.dnew = null; render(); }
+  else if(t.id==='dn-save'){ const n = S.dnew; for(const [k,id] of [['name','dn-name'],['brand','dn-brand'],['cat','dn-cat'],['color','dn-color'],['mat','dn-mat'],['price','dn-price'],['cost','dn-cost'],['bc','dn-bc']]) n[k] = $('#'+id).value.trim();
+    if(!n.name) return toast('Укажите название'); if(!n.brand) return toast('Отметьте бренд: MOON, Sunshine или оба'); t.disabled = true;
+    const { data, error } = await sb.rpc('product_save', { p:{ name:n.name, price:+n.price||0, brand:n.brand, category_id:n.cat||null, color:n.color||null, material:n.mat||null, barcode:n.bc||null, cost:n.cost||null } });
+    if(error){ t.disabled = false; return toast(errText(error)); }
+    S.catalog.push([data.id, data.barcode, '', n.name, +n.price||0, '', n.cat?+n.cat:null]);
+    S.dnew = null; docAdd({ id:data.id, name:n.name, barcode:data.barcode, price:+n.price||0 });
+    const it = S.doc.items.find(i=>i.pid===data.id); if(it && n.cost) it.cost = +n.cost;
+    toast('Товар создан, штрихкод '+data.barcode); render(); }
+});
 function docAdd(p){
   if(S.wmode==='audit') return auditAdd(p);
   const d = S.doc, it = d.items.find(i=>i.pid===p.id);
@@ -1136,7 +1166,7 @@ function renderStockAn(){
 }
 
 /* ---------- номенклатура ---------- */
-const NM_EMPTY = () => ({ id:null, barcode:'', sku:'', name:'', price:'', cost:'', category_id:'', material:'', color:'', supplier:'', purchase_url:'', photo_url:'', is_basic:false, archived:false, sites:[] });
+const NM_EMPTY = () => ({ id:null, barcode:'', sku:'', name:'', price:'', cost:'', brand:'', category_id:'', material:'', color:'', supplier:'', purchase_url:'', photo_url:'', is_basic:false, archived:false, sites:[] });
 async function loadNom(){
   const f = S.nm; f.data = null;
   if(!f.cats){ const { data } = await sb.from('categories').select('id,name').order('name'); f.cats = data || []; }
@@ -1172,6 +1202,7 @@ function renderNom(){
      <div class="grid2" style="grid-template-columns:1fr 1fr;gap:10px">
        ${inp('barcode','Штрихкод', 'placeholder="пусто — создать свой"')}${inp('sku','Артикул')}
        ${inp('price','Розничная цена, ₸ *','type="number" min="0" inputmode="numeric"')}${inp('cost','Закупочная цена, ₸','type="number" min="0" inputmode="numeric"')}
+       <label class="stack" style="gap:4px"><span class="label">Бренд${e.id?'':' *'}</span><select data-nf="brand">${[['','—'],['moon','MOON'],['sunshine','Sunshine'],['both','MOON и Sunshine']].map(([k,v])=>`<option value="${k}" ${(e.brand||'')===k?'selected':''}>${v}</option>`).join('')}</select></label>
        <label class="stack" style="gap:4px"><span class="label">Категория</span><select data-nf="category_id"><option value="">—</option>${cats.map(c=>`<option value="${c.id}" ${String(e.category_id)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label>
        ${inp('material','Материал','list="nm-mats"')}${inp('color','Цвет','list="nm-colors"')}${inp('supplier','Поставщик')}
      </div>
@@ -1191,7 +1222,7 @@ function renderNom(){
    </div>`}</div>
   </div>`;
 }
-function nmInfo(p){ return [p.category, p.color, p.material, p.stone, p.brand, p.supplier?'поставщик '+p.supplier:''].filter(Boolean).join(' · '); }
+function nmInfo(p){ return [p.category, p.color, p.material, p.stone, {moon:'MOON',sunshine:'Sunshine',both:'MOON и Sunshine'}[p.brand]||p.brand, +p.price===0?'⚠ нет розничной цены':'', p.supplier?'поставщик '+p.supplier:''].filter(Boolean).join(' · '); }
 function nmSiteLinks(p){ const L=(p.sites||[]).filter(x=>x.url); return L.length?`<div class="meta" style="padding:0 10px 8px">${L.map(x=>`🔗 <a href="${esc(x.url)}" target="_blank" rel="noopener">${x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'}${x.status==='review'?' (связь не проверена)':''}</a>`).join(' &nbsp; ')}</div>`:''; }
 function nmOpen(p){ S.nm.ed = { ...NM_EMPTY(), ...p, category_id: p.category_id??'', cost: p.cost??'', supplier: p.supplier||'', sites: p.sites||[] }; S.nm.sq=''; S.nm.sfound=[]; render(); }
 async function nmSave(){
@@ -1602,6 +1633,17 @@ function paySum(e){
   const due = e.total + plus - minus, paid = by('advance')+by('paid')+by('card');
   return { A, by, plus, minus, due, paid, rest: due - paid };
 }
+function consHtml(){
+  const C = (S.emps||[]).filter(e=>e.role==='consultant').sort((a,b)=>(b.active-a.active)||a.full_name.localeCompare(b.full_name,'ru'));
+  const noTg = C.filter(e=>e.active&&!e.telegram_id).length, noPh = C.filter(e=>e.active&&!e.phone).length;
+  return `<details class="card" style="margin-top:12px" ${PY.consOpen?'open':''} id="py-cons"><summary><b>Консультанты и Telegram-бот (${C.filter(e=>e.active).length})</b>${noTg?` <span class="chip warn">без Telegram: ${noTg}</span>`:''}</summary>
+    <p class="meta">Чтобы консультант пользовался ботом: впишите телефон → консультант открывает бота, жмёт «Поделиться номером». Без телефона${noPh?` (сейчас таких ${noPh})`:''} бот его не узнает.</p>
+    <div class="scroll"><table><tbody>${C.map(e=>`<tr style="${e.active?'':'opacity:.55'}"><td>${esc(e.full_name)}<br><input class="small" data-ephone="${e.id}" value="${esc(e.phone||'')}" placeholder="телефон" inputmode="tel" style="width:140px;margin-top:4px"></td>
+      <td>${storesDD(e.store_ids||(e.home_store_id?[e.home_store_id]:[]), id=>`data-estores="${e.id}:${id}"`)}</td>
+      <td>${e.telegram_id?'<span class="chip ok">Telegram ✓</span>':'<span class="meta">не подключён</span>'}<br><label class="meta"><input type="checkbox" data-eoff="${e.id}" ${e.official?'checked':''}> офиц.</label> <label class="meta"><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''}> работает</label></td></tr>`).join('')}</tbody></table></div>
+    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-top:8px"><input id="nc-name" placeholder="Имя консультанта"><input id="nc-phone" placeholder="+7 7__ ___ __ __" inputmode="tel" style="width:150px">
+      ${storesDD([], id=>`class="nc-store" value="${id}"`)}<button class="btn primary" id="nc-add">Добавить консультанта</button></div></details>`;
+}
 function renderPay(){
   const D0 = PY.data, D = D0 && PYF.official ? D0.filter(e=>e.official) : D0, tabel = S.me && ['owner','manager'].includes(S.me.role) && !isViewer();
   const total = (D||[]).reduce((a,e)=>a+e.total,0);
@@ -1636,7 +1678,7 @@ function renderPay(){
    ${tabel?`<div class="card stack"><b>Табель часов</b>
      <div class="row" style="flex-wrap:wrap;justify-content:flex-start"><select id="py-store">${S.stores.map(s=>`<option value="${s.id}" ${+PY.store===s.id?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select><input type="date" id="py-day" value="${PY.day}"></div>
      <span class="meta">Правило: ${esc(payRuleText((PY.rules||{})[String(PY.store)]))}</span>
-     ${(PY.sheet||[]).length?`<table><tbody>${PY.sheet.map(w=>`<tr><td>${esc(w.name)}${w.kind==='dress'?' <span class="chip">переодевание</span>':''}</td>
+     ${(PY.sheet||[]).length?`<table><tbody>${PY.sheet.map(w=>`<tr><td>${esc(w.name)}${w.kind==='dress'?' <span class="chip">переодевание</span>':''}${w.status==='open'?` <span class="chip warn">на смене с ${esc(w.from||'')}</span>`:w.status==='pending'?` <span class="chip warn" title="Отмечено в Telegram, ждёт подтверждения менеджера">ждёт подтверждения</span>`:''}${w.from&&w.status!=='open'?`<br><span class="meta">${esc(w.from)}–${esc(w.to||'')} · из Telegram</span>`:''}</td>
        <td><input class="small" type="number" min="0" max="24" step="0.5" value="${w.hours}" data-pyh="${w.employee}:${w.kind}" inputmode="decimal"> ч</td>
        <td><button class="btn small" data-pydel="${w.employee}:${w.kind}">✕</button></td></tr>`).join('')}</tbody></table>`:'<span class="meta">На этот день в табеле никого нет. Тот, кто открывает смену, попадает в табель автоматически.</span>'}
      <div class="row" style="flex-wrap:wrap;justify-content:flex-start">
@@ -1644,7 +1686,8 @@ function renderPay(){
        <input id="py-hours" class="small" type="number" min="0.5" max="24" step="0.5" placeholder="часы" value="${esc(PY.add.hours)}" inputmode="decimal">
        <select id="py-kind"><option value="sale" ${PY.add.kind==='sale'?'selected':''}>продажи</option><option value="dress" ${PY.add.kind==='dress'?'selected':''}>переодевание (1 200/ч)</option></select>
        <button class="btn primary" id="py-add">Добавить</button></div>
-   </div>`:`<div class="card meta">Часы в табель ставит менеджер. Если вы видите ошибку в часах — напишите менеджеру.</div>`}
+     <span class="meta">Консультанты отмечают приход и уход в Telegram-боте, вечером менеджеру приходит сводка «Подтвердить / Скорректировать». Изменение часов здесь сразу считается подтверждённым.</span>
+   </div>${consHtml()}`:`<div class="card meta">Часы в табель ставит менеджер. Если вы видите ошибку в часах — напишите менеджеру.</div>`}
   </div></div>`;
 }
 
@@ -1656,7 +1699,7 @@ function defaultTabs(role){ const boss = ['manager','viewer','accountant'].inclu
 function canEditTab(v){ if(!S.me || S.me.role==='owner') return true; const E=(S.tabEdit||{})[S.me.role]; return Array.isArray(E) ? E.includes(v) : true; }
 function accessHtml(){
   if(S.me.role!=='owner') return '';
-  const roles = ['manager','consultant','purchaser','viewer','accountant'], A = S.tabAccess || {};
+  const roles = ['manager','purchaser','viewer','accountant'], A = S.tabAccess || {};
   const has = (r,v) => Array.isArray(A[r]) ? A[r].includes(v) : defaultTabs(r).includes(v);
   const E = S.tabEdit || {}, can = (r,v) => has(r,v) && r!=='viewer' && (Array.isArray(E[r]) ? E[r].includes(v) : true);
   return `<div class="card stack" style="margin-top:16px"><b>Какие вкладки видит и может менять каждая роль</b>
@@ -1669,16 +1712,18 @@ function accessHtml(){
 
 async function loadEmps(){ const { data } = await sb.from('employees').select('*').order('created_at'); S.emps = data || []; }
 function renderEmps(){
-  $('#main').innerHTML = `<h2>Сотрудники</h2>
+  const list = S.emps.filter(e => e.role!=='consultant');
+  $('#main').innerHTML = `<h2>Сотрудники с доступом к Silver</h2>
+    <p class="meta">Консультанты в программу не входят: они отмечают смены и смотрят зарплату в Telegram-боте. Их список, телефоны и магазины — во вкладке «Зарплата».</p>
     <div class="card stack" style="margin-bottom:12px"><b>Добавить сотрудника по телефону</b>
       <div class="row" style="flex-wrap:wrap;justify-content:flex-start">
         <input id="ne-phone" placeholder="+7 7__ ___ __ __" inputmode="tel"><input id="ne-name" placeholder="Имя и фамилия" style="flex:1;min-width:160px">
-        <select id="ne-role">${Object.entries(ROLE).filter(([k])=>k!=='owner'||S.me.role==='owner').map(([k,v])=>`<option value="${k}" ${k==='consultant'?'selected':''}>${v}</option>`).join('')}</select></div>
+        <select id="ne-role">${Object.entries(ROLE).filter(([k])=>k!=='consultant'&&(k!=='owner'||S.me.role==='owner')).map(([k,v])=>`<option value="${k}" ${k==='manager'?'selected':''}>${v}</option>`).join('')}</select></div>
       <div><span class="meta">Магазины:</span> ${storesDD([], id=>`class="ne-store" value="${id}"`)}</div>
       <div class="row"><span class="meta">Сотрудник входит кнопкой «Войти через Telegram» и делится этим же номером в боте — пароль не нужен.</span><button class="btn primary" id="ne-add">Добавить</button></div></div>
     <div class="scroll"><table><thead><tr><th>Имя</th><th>Роль</th><th>Доступ к магазинам</th><th>Вход</th></tr></thead><tbody>
-    ${S.emps.map(e=>`<tr><td>${esc(e.full_name)}<br><input class="small" data-ephone="${e.id}" value="${esc(e.phone||'')}" placeholder="телефон не указан" inputmode="tel" style="width:150px;margin-top:4px"><br><span class="meta">${e.telegram_id?'Telegram ✓':''}${!e.auth_user_id?(e.telegram_id?' · ':'')+'ещё не входил':''}</span></td>
-      <td><select data-erole="${e.id}">${Object.entries(ROLE).map(([k,v])=>`<option value="${k}" ${e.role===k?'selected':''}>${v}</option>`).join('')}</select></td>
+    ${list.map(e=>`<tr><td>${esc(e.full_name)}<br><input class="small" data-ephone="${e.id}" value="${esc(e.phone||'')}" placeholder="телефон не указан" inputmode="tel" style="width:150px;margin-top:4px"><br><span class="meta">${e.telegram_id?'Telegram ✓':''}${!e.auth_user_id?(e.telegram_id?' · ':'')+'ещё не входил':''}</span></td>
+      <td><select data-erole="${e.id}">${Object.entries(ROLE).filter(([k])=>k!=='consultant').map(([k,v])=>`<option value="${k}" ${e.role===k?'selected':''}>${v}</option>`).join('')}</select></td>
       <td>${['owner','viewer'].includes(e.role)?'<span class="meta">все магазины</span>':(e.role==='manager'?'<div class="meta" style="max-width:240px">Видит все; отмеченные — подтверждает перемещения:</div>':'')+(()=>{ const ids=e.store_ids||(e.home_store_id?[e.home_store_id]:[]); return storesDD(ids, id=>`data-estores="${e.id}:${id}"`); })()}</td>
       <td><label><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''}> включён</label><br><label title="Официально трудоустроен — для бухгалтера"><input type="checkbox" data-eoff="${e.id}" ${e.official?'checked':''}> официально</label></td></tr>`).join('')}</tbody></table></div>${accessHtml()}`;
 }
@@ -1768,16 +1813,17 @@ document.addEventListener('click', async e => {
   else if(d.pocreate){ const o = (PO.list||[]).find(x=>(x.items||[]).some(i=>i.item_id===d.pocreate)), i = o.items.find(x=>x.item_id===d.pocreate);
     if(!PO.cats){ const { data } = await sb.from('categories').select('id,name').order('name'); PO.cats = data||[]; }
     const landed = poLanded(i.price_cur!=null?i.price_cur:(i.unit_cost||0)/(+o.rate||1), +o.rate_now||+o.rate||1, o.delivery_pct??10, o.cargo, (o.items||[]).reduce((a,x)=>a+x.qty,0));
-    PO.mk = { item:i.item_id, name:(i.title_ru||i.supplier_title||'').replace(/цвет:.*$/i,'').slice(0,70).trim(), color:(i.spec||''), cat:'', price:'', landed:Math.round(landed) }; PO.lnk = null; render(); }
+    PO.mk = { item:i.item_id, name:(i.title_ru||i.supplier_title||'').replace(/цвет:.*$/i,'').slice(0,70).trim(), color:colorRu(i.spec||i.title_ru||''), brand:'', cat:'', price:'', landed:Math.round(landed) }; PO.lnk = null; render();
+    if(i.spec && /[\u4e00-\u9fff]/.test(i.spec)) trZh(i.spec).then(ru => { if(ru && PO.mk && PO.mk.item===i.item_id){ PO.mk.specRu = ru; if(!PO.mk.color) PO.mk.color = colorRu(ru); render(); } }); }
   else if(t.id==='po-mk-cancel'){ PO.mk = null; render(); }
   else if(t.id==='po-mk-save'){ const m = PO.mk, o = (PO.list||[]).find(x=>(x.items||[]).some(i=>i.item_id===m.item)), i = o.items.find(x=>x.item_id===m.item);
-    m.name = $('#po-mk-name').value.trim(); m.price = $('#po-mk-price').value; m.cat = $('#po-mk-cat').value; m.color = $('#po-mk-color').value.trim();
-    if(!m.name) return toast('Укажите название'); if(!(+m.price>0)) return toast('Укажите розничную цену'); t.disabled = true;
-    const { data, error } = await sb.rpc('product_save', { p:{ name:m.name, price:+m.price, category_id:m.cat||null, color:m.color||null, photo_url:i.supplier_photo||null, purchase_url:i.supplier_url||null, supplier:o.supplier||null } });
+    m.name = $('#po-mk-name').value.trim(); m.price = $('#po-mk-price').value; m.cat = $('#po-mk-cat').value; m.color = $('#po-mk-color').value.trim(); m.brand = $('#po-mk-brand').value;
+    if(!m.name) return toast('Укажите название'); if(!m.brand) return toast('Отметьте бренд: MOON, Sunshine или оба'); if(/[\u4e00-\u9fff]/.test(m.color)) return toast('Цвет напишите по-русски'); t.disabled = true;
+    const { data, error } = await sb.rpc('product_save', { p:{ name:m.name, price:+m.price||0, brand:m.brand, category_id:m.cat||null, color:m.color||null, photo_url:i.supplier_photo||null, purchase_url:i.supplier_url||null, supplier:o.supplier||null } });
     if(error){ t.disabled=false; return toast(errText(error)); }
     const l = await sb.rpc('po_link_item', { p_item:i.item_id, p_product:data.id }); if(l.error){ t.disabled=false; return toast(errText(l.error)); }
     S.catalog.push([data.id, data.barcode, '', m.name, +m.price, i.supplier_photo||'', m.cat?+m.cat:null]);
-    toast('Товар создан, штрихкод '+data.barcode); PO.mk = null; await loadPo(); render(); }
+    toast('Товар создан, штрихкод '+data.barcode+(+m.price>0?'':' · розничную цену поставит Анна')); PO.mk = null; await loadPo(); render(); }
   else if(d.poarch){ if(t.dataset.sure!=='1'){ t.dataset.sure='1'; t.textContent='Закрыть без приёмки?'; return; } const { error } = await sb.rpc('po_close_archive', { p_id:d.poarch }); if(error) return toast(errText(error)); toast('Заказ закрыт без оприходования'); await loadPo(); render(); }
   else if(t.id==='po-rcv-ok'){ const r = PO.rcv, o = (PO.list||[]).find(x=>x.id===r.id); t.disabled=true;
     const main = +(r.store||o.store||S.store);
@@ -1821,6 +1867,9 @@ document.addEventListener('click', async e => {
     const { error } = await sb.rpc('bonus_adjust', { p_customer:BK.cur, p_brand:BK.brand, p_amount:amt, p_reason:$('#bk-reason').value, p_ttl_days:+$('#bk-ttl').value||91 });
     if(error){ toast(errText(error)); t.disabled=false; } else { toast('Бонусы скорректированы'); await openBonusClient(BK.cur); loadBonus().then(render); } }
   else if(t.id==='acc-reset'){ const [a,b] = await Promise.all([sb.rpc('set_tab_access', { p:{} }), sb.rpc('set_tab_edit', { p:{} })]); if(a.error||b.error) toast(errText(a.error||b.error)); else { S.tabAccess={}; S.tabEdit={}; toast('Доступы по умолчанию'); render(); } }
+  else if(t.id==='nc-add'){ const ids=[...document.querySelectorAll('.nc-store:checked')].map(x=>+x.value); PY.consOpen = true;
+    const { error } = await sb.rpc('employee_add', { p_phone:$('#nc-phone').value, p_name:$('#nc-name').value, p_role:'consultant', p_store_ids:ids });
+    if(error) toast(errText(error)); else { toast('Консультант добавлен'); await loadEmps(); render(); } }
   else if(t.id==='ne-add'){ const ids=[...document.querySelectorAll('.ne-store:checked')].map(x=>+x.value);
     const { error } = await sb.rpc('employee_add', { p_phone:$('#ne-phone').value, p_name:$('#ne-name').value, p_role:$('#ne-role').value, p_store_ids:ids });
     if(error) toast(errText(error)); else { toast('Сотрудник добавлен'); await loadEmps(); render(); } }
@@ -1877,6 +1926,7 @@ document.addEventListener('change', async e => {
   if(t.id==='sg-import' && t.files[0]){ sagiImport(t.files[0]); }
   if(t.id==='pf-from'){ PF.from=t.value; await loadProfit(); render(); } if(t.id==='pf-to'){ PF.to=t.value; await loadProfit(); render(); }
   if(t.id==='pf-store'){ PF.add.store=t.value; } if(t.id==='pf-month'){ PF.add.month=t.value; } if(t.id==='pf-cat'){ PF.add.cat=t.value; }
+  if(t.classList && t.classList.contains('nc-store')){ const ids=[...document.querySelectorAll('.nc-store:checked')].map(x=>+x.value); const sm=t.closest('details.dd'); if(sm) sm.querySelector('summary').textContent=ddSummary(ids); }
   if(t.classList && t.classList.contains('ne-store')){ const ids=[...document.querySelectorAll('.ne-store:checked')].map(x=>+x.value); const sm=t.closest('details.dd'); if(sm) sm.querySelector('summary').textContent=ddSummary(ids); }
   if(t.id==='po-store' && PO.d){ PO.d.store=+t.value; } if(t.id==='po-eta' && PO.d){ PO.d.eta=t.value; }
   if(t.dataset && t.dataset.poqty!=null && PO.d){ PO.d.items[+t.dataset.poqty].qty = Math.max(1, +t.value||1); render(); }
@@ -2223,7 +2273,7 @@ function poItemRow(o, i){
       ${cands.length?`<div class="meta" style="margin-top:4px">По этой же ссылке в базе ${cands.length===1?'есть товар':'есть товары'} — выберите нужный вариант:</div><div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:4px">${cands.map(p=>`<button class="btn small" data-polink="${i.item_id}:${p.id}" style="display:flex;gap:6px;align-items:center">${thumb(p)}<span style="text-align:left">${esc(p.name)}<br><span class="meta num">${esc(p.barcode)}</span></span></button>`).join('')}</div>`:''}
       ${i.spec?`<br><span class="meta">вариант: ${esc(i.spec)}</span>`:''}${i.purchase_url?` · <a href="${esc(i.purchase_url)}" target="_blank" rel="noopener" class="meta">у поставщика</a>`:''}
       ${canLink&&!i.product_id&&i.suggest?`<br><button class="btn small primary" data-polink="${i.item_id}:${i.suggest.id}">Связать с «${esc(i.suggest.name)}»</button>`:''}
-      ${canLink&&!lnk&&!(PO.mk&&PO.mk.item===i.item_id)?`<br><span class="row" style="gap:6px;justify-content:flex-start"><button class="btn small" data-polinkopen="${i.item_id}">${i.product_id?'Изменить связь':'Найти в базе'}</button>${!i.product_id&&isBoss()&&!isViewer()?`<button class="btn small" data-pocreate="${i.item_id}">+ Создать товар</button>`:''}</span>`:''}
+      ${canLink&&!lnk&&!(PO.mk&&PO.mk.item===i.item_id)?`<br><span class="row" style="gap:6px;justify-content:flex-start">${i.product_id?`<button class="btn small" data-polink="${i.item_id}:" title="Связь ошибочная — снять">✕ Отменить связь</button>`:`<button class="btn small" data-polinkopen="${i.item_id}">Найти в базе</button>${isBoss()&&!isViewer()?`<button class="btn small" data-pocreate="${i.item_id}">+ Создать товар</button>`:''}`}</span>`:''}
       ${PO.mk&&PO.mk.item===i.item_id?poCreateHtml(o,i):''}
       ${lnk?`<div class="stack" style="gap:4px;margin-top:6px"><input id="po-lnk-q" placeholder="Штрихкод, артикул или название в нашей базе" value="${esc(PO.lnk.q)}" autocomplete="off">
         ${PO.lnk.found.slice(0,8).map(p=>`<button class="prod" data-polink="${i.item_id}:${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}</span></span><span class="price num">${fmt(p.price)}</span></button>`).join('')}</div>`:''}</td>
@@ -2325,16 +2375,25 @@ function advanceText(month){ const d = advanceDate(month), today = new Date(); t
   const s = d.toLocaleDateString('ru-RU',{ day:'numeric', month:'long', weekday:'long' }), diff = Math.round((d - today)/864e5);
   return `Аванс в этом месяце: <b>${s}</b>${diff>0?` — через ${diff} дн.`:diff===0?' — <b>сегодня</b>':' — уже прошёл'} (обычно 15-го, если выпадает на выходные — в пятницу перед ними).`; }
 
+const COLORS_RU = ['золото','серебро','цветной','черный','белый','розовое золото'];
+function colorRu(t){ t = String(t||'').toLowerCase();
+  if(/玫瑰金|rose gold|розов\S* золот/.test(t)) return 'розовое золото';
+  if(/金|gold|золот/.test(t)) return 'золото'; if(/银|silver|серебр|白金|钢色/.test(t)) return 'серебро';
+  if(/黑|black|черн/.test(t)) return 'черный'; if(/白|white|бел/.test(t)) return 'белый';
+  if(/彩|多色|红|蓝|绿|粉|紫|黄|color|цвет\S*|красн|син|зел|роз/.test(t)) return 'цветной'; return ''; }
+async function trZh(text){ try{ if(!('Translator' in self)) return ''; const tr = await Translator.create({ sourceLanguage:'zh', targetLanguage:'ru' }); return await tr.translate(text); }catch(e){ return ''; } }
 function poCreateHtml(o, i){
   const m = PO.mk;
   return `<div class="cust stack" style="gap:6px;margin-top:6px"><b>Новый товар в базу</b>
     <input id="po-mk-name" value="${esc(m.name)}" placeholder="Название по-русски, как у нас в базе">
     <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
       <select id="po-mk-cat"><option value="">Категория…</option>${(PO.cats||[]).map(c=>`<option value="${c.id}" ${String(m.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
-      <input id="po-mk-color" value="${esc(m.color)}" placeholder="цвет" style="width:120px">
-      <label class="meta">Розничная цена, ₸ <input id="po-mk-price" type="number" min="1" inputmode="numeric" value="${esc(m.price)}" style="width:110px"></label>
+      <select id="po-mk-brand" aria-label="Бренд">${[['','Бренд…'],['moon','MOON'],['sunshine','Sunshine'],['both','MOON и Sunshine']].map(([k,v])=>`<option value="${k}" ${m.brand===k?'selected':''}>${v}</option>`).join('')}</select>
+      <input id="po-mk-color" value="${esc(m.color)}" placeholder="цвет по-русски" list="po-colors" style="width:130px"><datalist id="po-colors">${COLORS_RU.map(c=>`<option value="${c}">`).join('')}</datalist>
+      <label class="meta">Розничная цена, ₸ <input id="po-mk-price" type="number" min="0" inputmode="numeric" value="${esc(m.price)}" placeholder="можно позже" style="width:110px"></label>
       <span class="meta">себестоимость ≈ ${fmt(m.landed)}</span></div>
-    <span class="meta">Фото и ссылка на поставщика сохранятся в карточке. Штрихкод создастся автоматически.</span>
+    ${i.spec?`<span class="meta">Вариант у поставщика: ${esc(i.spec)}${m.specRu?' → '+esc(m.specRu):''}</span>`:''}
+    <span class="meta">Розничную цену можно оставить пустой — её поставит Анна. Фото и ссылка на поставщика сохранятся в карточке, штрихкод создастся автоматически.</span>
     <div class="row" style="justify-content:flex-start"><button class="btn small" id="po-mk-cancel">Отмена</button><button class="btn small primary" id="po-mk-save">Создать и связать</button></div></div>`;
 }
 
