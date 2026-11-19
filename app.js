@@ -1254,7 +1254,7 @@ function renderNom(){
     ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}. Нажмите на название, чтобы открыть карточку. Категорию можно менять прямо в таблице.</p>
     ${nmCanEdit()&&Object.keys(f.sel||{}).length?`<div class="cust row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;margin-bottom:8px"><b>Выбрано: ${Object.keys(f.sel).length}</b>
       <select id="nm-bulkcat"><option value="">Назначить категорию…</option>${cats.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
-      <button class="btn small primary" id="nm-bulk-go">Применить</button><button class="btn small" id="nm-bulk-clear">Снять выбор</button></div>`:''}
+      <button class="btn small primary" id="nm-bulk-go">Применить</button><button class="btn small" id="nm-bulk-grp" title="Под каждым из этих штрихкодов много разных изделий одной цены">Отметить как общий штрихкод</button><button class="btn small" id="nm-bulk-clear">Снять выбор</button></div>`:''}
     <div class="scroll"><table class="nm-table"><thead><tr>${nmCanEdit()?`<th style="width:28px;padding-right:0"><input type="checkbox" id="nm-selall" title="Выбрать все на странице" ${D.rows.length&&D.rows.every(p=>(f.sel||{})[p.id])?'checked':''}></th>`:''}<th></th>${[['name','Название'],['category','Категория'],['barcode','Штрихкод'],['cost','Закуп'],['price','Цена'],['stock','Остаток'],['site','Сайт']].map(([k,v])=>`<th><button data-nmsort="${k}" style="border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;white-space:nowrap" title="Сортировать">${v} ${f.sort===k?(f.desc?'▼':'▲'):'<span class="meta">↕</span>'}</button></th>`).join('')}</tr></thead><tbody>
     ${D.rows.map(p=>{ const inc = (S.inc||{})[p.id], L = (p.sites||[]).filter(x=>x.url);
       return `<tr style="${e&&e.id===p.id?'background:var(--soft)':''}">${nmCanEdit()?`<td style="width:28px;padding-right:0;vertical-align:middle"><input type="checkbox" data-nmsel="${p.id}" ${(f.sel||{})[p.id]?'checked':''}></td>`:''}<td>${thumb(p)}</td>
@@ -1283,6 +1283,9 @@ document.addEventListener('change', async e => { if(S.view!=='nom') return; cons
 });
 document.addEventListener('click', async e => { if(S.view!=='nom') return; const t = e.target.closest('button'); if(!t) return; const f = S.nm;
   if(t.id==='nm-bulk-clear'){ f.sel = {}; render(); }
+  else if(t.id==='nm-bulk-grp'){ const ids = Object.keys(f.sel||{}); t.disabled = true; let linked = 0;
+    for(const id of ids){ const r = await sb.rpc('product_mark_group', { p_id:id, p_on:true }); if(r.error){ t.disabled = false; return toast(errText(r.error)); } linked += +(r.data||{}).linked||0; }
+    toast(`Отмечено как общий штрихкод: ${ids.length}${linked?`, сразу связано с карточками сайта той же цены: ${linked}`:''}`); f.sel = {}; await loadNom(); render(); }
   else if(t.id==='nm-bulk-go'){ const c = $('#nm-bulkcat').value; if(!c) return toast('Выберите категорию'); t.disabled = true;
     const r = await sb.rpc('products_set_category', { p_ids:Object.keys(f.sel), p_cat:+c }); if(r.error){ t.disabled = false; return toast(errText(r.error)); }
     toast('Категория назначена: '+r.data+' товарам'); f.sel = {}; await loadNom(); render(); }
