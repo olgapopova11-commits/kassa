@@ -163,9 +163,9 @@ function renderLogin(mode='in', msg=''){
   $('#app').innerHTML = `<div class="login card">
     <div class="brand-login" style="font-weight:800;font-size:26px;letter-spacing:.04em">Silver</div>
     <h2>${mode==='in'?'Вход':'Регистрация сотрудника'}</h2>
-    ${mode==='in'?`<button class="btn primary" id="lg-tg">✈️ Войти через Telegram</button><p class="meta">Для сотрудников, которых менеджер добавил по номеру телефона.</p><div class="label">или по почте</div>`:''}
+    ${mode==='in'?`<button class="btn primary" id="lg-tg">✈️ Войти через Telegram</button><p class="meta">Для сотрудников, которых менеджер добавил по номеру телефона.</p><div class="label">или по логину и паролю</div>`:''}
     ${mode==='up'?'<input id="lg-name" placeholder="Имя и фамилия" autocomplete="name"><input id="lg-phone" placeholder="Телефон, который указал менеджер" inputmode="tel" autocomplete="tel">':''}
-    <input id="lg-email" type="email" placeholder="Почта" autocomplete="username">
+    <input id="lg-email" placeholder="${mode==='in'?'Логин или почта':'Почта'}" autocomplete="username" autocapitalize="off" spellcheck="false">
     <input id="lg-pass" type="password" placeholder="Пароль (не меньше 6 символов)" autocomplete="${mode==='in'?'current-password':'new-password'}">
     ${msg?`<div class="${/ошиб|не /i.test(msg)?'warn':'okmsg'}">${esc(msg)}</div>`:''}
     <button class="btn primary" id="lg-go">${mode==='in'?'Войти':'Зарегистрироваться'}</button>
@@ -175,8 +175,8 @@ function renderLogin(mode='in', msg=''){
   $('#lg-switch').onclick = () => renderLogin(mode==='in'?'up':'in');
   if($('#lg-tg')) $('#lg-tg').onclick = () => tgLogin('login');
   $('#lg-go').onclick = async () => {
-    const email = $('#lg-email').value.trim(), password = $('#lg-pass').value;
-    if(mode==='in'){
+    let email = $('#lg-email').value.trim().toLowerCase(), password = $('#lg-pass').value;
+    if(mode==='in'){ if(email && !email.includes('@')) email += '@silver.kz';
       const { error } = await sb.auth.signInWithPassword({ email, password });
       if(error) return renderLogin('in', 'Не удалось войти: '+errText(error));
       boot();
@@ -1902,6 +1902,20 @@ document.addEventListener('change', async e => { if(S.view!=='photo') return; co
 });
 document.addEventListener('keydown', async e => { if(S.view!=='photo' || e.target.id!=='ph-q' || e.key!=='Enter') return; e.preventDefault(); PH.q = e.target.value.trim(); PH.data = null; render(); await loadPhoto(); render(); });
 
+/* ---------- логин и пароль для сотрудника (задаёт владелец) ---------- */
+document.addEventListener('click', async e => { const t = e.target.closest('button'); if(!t) return;
+  if(t.dataset.epass){ const em = (S.emps||[]).find(x=>x.id===t.dataset.epass); if(!em) return;
+    const sug = (em.full_name||'').toLowerCase().replace(/[^a-zа-яё0-9]+/gi,'').replace(/[а-яё]/g, c => ({а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'e',ж:'zh',з:'z',и:'i',й:'y',к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'h',ц:'c',ч:'ch',ш:'sh',щ:'sh',ы:'y',э:'e',ю:'yu',я:'ya'})[c]||'').slice(0,20);
+    modal(`<div class="row"><h3 style="margin:0">🔑 Вход для «${esc(em.full_name)}»</h3><button class="btn small" data-close>✕</button></div>
+      <div class="stack" style="gap:8px;margin-top:10px"><span class="meta">Сотрудник сможет входить без Telegram: на экране входа ввести логин и пароль. Регистрация не нужна. Если пароль уже был — он заменится.</span>
+      <label class="stack" style="gap:2px"><span class="label">Логин (латиницей)</span><input id="ep-login" value="${esc(sug)}" autocapitalize="off" spellcheck="false"></label>
+      <label class="stack" style="gap:2px"><span class="label">Пароль (от 6 символов)</span><input id="ep-pass" type="text" autocomplete="off"></label>
+      <div class="row"><span></span><button class="btn primary" id="ep-save" data-id="${em.id}">Сохранить</button></div></div>`); }
+  else if(t.id==='ep-save'){ t.disabled = true; const { data, error } = await sb.functions.invoke('staff', { body:{ employee_id:t.dataset.id, login:$('#ep-login').value, password:$('#ep-pass').value } });
+    let msg = error ? error.message : null; if(error){ try{ const j = await error.context.json(); msg = j.error || msg; }catch(_){} }
+    t.disabled = false; if(msg) return toast(msg); closeModal(); toast(`Готово: логин «${data.login}» — передайте сотруднику логин и пароль`); await loadEmps(); render(); }
+});
+
 function loadScriptOnce(src){ return new Promise((ok,no)=>{ if(document.querySelector(`script[src="${src}"]`)) return ok(); const el=document.createElement('script'); el.src=src; el.onload=ok; el.onerror=no; document.head.appendChild(el); }); }
 async function sagiImport(file){
   const brand = BK.brand; BK.imp = 'Читаем файл…'; render();
@@ -2256,13 +2270,14 @@ function renderEmps(){
         <select id="ne-role">${Object.entries(ROLE).filter(([k])=>k!=='consultant'&&(k!=='owner'||S.me.role==='owner')).map(([k,v])=>`<option value="${k}" ${k==='manager'?'selected':''}>${v}</option>`).join('')}</select>
         ${storesDD([], id=>`class="ne-store" value="${id}"`)}<button class="btn primary small" id="ne-add">Добавить</button></div>
       <span class="meta">Сотрудник входит кнопкой «Войти через Telegram» и делится этим же номером в боте — пароль не нужен.</span></div></details>
-    <div class="scroll"><table class="emp-tbl"><thead><tr><th>Имя</th><th>Телефон</th><th>Роль</th><th>Магазины</th><th title="Может входить">Вкл.</th><th title="Официально трудоустроен">Офиц.</th></tr></thead><tbody>
+    <div class="scroll"><table class="emp-tbl"><thead><tr><th>Имя</th><th>Телефон</th><th>Роль</th><th>Магазины</th><th title="Может входить">Вкл.</th><th title="Официально трудоустроен">Офиц.</th>${S.me.role==='owner'?'<th>Вход</th>':''}</tr></thead><tbody>
     ${list.map(e=>`<tr class="${e.active?'':'off'}"><td><b>${esc(e.full_name)}</b> <span class="meta" title="${e.telegram_id?'Telegram привязан':'Telegram не привязан'}${!e.auth_user_id?' · ещё не входил':''}">${e.telegram_id?'✈':''}${!e.auth_user_id?' · не входил':''}</span></td>
       <td><input data-ephone="${e.id}" value="${esc(e.phone||'')}" placeholder="нет телефона" inputmode="tel" style="width:135px"></td>
       <td><select data-erole="${e.id}">${Object.entries(ROLE).filter(([k])=>k!=='consultant').map(([k,v])=>`<option value="${k}" ${e.role===k?'selected':''}>${v}</option>`).join('')}</select></td>
       <td>${['owner','viewer'].includes(e.role)?'<span class="meta">все</span>':(()=>{ const ids=e.store_ids||(e.home_store_id?[e.home_store_id]:[]); return storesDD(ids, id=>`data-estores="${e.id}:${id}"`); })()+(e.role==='manager'?' <span class="meta" title="Менеджер видит все магазины; отмеченные — подтверждает перемещения">ⓘ</span>':'')}</td>
       <td style="text-align:center"><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''} aria-label="включён"></td>
-      <td style="text-align:center"><input type="checkbox" data-eoff="${e.id}" ${e.official?'checked':''} aria-label="официально"></td></tr>`).join('')}</tbody></table></div>
+      <td style="text-align:center"><input type="checkbox" data-eoff="${e.id}" ${e.official?'checked':''} aria-label="официально"></td>
+      ${S.me.role==='owner'?`<td><button class="btn small" data-epass="${e.id}" title="Задать логин и пароль для входа без Telegram">🔑 Логин</button></td>`:''}</tr>`).join('')}</tbody></table></div>
     ${S.me.role==='owner'?`<details class="card emp-acc" style="margin-top:12px"><summary>⚙ Какие вкладки видит каждая роль</summary>${accessHtml()}</details>`:''}`;
 }
 async function updEmp(id, patch){ const { error } = await sb.from('employees').update(patch).eq('id', id); if(error) toast(errText(error)); else toast('Сохранено'); }
@@ -2933,7 +2948,7 @@ async function translate1688(){
 async function importPhotos1688(raw){
   try{
     const data = JSON.parse(decodeURIComponent(raw)); // [[номер заказа, offer, [фото...]], ...]
-    const rows = data.map(([o,f,i])=>({ o, f, i: i.map(u => u.startsWith('http') ? u : 'https://'+u) }));
+    const rows = data.map(([o,f,i,sk])=>({ o, f, i: i.map(u => u.startsWith('http') ? u : 'https://'+u), ...(sk ? { s: sk } : {}) }));
     let n = 0;
     for(let k=0; k<rows.length; k+=150){ const { data:d, error } = await sb.rpc('po_photos_set', { p: rows.slice(k, k+150) }); if(error) throw error; n += +d||0; }
     toast(`Фото добавлены к ${n} позициям заказов`); PO.list = null; if(S.view==='po'){ await loadPo(); render(); }
