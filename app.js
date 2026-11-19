@@ -824,7 +824,7 @@ function renderCerts(){
     <div class="filters">${[['active','Действующие'],['expired','Истёкшие'],['used','Использованные'],['review','⚠ Сомнительные'],['all','Все']].map(([k,v])=>`<button class="btn small ${S.cf.st===k?'primary':''}" data-cfst="${k}">${v}</button>`).join('')}
       <select id="cf-store"><option value="">Все магазины</option>${S.allStores.map(st=>`<option value="${st.id}" ${String(S.cf.store)===String(st.id)?'selected':''}>${esc(BRAND[st.brand]+' · '+st.address)}</option>`).join('')}</select>
       <input id="cf-q" placeholder="Номер, телефон, имя" value="${esc(S.cf.q)}" style="flex:1;min-width:140px"></div>
-    <p class="meta">Показано: ${S.certs.length}${S.certs.length===300?' (первые 300 — уточните поиск)':''}. Старые сертификаты перенесены из Google-таблицы; срок действия для них считается 3 месяца от даты покупки.</p>
+    <p class="meta">Показано: ${S.certs.length}${S.certs.length===300?' (первые 300 — уточните поиск)':''}. Старые сертификаты перенесены из Google-таблицы; срок действия — 6 месяцев от даты покупки.</p>
     ${S.certs.length?`<div class="scroll"><table><thead><tr><th>Номер</th><th>Номинал / остаток</th><th>Статус</th><th>Продан</th><th>Кто купил → кому</th><th>Где использован</th></tr></thead><tbody>
     ${S.certs.map(c=>`<tr style="${c.needs_review?'background:#fff6e5':''}"><td><b>${esc(c.code)}</b><br><span class="meta">${c.kind==='electronic'?'электронный':'физический'}</span>
         ${c.needs_review?`<br><span class="chip warn" title="${esc(c.source||'')}">⚠ ${esc(c.review_note||'проверить')}</span>`:''}${c.note?`<br><span class="meta">${esc(c.note)}</span>`:''}</td>
@@ -1649,6 +1649,7 @@ async function loadContent(){
   const [l, st] = await Promise.all([ sb.rpc('content_list', { p_brand:CT.brand }), CT.ai===null ? sb.functions.invoke('content', { body:{ action:'status' } }) : null ]);
   if(l.error) toast(errText(l.error)); CT.list = l.data || [];
   if(st) CT.ai = !!(st.data && st.data.ai);
+  if(CT.banned==null){ const b = await sb.rpc('content_banned_get'); CT.banned = b.data || ''; }
 }
 async function ctAI(body){
   const { data, error } = await sb.functions.invoke('content', { body });
@@ -1683,7 +1684,10 @@ function renderContent(){
   ${ctEdit()?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:10px">
     <button class="btn primary" id="ct-ai" ${CT.ai?'':'disabled'}>${CT.busy==='ideas'?'Думаем…':'✨ Идеи ИИ на неделю'}</button>
     <button class="btn" id="ct-data">${CT.busy==='data'?'Собираем…':'💡 Идеи из данных Silver'}</button>
-    <button class="btn" id="ct-add">+ Своя идея</button></div>`:''}
+    <button class="btn" id="ct-add">+ Своя идея</button></div>
+  <details class="card" style="margin-bottom:10px"><summary style="cursor:pointer"><b>🚫 Нельзя в Instagram</b> <span class="meta">— товары с этими словами в названии не попадают в идеи и посты</span></summary>
+    <textarea id="ct-banned" rows="3" style="width:100%;margin-top:6px">${esc(CT.banned||'')}</textarea>
+    <div class="row"><span class="meta">Слова через запятую: бренды и узнаваемые модели (клевер, гвоздь…).</span><button class="btn small primary" id="ct-banned-save">Сохранить</button></div></details>`:''}
   ${CT.ai===false?`<div class="card meta" style="margin-bottom:10px">✨ ИИ пока не подключён. «Идеи из данных Silver» и ручные посты уже работают. Чтобы ИИ сам писал идеи и тексты, владелец добавляет ключ Anthropic в Supabase → Edge Functions → Secrets под именем ANTHROPIC_API_KEY.</div>`:''}
   ${CT.add?`<div class="card stack" style="margin-bottom:10px;gap:6px"><b>Своя идея</b><input id="ct-n-title" placeholder="Коротко: о чём пост"><textarea id="ct-n-idea" rows="2" placeholder="Что снять, зачем"></textarea>
     <div class="row" style="justify-content:flex-start;gap:6px"><select id="ct-n-fmt">${Object.entries(CT_FMT).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select><button class="btn small primary" id="ct-n-save">Добавить</button><button class="btn small" id="ct-n-cancel">Отмена</button></div></div>`:''}
@@ -1703,6 +1707,7 @@ document.addEventListener('click', async e => {
   try{
     if(d.ctbrand){ CT.brand = d.ctbrand; CT.list = null; render(); await loadContent(); render(); }
     else if(t.id==='ct-add'){ CT.add = true; render(); }
+    else if(t.id==='ct-banned-save'){ const v = $('#ct-banned').value; const { error } = await sb.rpc('content_banned_set', { p:v }); if(error) throw error; CT.banned = v; toast('Список сохранён'); }
     else if(t.id==='ct-n-cancel'){ CT.add = false; render(); }
     else if(t.id==='ct-n-save'){ const title = $('#ct-n-title').value.trim(); if(!title) return toast('Напишите, о чём пост');
       const { error } = await sb.rpc('content_save', { p:{ brand:CT.brand, title, idea:$('#ct-n-idea').value, format:$('#ct-n-fmt').value, status:'idea' } }); if(error) throw error; CT.add = false; await loadContent(); render(); }
@@ -2535,32 +2540,45 @@ const adCalc = a => { const due = (+a.accrued||0) + (+a.bonus||0) - (+a.deductio
   return { due, card, cash: due - card, paid, rest: due - paid, cost: due + (+a.tax||0) }; };
 function renderAdm(){
   if(S.me.role!=='owner'){ $('#main').innerHTML = '<div class="empty">Нет доступа</div>'; return; }
-  const L = AD.list, C = (L||[]).map(adCalc), sum = k => C.reduce((t,c)=>t+c[k],0), ep = L&&L[0] ? +L[0].ep_rate : 24.8;
-  const num = (a,k,w=100) => `<input class="small" type="number" min="0" inputmode="numeric" value="${+a[k]||''}" data-adf="${a.id}:${k}" style="width:${w}px">`;
-  $('#main').innerHTML = `<div class="row"><h2>Административный штат</h2><label class="meta">Месяц <input type="month" id="ad-month" value="${AD.month}"></label></div>
-  <div class="card meta" style="margin-bottom:8px">💰 ${advanceText(AD.month)}</div>
-  <p class="meta">🔒 Эту вкладку видите только вы. Официальная часть на карту считается по единому платежу (${ep}% от официальной ставки): работнику на руки ставка минус удержанная доля (ОПВ, ВОСМС, ИПН), налоги целиком платит компания. Остаток до управленческой суммы — наличными. Суммы сохраняются сразу при вводе.</p>
-  ${!L?'<div class="empty">Загружаем…</div>':`<div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Как считается</th><th>Начислено</th>${AD_F.slice(0,1).map(([,t])=>`<th>${t}</th>`).join('')}<th>К выплате</th><th>Офиц. ставка</th><th>На карту офиц.</th><th>Наличными</th>${AD_F.slice(1).map(([,t])=>`<th>${t}</th>`).join('')}<th>Остаток</th><th>Налоги ЕП</th><th></th></tr></thead><tbody>
-    ${L.map((a,n)=>{ const c = C[n]; return `<tr><td><input value="${esc(a.name)}" data-adf="${a.id}:name" style="min-width:130px"><br><input value="${esc(a.position||'')}" data-adf="${a.id}:position" placeholder="должность" class="small" style="min-width:130px">${a.note?`<br><span class="meta">${esc(a.note)}</span>`:''}</td>
-      <td><select data-adf="${a.id}:rule"><option value="fixed" ${a.rule!=='pct'?'selected':''}>оклад</option><option value="pct" ${a.rule==='pct'?'selected':''}>% от продаж</option></select><br>
-        ${a.rule==='pct'?`${num(a,'pct',60)} % · <span class="meta">${(a.pct_stores||[1,2,3,6]).map(id=>esc((S.allStores.find(x=>x.id===id)||{}).address||id)).join(', ')}<br>продажи ${fmt(a.sales)}</span>`:num(a,'salary',110)}</td>
-      <td class="num"><b>${fmt(a.accrued)}</b></td><td>${num(a,'bonus')}</td><td class="num"><b>${fmt(c.due)}</b></td>
-      <td>${num(a,'official_base',100)}<br><label class="meta"><input type="checkbox" data-adf="${a.id}:all_card" ${a.all_card?'checked':''}> всё на карту</label></td>
+  const L = AD.list, C = (L||[]).map(adCalc), sum = k => C.reduce((t,c)=>t+c[k],0), ep = L&&L[0] ? +L[0].ep_rate : 24.8, taxes = (L||[]).reduce((t,a)=>t+(+a.tax||0),0);
+  if(!document.getElementById('adm-css')){ const st = document.createElement('style'); st.id = 'adm-css'; st.textContent = `.adm-tbl td,.adm-tbl th{padding:6px 8px;vertical-align:middle;white-space:nowrap}.adm-tbl th{font-size:12px}.adm-tbl input{padding:4px 6px;font-size:13px;width:95px}.adm-tbl tfoot td{border-top:2px solid var(--line);font-weight:600}.adm-add>summary{cursor:pointer;font-weight:600;list-style:none}.adm-add>summary::-webkit-details-marker{display:none}`; document.head.append(st); }
+  const num = (a,k) => `<input type="number" min="0" inputmode="numeric" value="${+a[k]||''}" placeholder="0" data-adf="${a.id}:${k}">`;
+  const how = a => a.rule==='pct' ? `${+a.pct||0}% от продаж ${fmt(a.sales)}` : 'оклад';
+  $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap"><h2 style="margin:0">Административный штат</h2><label class="meta">Месяц <input type="month" id="ad-month" value="${AD.month}"></label></div>
+  <p class="meta" style="margin:6px 0 10px">🔒 Видите только вы · 💰 ${advanceText(AD.month)} · Вводите премию и выплаты — сохраняется сразу.</p>
+  ${!L?'<div class="empty">Загружаем…</div>':`<div class="scroll"><table class="adm-tbl"><thead><tr><th>Сотрудник</th><th>Начислено</th><th>Премия</th><th>К выплате</th><th>На карту</th><th>Наличными</th><th>Выплачено нал.</th><th>Выплачено на карту</th><th>Остаток</th><th></th></tr></thead><tbody>
+    ${L.map((a,n)=>{ const c = C[n]; return `<tr><td><b>${esc(a.name)}</b>${a.position?`<br><span class="meta">${esc(a.position)}</span>`:''}</td>
+      <td class="num">${fmt(a.accrued)}<br><span class="meta">${how(a)}</span></td><td>${num(a,'bonus')}</td><td class="num"><b>${fmt(c.due)}</b></td>
       <td class="num">${fmt(c.card)}</td><td class="num">${fmt(c.cash)}</td><td>${num(a,'paid_cash')}</td><td>${num(a,'paid_card')}</td>
-      <td class="num" style="color:${c.rest<0?'var(--bad)':c.rest>0?'inherit':'var(--ok)'}"><b>${c.rest<0?'переплата '+fmt(-c.rest):fmt(c.rest)}</b></td><td class="num">${fmt(a.tax)}</td>
-      <td><button class="btn small" data-addel="${a.id}" title="Удалить">✕</button></td></tr>`; }).join('') || `<tr><td colspan="14" class="meta">В этом месяце пока никого нет — нажмите «Перенести с прошлого месяца» или добавьте сотрудника</td></tr>`}
-    ${L.length>1?`<tr><td><b>Итого</b></td><td></td><td class="num">${fmt(L.reduce((t,a)=>t+(+a.accrued||0),0))}</td><td></td><td class="num"><b>${fmt(sum('due'))}</b></td><td></td><td class="num">${fmt(sum('card'))}</td><td class="num">${fmt(sum('cash'))}</td><td></td><td></td><td class="num"><b>${fmt(sum('rest'))}</b></td><td class="num">${fmt(L.reduce((t,a)=>t+(+a.tax||0),0))}</td><td></td></tr>`:''}</tbody></table></div>
-  <p class="meta">Расход компании на административный штат за месяц: <b>${fmt(sum('cost'))}</b> (выплаты ${fmt(sum('due'))} + налоги ${fmt(L.reduce((t,a)=>t+(+a.tax||0),0))}).</p>`}
-  <div class="card stack" style="margin-top:14px"><b>Добавить сотрудника</b>
-    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px"><input id="ad-name" placeholder="Имя и фамилия"><input id="ad-pos" placeholder="Должность: бухгалтер, менеджер, СММ…"><input id="ad-sal" type="number" min="0" inputmode="numeric" placeholder="оклад, ₸" style="width:130px">
-      <button class="btn primary" id="ad-add">Добавить</button><button class="btn" id="ad-copy" title="Перенести людей, оклады и правила с прошлого месяца">Перенести с прошлого месяца</button></div></div>`;
+      <td class="num" style="color:${c.rest<0?'var(--bad)':c.rest>0?'inherit':'var(--ok)'}"><b>${c.rest<0?'переплата '+fmt(-c.rest):c.rest===0?'✓ выплачено':fmt(c.rest)}</b></td>
+      <td><button class="btn small" data-adedit="${a.id}" title="Оклад, процент, официальная ставка">✎</button></td></tr>`; }).join('') || `<tr><td colspan="10" class="meta">В этом месяце пока никого нет — нажмите «Перенести с прошлого месяца»</td></tr>`}</tbody>
+    ${L.length>1?`<tfoot><tr><td>Итого</td><td class="num">${fmt(L.reduce((t,a)=>t+(+a.accrued||0),0))}</td><td></td><td class="num">${fmt(sum('due'))}</td><td class="num">${fmt(sum('card'))}</td><td class="num">${fmt(sum('cash'))}</td><td></td><td></td><td class="num">${fmt(sum('rest'))}</td><td></td></tr></tfoot>`:''}</table></div>
+  <p class="meta">Расход компании за месяц: <b>${fmt(sum('cost'))}</b> — выплаты ${fmt(sum('due'))} + налоги ЕП ${fmt(taxes)} (${ep}% от официальной ставки; на карту — ставка минус удержания, остальное наличными).</p>`}
+  <div class="row" style="justify-content:flex-start;gap:8px;margin-top:10px;flex-wrap:wrap">
+    <button class="btn small" id="ad-copy" title="Перенести людей, оклады и правила с прошлого месяца">Перенести с прошлого месяца</button>
+    <details class="adm-add"><summary class="btn small">+ Добавить сотрудника</summary>
+      <div class="row card" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-top:6px"><input id="ad-name" placeholder="Имя и фамилия"><input id="ad-pos" placeholder="Должность"><input id="ad-sal" type="number" min="0" inputmode="numeric" placeholder="оклад, ₸" style="width:120px"><button class="btn primary small" id="ad-add">Добавить</button></div></details></div>`;
+}
+function admEditHtml(a){
+  return `<div class="row"><h3 style="margin:0">${esc(a.name)}</h3><button class="btn small" data-close>✕</button></div>
+  <div class="stack" style="gap:8px;margin-top:10px">
+    <label class="stack" style="gap:2px"><span class="label">Имя</span><input id="ae-name" value="${esc(a.name)}"></label>
+    <label class="stack" style="gap:2px"><span class="label">Должность</span><input id="ae-pos" value="${esc(a.position||'')}"></label>
+    <label class="stack" style="gap:2px"><span class="label">Как считается</span><select id="ae-rule"><option value="fixed" ${a.rule!=='pct'?'selected':''}>Оклад</option><option value="pct" ${a.rule==='pct'?'selected':''}>% от продаж</option></select></label>
+    <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><label class="meta">Оклад, ₸ <input id="ae-sal" type="number" min="0" value="${+a.salary||''}" style="width:120px"></label><label class="meta">Процент <input id="ae-pct" type="number" min="0" step="0.1" value="${+a.pct||''}" style="width:70px"></label></div>
+    <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><label class="meta">Официальная ставка, ₸ <input id="ae-off" type="number" min="0" value="${+a.official_base||''}" style="width:120px"></label><label class="meta"><input type="checkbox" id="ae-allcard" ${a.all_card?'checked':''}> всё на карту</label></div>
+    <div class="row"><button class="btn small" data-addel="${a.id}">Удалить из месяца</button><button class="btn primary" id="ae-save" data-id="${a.id}">Сохранить</button></div></div>`;
 }
 document.addEventListener('click', async e => {
   if(S.view!=='adm') return; const t = e.target.closest('button'); if(!t) return;
   if(t.id==='ad-add'){ const name = $('#ad-name').value.trim(); if(!name) return toast('Укажите имя');
     const { error } = await sb.rpc('admin_pay_save', { p:{ month:AD.month+'-01', name, position:$('#ad-pos').value.trim(), salary:$('#ad-sal').value } }); if(error) return toast(errText(error)); await loadAdm(); render(); }
   else if(t.id==='ad-copy'){ const { data, error } = await sb.rpc('admin_pay_copy', { p_month:AD.month+'-01' }); if(error) return toast(errText(error)); toast(data ? 'Перенесено: '+data : 'Нечего переносить'); await loadAdm(); render(); }
-  else if(t.dataset.addel){ if(t.dataset.sure!=='1'){ t.dataset.sure='1'; t.textContent='Удалить?'; return; } const { error } = await sb.rpc('admin_pay_del', { p_id:t.dataset.addel }); if(error) return toast(errText(error)); await loadAdm(); render(); }
+  else if(t.dataset.adedit){ const a = (AD.list||[]).find(x=>x.id===t.dataset.adedit); if(a) modal(admEditHtml(a)); }
+  else if(t.id==='ae-save'){ const a = (AD.list||[]).find(x=>x.id===t.dataset.id); if(!a) return;
+    const p = { ...a, name:$('#ae-name').value.trim()||a.name, position:$('#ae-pos').value.trim(), rule:$('#ae-rule').value, salary:$('#ae-sal').value, pct:$('#ae-pct').value, official_base:$('#ae-off').value, all_card:$('#ae-allcard').checked };
+    const { error } = await sb.rpc('admin_pay_save', { p }); if(error) return toast(errText(error)); closeModal(); toast('Сохранено'); await loadAdm(); render(); }
+  else if(t.dataset.addel){ if(t.dataset.sure!=='1'){ t.dataset.sure='1'; t.textContent='Точно удалить?'; return; } const { error } = await sb.rpc('admin_pay_del', { p_id:t.dataset.addel }); if(error) return toast(errText(error)); closeModal(); await loadAdm(); render(); }
 });
 document.addEventListener('change', async e => {
   if(S.view!=='adm') return; const t = e.target;
@@ -2568,7 +2586,7 @@ document.addEventListener('change', async e => {
   if(!t.dataset.adf) return; const [id, k] = t.dataset.adf.split(':'), a = (AD.list||[]).find(x=>x.id===id); if(!a) return;
   a[k] = t.type==='checkbox' ? t.checked : t.value;
   const { error } = await sb.rpc('admin_pay_save', { p:{ ...a } }); if(error){ toast(errText(error)); return; }
-  await loadAdm(); render();
+  await loadAdm(); render(); toast('Сохранено');
 });
 
 
