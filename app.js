@@ -2073,24 +2073,30 @@ document.addEventListener('change', async e => { if(S.view==='me' && e.target.id
 
 /* ---------- административный штат (видит только владелец) ---------- */
 const AD = { month: new Date().toISOString().slice(0,7), list:null };
-const AD_F = [['salary','Оклад'],['bonus','Премия'],['deduction','Удержание'],['paid_cash','Выплачено наличными'],['paid_card','На карту']];
+const AD_F = [['bonus','Премия'],['deduction','Удержание'],['paid_cash','Выплачено наличными'],['paid_card','Выплачено на карту']];
 async function loadAdm(){ AD.list = null; const { data, error } = await sb.rpc('admin_pay_list', { p_month: AD.month+'-01' }); if(error) toast(errText(error)); AD.list = data || []; }
-const adCalc = a => { const due = +a.salary + +a.bonus - +a.deduction, paid = +a.paid_cash + +a.paid_card; return { due, paid, rest: due - paid }; };
+const adCalc = a => { const due = (+a.accrued||0) + (+a.bonus||0) - (+a.deduction||0), card = a.all_card ? due : (+a.official_card||0), paid = (+a.paid_cash||0) + (+a.paid_card||0);
+  return { due, card, cash: due - card, paid, rest: due - paid, cost: due + (+a.tax||0) }; };
 function renderAdm(){
   if(S.me.role!=='owner'){ $('#main').innerHTML = '<div class="empty">Нет доступа</div>'; return; }
-  const L = AD.list, T = (L||[]).reduce((t,a)=>{ const c = adCalc(a); AD_F.forEach(([k])=>t[k]=(t[k]||0)+ +a[k]); t.due=(t.due||0)+c.due; t.rest=(t.rest||0)+c.rest; return t; }, {});
-  const inp = (a,k) => `<input class="small" type="number" min="0" inputmode="numeric" value="${+a[k]||''}" data-adf="${a.id}:${k}" style="width:105px">`;
+  const L = AD.list, C = (L||[]).map(adCalc), sum = k => C.reduce((t,c)=>t+c[k],0), ep = L&&L[0] ? +L[0].ep_rate : 24.8;
+  const num = (a,k,w=100) => `<input class="small" type="number" min="0" inputmode="numeric" value="${+a[k]||''}" data-adf="${a.id}:${k}" style="width:${w}px">`;
   $('#main').innerHTML = `<div class="row"><h2>Административный штат</h2><label class="meta">Месяц <input type="month" id="ad-month" value="${AD.month}"></label></div>
-  <p class="meta">🔒 Эту вкладку видите только вы. Бухгалтер, менеджеры, СММ и другие сотрудники на окладе — не зависят от продаж магазинов. Суммы сохраняются сразу при вводе.</p>
-  ${!L?'<div class="empty">Загружаем…</div>':`<div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Должность</th>${AD_F.map(([,t])=>`<th>${t}</th>`).join('')}<th>К выплате</th><th>Остаток</th><th></th></tr></thead><tbody>
-    ${L.map(a=>{ const c = adCalc(a); return `<tr><td><input value="${esc(a.name)}" data-adf="${a.id}:name" style="min-width:130px"><br><label class="meta"><input type="checkbox" data-adf="${a.id}:official" ${a.official?'checked':''}> официально</label></td>
-      <td><input value="${esc(a.position||'')}" data-adf="${a.id}:position" placeholder="должность" style="min-width:110px"></td>${AD_F.map(([k])=>`<td>${inp(a,k)}</td>`).join('')}
-      <td class="num"><b>${fmt(c.due)}</b></td><td class="num" style="color:${c.rest<0?'var(--bad)':c.rest>0?'inherit':'var(--ok)'}"><b>${c.rest<0?'переплата '+fmt(-c.rest):fmt(c.rest)}</b></td>
-      <td><button class="btn small" data-addel="${a.id}" title="Удалить">✕</button></td></tr>`; }).join('') || `<tr><td colspan="10" class="meta">В этом месяце пока никого нет${''}</td></tr>`}
-    ${L.length>1?`<tr><td><b>Итого</b></td><td></td>${AD_F.map(([k])=>`<td class="num">${fmt(T[k])}</td>`).join('')}<td class="num"><b>${fmt(T.due)}</b></td><td class="num"><b>${fmt(T.rest)}</b></td><td></td></tr>`:''}</tbody></table></div>`}
+  <p class="meta">🔒 Эту вкладку видите только вы. Официальная часть на карту считается по единому платежу (${ep}% от официальной ставки): работнику на руки ставка минус удержанная доля (ОПВ, ВОСМС, ИПН), налоги целиком платит компания. Остаток до управленческой суммы — наличными. Суммы сохраняются сразу при вводе.</p>
+  ${!L?'<div class="empty">Загружаем…</div>':`<div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Как считается</th><th>Начислено</th>${AD_F.slice(0,2).map(([,t])=>`<th>${t}</th>`).join('')}<th>К выплате</th><th>Офиц. ставка</th><th>На карту офиц.</th><th>Наличными</th>${AD_F.slice(2).map(([,t])=>`<th>${t}</th>`).join('')}<th>Остаток</th><th>Налоги ЕП</th><th></th></tr></thead><tbody>
+    ${L.map((a,n)=>{ const c = C[n]; return `<tr><td><input value="${esc(a.name)}" data-adf="${a.id}:name" style="min-width:130px"><br><input value="${esc(a.position||'')}" data-adf="${a.id}:position" placeholder="должность" class="small" style="min-width:130px">${a.note?`<br><span class="meta">${esc(a.note)}</span>`:''}</td>
+      <td><select data-adf="${a.id}:rule"><option value="fixed" ${a.rule!=='pct'?'selected':''}>оклад</option><option value="pct" ${a.rule==='pct'?'selected':''}>% от продаж</option></select><br>
+        ${a.rule==='pct'?`${num(a,'pct',60)} % · <span class="meta">${(a.pct_stores||[1,2,3,6]).map(id=>esc((S.allStores.find(x=>x.id===id)||{}).address||id)).join(', ')}<br>продажи ${fmt(a.sales)}</span>`:num(a,'salary',110)}</td>
+      <td class="num"><b>${fmt(a.accrued)}</b></td><td>${num(a,'bonus')}</td><td>${num(a,'deduction')}</td><td class="num"><b>${fmt(c.due)}</b></td>
+      <td>${num(a,'official_base',100)}<br><label class="meta"><input type="checkbox" data-adf="${a.id}:all_card" ${a.all_card?'checked':''}> всё на карту</label></td>
+      <td class="num">${fmt(c.card)}</td><td class="num">${fmt(c.cash)}</td><td>${num(a,'paid_cash')}</td><td>${num(a,'paid_card')}</td>
+      <td class="num" style="color:${c.rest<0?'var(--bad)':c.rest>0?'inherit':'var(--ok)'}"><b>${c.rest<0?'переплата '+fmt(-c.rest):fmt(c.rest)}</b></td><td class="num">${fmt(a.tax)}</td>
+      <td><button class="btn small" data-addel="${a.id}" title="Удалить">✕</button></td></tr>`; }).join('') || `<tr><td colspan="14" class="meta">В этом месяце пока никого нет — нажмите «Перенести с прошлого месяца» или добавьте сотрудника</td></tr>`}
+    ${L.length>1?`<tr><td><b>Итого</b></td><td></td><td class="num">${fmt(L.reduce((t,a)=>t+(+a.accrued||0),0))}</td><td></td><td></td><td class="num"><b>${fmt(sum('due'))}</b></td><td></td><td class="num">${fmt(sum('card'))}</td><td class="num">${fmt(sum('cash'))}</td><td></td><td></td><td class="num"><b>${fmt(sum('rest'))}</b></td><td class="num">${fmt(L.reduce((t,a)=>t+(+a.tax||0),0))}</td><td></td></tr>`:''}</tbody></table></div>
+  <p class="meta">Расход компании на административный штат за месяц: <b>${fmt(sum('cost'))}</b> (выплаты ${fmt(sum('due'))} + налоги ${fmt(L.reduce((t,a)=>t+(+a.tax||0),0))}).</p>`}
   <div class="card stack" style="margin-top:14px"><b>Добавить сотрудника</b>
-    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px"><input id="ad-name" placeholder="Имя, напр. Кира"><input id="ad-pos" placeholder="Должность: бухгалтер, менеджер, СММ…"><input id="ad-sal" type="number" min="0" inputmode="numeric" placeholder="оклад, ₸" style="width:130px">
-      <button class="btn primary" id="ad-add">Добавить</button><button class="btn" id="ad-copy" title="Перенести людей и оклады с прошлого месяца">Перенести с прошлого месяца</button></div></div>`;
+    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px"><input id="ad-name" placeholder="Имя и фамилия"><input id="ad-pos" placeholder="Должность: бухгалтер, менеджер, СММ…"><input id="ad-sal" type="number" min="0" inputmode="numeric" placeholder="оклад, ₸" style="width:130px">
+      <button class="btn primary" id="ad-add">Добавить</button><button class="btn" id="ad-copy" title="Перенести людей, оклады и правила с прошлого месяца">Перенести с прошлого месяца</button></div></div>`;
 }
 document.addEventListener('click', async e => {
   if(S.view!=='adm') return; const t = e.target.closest('button'); if(!t) return;
@@ -2105,7 +2111,7 @@ document.addEventListener('change', async e => {
   if(!t.dataset.adf) return; const [id, k] = t.dataset.adf.split(':'), a = (AD.list||[]).find(x=>x.id===id); if(!a) return;
   a[k] = t.type==='checkbox' ? t.checked : t.value;
   const { error } = await sb.rpc('admin_pay_save', { p:{ ...a } }); if(error){ toast(errText(error)); return; }
-  render();
+  await loadAdm(); render();
 });
 
 
