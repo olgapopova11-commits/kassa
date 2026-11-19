@@ -265,6 +265,7 @@ function renderHeader(){
   if($('#tg-link')) $('#tg-link').onclick = () => tgLogin('link');
 }
 function render(){
+  if(S.view!=='nom' && document.getElementById('nm-modal')){ $('#modal').innerHTML = ''; if(S.nm) S.nm.ed = null; }
   if(location.hash.slice(1)!==S.view) try{ history.replaceState(null,'','#'+S.view); }catch(_){}
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
@@ -1238,8 +1239,7 @@ function renderNom(){
   const f = S.nm, D = f.data, e = f.ed, cats = f.cats || [];
   const inp = (k, label, extra='') => `<label class="stack" style="gap:4px"><span class="label">${label}</span><input data-nf="${k}" value="${esc(e[k]??'')}" ${extra}></label>`;
   $('#main').innerHTML = `<div class="row"><h2>Номенклатура</h2><button class="btn primary" id="nm-new">+ Новый товар</button></div>
-  ${e?nmEditorHtml(e, f, cats, inp):''}
-    <div class="filters" style="margin-top:${e?'14px':'0'}"><input id="nm-q" placeholder="Штрихкод, артикул или название" value="${esc(f.q)}" style="flex:1;min-width:180px">
+    <div class="filters"><input id="nm-q" placeholder="Штрихкод, артикул или название" value="${esc(f.q)}" style="flex:1;min-width:180px">
       <select id="nm-cat"><option value="">Все категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
       <label class="meta" style="align-self:center"><input type="checkbox" id="nm-arch" ${f.arch?'checked':''}> архив</label></div>
     ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}. Нажмите на название, чтобы открыть карточку.</p>
@@ -1254,9 +1254,20 @@ function renderNom(){
       <td class="num">${p.stock>0?'<span class="chip ok">есть '+p.stock+'</span>':'<span class="chip zero">нет</span>'}${inc&&((inc.ordered||0)+(inc.transit||0))?`<br><span class="meta">заказано ${(inc.ordered||0)+(inc.transit||0)}</span>`:''}</td>
       <td>${L.length?L.map(x=>`<a href="${esc(x.url)}" target="_blank" rel="noopener">${x.site==='moon'?'MOON':'Sunshine'}</a>${x.status==='review'?' <span class="meta">(не проверено)</span>':''}`).join('<br>'):'<span class="meta">нет на сайте</span>'}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">Ничего не найдено</td></tr>'}</tbody></table></div>
     ${f.off||D.rows.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-nmpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-nmpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`}`;
+  nmModalSync(e, f, cats, inp);
+}
+document.addEventListener('mousedown', e => { if(e.target && e.target.id==='nm-modal' && S.nm){ S.nm.ed = null; render(); } });
+function nmModalSync(e, f, cats, inp){
+  const M = $('#modal'), has = !!M.querySelector('#nm-modal');
+  if(!e){ if(has) M.innerHTML = ''; return; }
+  const ae = document.activeElement, keep = ae && M.contains(ae) && ae.id ? { id:ae.id, s:ae.selectionStart, e:ae.selectionEnd } : null;
+  const sc = has ? M.querySelector('.dialog').scrollTop : 0;
+  M.innerHTML = `<div class="overlay" id="nm-modal"><div class="dialog" role="dialog" aria-modal="true" style="max-width:820px">${nmEditorHtml(e, f, cats, inp)}</div></div>`;
+  M.querySelector('.dialog').scrollTop = sc;
+  if(keep){ const el = document.getElementById(keep.id); if(el){ el.focus(); try{ el.setSelectionRange(keep.s, keep.e); }catch(_){} } }
 }
 function nmEditorHtml(e, f, cats, inp){
-  return `<div class="card stack">
+  return `<div class="stack">
      <div class="row"><h2 style="margin:0">${e.id?'Карточка товара':'Новый товар'}</h2><button class="btn small" id="nm-close">Закрыть</button></div>
      <div class="row" style="justify-content:flex-start;align-items:flex-start">
        ${e.photo_url?`<img src="${esc(e.photo_url)}" alt="" style="width:120px;height:120px;object-fit:cover;border-radius:12px">`:'<span class="thumb" style="width:120px;height:120px"></span>'}
@@ -1291,7 +1302,7 @@ function nmEditorHtml(e, f, cats, inp){
 }
 function nmInfo(p){ return [p.category, p.color, p.material, p.stone, {moon:'MOON',sunshine:'Sunshine',both:'MOON и Sunshine'}[p.brand]||p.brand, +p.price===0?'⚠ нет розничной цены':'', p.supplier?'поставщик '+p.supplier:''].filter(Boolean).join(' · '); }
 function nmSiteLinks(p){ const L=(p.sites||[]).filter(x=>x.url); return L.length?`<div class="meta" style="padding:0 10px 8px">${L.map(x=>`🔗 <a href="${esc(x.url)}" target="_blank" rel="noopener">${x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'}${x.status==='review'?' (связь не проверена)':''}</a>`).join(' &nbsp; ')}</div>`:''; }
-function nmOpen(p){ S.nm.ed = { ...NM_EMPTY(), ...p, category_id: p.category_id??'', cost: p.cost??'', supplier: p.supplier||'', sites: p.sites||[] }; S.nm.sq=''; S.nm.sfound=[]; render(); window.scrollTo({ top:0, behavior:'smooth' }); }
+function nmOpen(p){ S.nm.ed = { ...NM_EMPTY(), ...p, category_id: p.category_id??'', cost: p.cost??'', supplier: p.supplier||'', sites: p.sites||[] }; S.nm.sq=''; S.nm.sfound=[]; render(); }
 async function nmSave(){
   const e = S.nm.ed; if(!e) return;
   const { data, error } = await sb.rpc('product_save', { p: { ...e, sites: undefined } });
