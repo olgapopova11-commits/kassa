@@ -1611,7 +1611,7 @@ function renderPay(){
            <div class="row" style="border-top:1px solid var(--line);padding-top:6px"><b>${P.rest<0?'Переплата (учесть в следующем месяце)':'Остаток к выплате'}</b><b class="num">${fmt(Math.abs(P.rest))}</b></div>
            ${P.by('card')?`<div class="meta">из них переведено на карту: ${fmt(P.by('card'))}</div>`:''}
            ${tabelOk()?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
-             <select id="pa-kind-${e.employee}">${Object.entries(PADJ).map(([k,[t]])=>`<option value="${k}">${t}</option>`).join('')}</select>
+             <select id="pa-kind-${e.employee}">${Object.entries(PADJ).filter(([k])=>k!=='fine').map(([k,[t]])=>`<option value="${k}">${t}</option>`).join('')}</select>
              <input id="pa-amt-${e.employee}" class="small" type="number" min="1" inputmode="numeric" placeholder="сумма" style="width:110px">
              <input id="pa-note-${e.employee}" placeholder="комментарий" style="flex:1;min-width:120px">
              <button class="btn small primary" data-paadd="${e.employee}">Добавить</button>
@@ -1745,8 +1745,9 @@ document.addEventListener('click', async e => {
   else if(t.id==='po-tr'){ translate1688(); }
   else if(d.poarch){ if(t.dataset.sure!=='1'){ t.dataset.sure='1'; t.textContent='Закрыть без приёмки?'; return; } const { error } = await sb.rpc('po_close_archive', { p_id:d.poarch }); if(error) return toast(errText(error)); toast('Заказ закрыт без оприходования'); await loadPo(); render(); }
   else if(t.id==='po-rcv-ok'){ const r = PO.rcv, o = (PO.list||[]).find(x=>x.id===r.id); t.disabled=true;
-    const items = (o.items||[]).map(i=>({ item_id:i.item_id, qty: r.qty[i.item_id]!=null ? +r.qty[i.item_id] : i.qty }));
-    const { error } = await sb.rpc('po_receive', { p_id:r.id, p_items:items, p_rate: o.currency==='KZT' ? 1 : +r.rate, p_store: +(r.store||o.store||S.store) });
+    const main = +(r.store||o.store||S.store);
+    const items = (o.items||[]).map(i=>{ const A = (r.al||{})[i.item_id] || { [main]: i.qty }; return { item_id:i.item_id, alloc: Object.entries(A).filter(([,v])=>+v>0).map(([s,v])=>({ store:+s, qty:+v })) }; });
+    const { error } = await sb.rpc('po_receive', { p_id:r.id, p_items:items, p_rate: o.currency==='KZT' ? 1 : +r.rate, p_store: main });
     if(error){ toast(errText(error)); t.disabled=false; return; } PO.rcv = null; toast('Товар принят, себестоимость пересчитана'); await loadPo(); render(); }
   else if(d.polink){ const [item, pid] = d.polink.split(':'); const { error } = await sb.rpc('po_link_item', { p_item:item, p_product:pid||null }); if(error) return toast(errText(error)); PO.lnk = null; toast(pid?'Связано с товаром базы':'Связь снята'); await loadPo(); render(); }
   else if(d.polinkopen){ PO.lnk = { item:d.polinkopen, q:'', found:[] }; render(); const el = document.getElementById('po-lnk-q'); if(el) el.focus(); }
@@ -1847,7 +1848,13 @@ document.addEventListener('change', async e => {
   if(t.dataset && t.dataset.pocost!=null && PO.d){ PO.d.items[+t.dataset.pocost].cost = t.value; render(); }
   if(t.id==='po-cur' && PO.d){ PO.d.cur = t.value; PO.d.rate = ''; render(); } if(t.id==='po-rate' && PO.d){ PO.d.rate = t.value; render(); } if(t.id==='po-pct' && PO.d){ PO.d.pct = t.value; render(); }
   if(t.id==='po-rcv-rate' && PO.rcv){ PO.rcv.rate = t.value; render(); }
-  if(t.id==='po-rcv-store' && PO.rcv){ PO.rcv.store = +t.value; }
+  if(t.id==='po-rcv-store' && PO.rcv){ PO.rcv.store = +t.value; PO.rcv.al = {}; render(); }
+  if(t.dataset && t.dataset.poal && PO.rcv){ const [it, st] = t.dataset.poal.split(':'); const o = (PO.list||[]).find(x=>x.id===PO.rcv.id), i = o && (o.items||[]).find(x=>x.item_id===it);
+    const main = +(PO.rcv.store||o.store||S.store); PO.rcv.al = PO.rcv.al || {}; const A = PO.rcv.al[it] || (PO.rcv.al[it] = { [main]: i ? i.qty : 0 });
+    A[st] = Math.max(0, +t.value||0);
+    // если меняют не основной магазин — остаток автоматически остаётся в основном
+    if(+st !== main && i){ const others = Object.entries(A).filter(([s])=>+s!==main).reduce((a,[,v])=>a+(+v||0),0); A[main] = Math.max(0, i.qty - others); }
+    render(); }
   if(t.id==='po-1688' && t.files[0]){ import1688(t.files[0]); t.value=''; }
   if(t.dataset && t.dataset.porcvqty && PO.rcv){ PO.rcv.qty[t.dataset.porcvqty] = Math.max(0, +t.value||0); render(); }
   if(t.id==='py-official'){ PYF.official = t.checked; render(); }
@@ -2186,18 +2193,25 @@ function poItemRow(o, i){
     <td class="num">${i.landed_cost!=null?'<b>'+fmt(i.landed_cost)+'</b><br><span class="meta">себестоимость</span>':''}</td></tr>`;
 }
 function poRcvHtml(o){
-  const r = PO.rcv, isK = (o.currency||'KZT')==='KZT', rt = isK ? 1 : (+r.rate||0);
-  const q = i => r.qty[i.item_id]!=null ? r.qty[i.item_id] : i.qty, units = (o.items||[]).reduce((a,i)=>a+q(i),0), unlinked = (o.items||[]).filter(i=>!i.product_id && q(i)>0).length;
-  return `<div class="cust stack" style="margin-top:8px"><b>Приёмка заказа №${o.number}</b>
-    <label class="meta">Принимаем в магазин <select id="po-rcv-store">${S.stores.map(st=>`<option value="${st.id}" ${+(r.store||o.store||S.store)===st.id?'selected':''}>${esc(storeName(st.id))}</option>`).join('')}</select></label>
-    ${isK?'':`<label class="meta">Курс ${o.currency} на сегодня <input id="po-rcv-rate" type="number" step="0.01" min="0" inputmode="decimal" value="${esc(r.rate)}" style="width:100px"></label>
-      <span class="meta">курс Нацбанка ${(+o.rate_now||0).toFixed(2)} · при заказе был ${(+o.rate).toFixed(2)}</span>`}
-    <div class="scroll"><table><thead><tr><th>Товар</th><th>Пришло, шт.</th><th>Себестоимость шт.</th></tr></thead><tbody>
-      ${(o.items||[]).map(i=>`<tr><td>${esc(i.name)}${i.product_id?'':' <span class="chip zero">свяжите с базой</span>'}</td><td><input class="small" type="number" min="0" data-porcvqty="${i.item_id}" value="${q(i)}" inputmode="numeric" style="width:70px"></td>
-        <td class="num">${fmt(poLanded(i.price_cur!=null?i.price_cur:(i.unit_cost||0)/(+o.rate||1), rt, o.delivery_pct??10, o.cargo, units))}</td></tr>`).join('')}</tbody></table></div>
-    <span class="meta">Себестоимость = цена × курс + ${o.delivery_pct??10}% доставка до Казахстана${+o.cargo?` + доставка по Китаю ${fmt(o.cargo*rt)} ÷ ${units} шт. = ${fmt(units?o.cargo*rt/units:0)} на каждую единицу`:''}.</span>
+  const r = PO.rcv, isK = (o.currency||'KZT')==='KZT', rt = isK ? 1 : (+r.rate||0), main = +(r.store||o.store||S.store);
+  const al = i => (r.al||{})[i.item_id] || { [main]: i.qty };   // сколько каждой позиции в какой магазин
+  const q = i => Object.values(al(i)).reduce((a,v)=>a+(+v||0),0);
+  const units = (o.items||[]).reduce((a,i)=>a+q(i),0), unlinked = (o.items||[]).filter(i=>!i.product_id && q(i)>0).length;
+  const stores = S.stores;
+  return `<div class="cust stack" style="margin-top:8px"><b>Приёмка заказа №${o.number} на склад</b>
+    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px">
+      <label class="meta">Основной магазин <select id="po-rcv-store">${stores.map(st=>`<option value="${st.id}" ${main===st.id?'selected':''}>${esc(storeName(st.id))}</option>`).join('')}</select></label>
+      ${isK?'':`<label class="meta">Курс ${o.currency} на сегодня <input id="po-rcv-rate" type="number" step="0.01" min="0" inputmode="decimal" value="${esc(r.rate)}" style="width:100px"></label>
+        <span class="meta">Нацбанк ${(+o.rate_now||0).toFixed(2)} · при заказе ${(+o.rate).toFixed(2)}</span>`}</div>
+    <span class="meta">Общий заказ можно разложить по магазинам: впишите, сколько штук идёт в каждый. Пусто или 0 — в этот магазин не идёт.</span>
+    <div class="scroll"><table><thead><tr><th>Товар</th><th>Заказано</th>${stores.map(st=>`<th style="font-size:12px">${esc(BRAND[st.brand])}<br>${esc(st.address)}</th>`).join('')}<th>Себестоимость шт.</th></tr></thead><tbody>
+      ${(o.items||[]).map(i=>{ const A = al(i), tot = q(i); return `<tr><td>${esc(i.name)}${i.product_id?'':' <span class="chip zero">свяжите с базой</span>'}</td>
+        <td class="num">${i.qty}${tot!==i.qty?`<br><span class="meta" style="color:var(--bad)">разложено ${tot}</span>`:''}</td>
+        ${stores.map(st=>`<td><input class="small" type="number" min="0" data-poal="${i.item_id}:${st.id}" value="${+A[st.id]||''}" inputmode="numeric" style="width:58px"></td>`).join('')}
+        <td class="num">${fmt(poLanded(i.price_cur!=null?i.price_cur:(i.unit_cost||0)/(+o.rate||1), rt, o.delivery_pct??10, o.cargo, units))}</td></tr>`; }).join('')}</tbody></table></div>
+    <span class="meta">Себестоимость = цена × курс + ${o.delivery_pct??10}% доставка до Казахстана${+o.cargo?` + доставка по Китаю ${fmt(o.cargo*rt)} ÷ ${units} шт. = ${fmt(units?o.cargo*rt/units:0)} на каждую единицу`:''}. Одинаковая для всех магазинов.</span>
     ${unlinked?`<div class="warn">Свяжите с базой товаров ещё ${unlinked} поз. — без этого приёмку не провести.</div>`:''}
-    <div class="row" style="justify-content:flex-start"><button class="btn" id="po-rcv-cancel">Отмена</button><button class="btn primary" id="po-rcv-ok" ${unlinked||(!isK&&!(rt>0))?'disabled':''}>Принять на склад</button></div></div>`;
+    <div class="row" style="justify-content:flex-start"><button class="btn" id="po-rcv-cancel">Отмена</button><button class="btn primary" id="po-rcv-ok" ${unlinked||(!isK&&!(rt>0))||!units?'disabled':''}>Принять на склад</button></div></div>`;
 }
 document.addEventListener('input', e => {
   if(S.view!=='po' || e.target.id!=='po-lnk-q' || !PO.lnk) return;
