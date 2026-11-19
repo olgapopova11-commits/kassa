@@ -1249,14 +1249,17 @@ function renderNom(){
   const inp = (k, label, extra='') => `<label class="stack" style="gap:4px"><span class="label">${label}</span><input data-nf="${k}" value="${esc(e[k]??'')}" ${extra}></label>`;
   $('#main').innerHTML = `<div class="row"><h2>Номенклатура</h2><button class="btn primary" id="nm-new">+ Новый товар</button></div>
     <div class="filters"><input id="nm-q" placeholder="Штрихкод, артикул или название" value="${esc(f.q)}" style="flex:1;min-width:180px">
-      <select id="nm-cat"><option value="">Все категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+      <select id="nm-cat"><option value="">Все категории</option><option value="-1" ${String(f.cat)==='-1'?'selected':''}>⚠ Без категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
       <label class="meta" style="align-self:center"><input type="checkbox" id="nm-arch" ${f.arch?'checked':''}> архив</label></div>
-    ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}. Нажмите на название, чтобы открыть карточку.</p>
-    <div class="scroll"><table class="nm-table"><thead><tr><th></th>${[['name','Название'],['category','Категория'],['barcode','Штрихкод'],['cost','Закуп'],['price','Цена'],['stock','Остаток'],['site','Сайт']].map(([k,v])=>`<th><button data-nmsort="${k}" style="border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;white-space:nowrap" title="Сортировать">${v} ${f.sort===k?(f.desc?'▼':'▲'):'<span class="meta">↕</span>'}</button></th>`).join('')}</tr></thead><tbody>
+    ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}. Нажмите на название, чтобы открыть карточку. Категорию можно менять прямо в таблице.</p>
+    ${nmCanEdit()&&Object.keys(f.sel||{}).length?`<div class="cust row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;margin-bottom:8px"><b>Выбрано: ${Object.keys(f.sel).length}</b>
+      <select id="nm-bulkcat"><option value="">Назначить категорию…</option>${cats.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+      <button class="btn small primary" id="nm-bulk-go">Применить</button><button class="btn small" id="nm-bulk-clear">Снять выбор</button></div>`:''}
+    <div class="scroll"><table class="nm-table"><thead><tr><th>${nmCanEdit()?`<input type="checkbox" id="nm-selall" title="Выбрать все на странице" ${D.rows.length&&D.rows.every(p=>(f.sel||{})[p.id])?'checked':''}>`:''}</th>${[['name','Название'],['category','Категория'],['barcode','Штрихкод'],['cost','Закуп'],['price','Цена'],['stock','Остаток'],['site','Сайт']].map(([k,v])=>`<th><button data-nmsort="${k}" style="border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;white-space:nowrap" title="Сортировать">${v} ${f.sort===k?(f.desc?'▼':'▲'):'<span class="meta">↕</span>'}</button></th>`).join('')}</tr></thead><tbody>
     ${D.rows.map(p=>{ const inc = (S.inc||{})[p.id], L = (p.sites||[]).filter(x=>x.url);
-      return `<tr style="${e&&e.id===p.id?'background:var(--soft)':''}"><td>${thumb(p)}</td>
+      return `<tr style="${e&&e.id===p.id?'background:var(--soft)':''}"><td style="white-space:nowrap">${nmCanEdit()?`<input type="checkbox" data-nmsel="${p.id}" ${(f.sel||{})[p.id]?'checked':''}> `:''}${thumb(p)}</td>
       <td style="min-width:200px"><button class="linkbtn" data-nmopen="${p.id}" style="border:0;background:none;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit"><b>${esc(p.name)}</b></button>${p.is_group?' <span class="chip">общий штрихкод</span>':''}<br><span class="meta">${esc([{moon:'MOON',sunshine:'Sunshine',both:'MOON и Sunshine'}[p.brand]||'', p.color, p.material].filter(Boolean).join(' · '))}</span></td>
-      <td>${esc(p.category||'—')}</td>
+      <td>${nmCanEdit()?`<select data-nmcat="${p.id}" style="max-width:170px;${p.category_id?'':'border-color:var(--warn,#d90)'}"><option value="">— без категории —</option>${cats.map(c=>`<option value="${c.id}" ${p.category_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`:esc(p.category||'—')}</td>
       <td class="num">${esc(p.barcode)}${p.sku?'<br><span class="meta">арт. '+esc(p.sku)+'</span>':''}</td>
       <td class="num">${p.cost!=null&&p.cost!==''?fmt(p.cost):'<span class="meta">—</span>'}</td>
       <td class="num">${+p.price>0?fmt(p.price):'<span class="chip warn">нет цены</span>'}</td>
@@ -1271,6 +1274,19 @@ function renderNom(){
   document.addEventListener('mouseover', e => { const el = e.target.closest && e.target.closest('.nm-st'); if(el) place(el); });
   document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest('.nm-st'); if(el) place(el); }); })();
 document.addEventListener('mousedown', e => { if(e.target && e.target.id==='nm-modal' && S.nm){ S.nm.ed = null; render(); } });
+const nmCanEdit = () => S.me && ['owner','manager','purchaser'].includes(S.me.role);
+document.addEventListener('change', async e => { if(S.view!=='nom') return; const t = e.target, f = S.nm;
+  if(t.dataset.nmcat){ const r = await sb.rpc('products_set_category', { p_ids:[t.dataset.nmcat], p_cat: t.value ? +t.value : null }); if(r.error) return toast(errText(r.error));
+    const row = (f.data&&f.data.rows||[]).find(x=>x.id===t.dataset.nmcat); if(row){ row.category_id = t.value ? +t.value : null; row.category = t.value ? t.options[t.selectedIndex].text : null; } toast('Категория сохранена'); render(); }
+  else if(t.dataset.nmsel){ f.sel = f.sel || {}; if(t.checked) f.sel[t.dataset.nmsel] = 1; else delete f.sel[t.dataset.nmsel]; render(); }
+  else if(t.id==='nm-selall'){ f.sel = f.sel || {}; (f.data&&f.data.rows||[]).forEach(p=>{ if(t.checked) f.sel[p.id] = 1; else delete f.sel[p.id]; }); render(); }
+});
+document.addEventListener('click', async e => { if(S.view!=='nom') return; const t = e.target.closest('button'); if(!t) return; const f = S.nm;
+  if(t.id==='nm-bulk-clear'){ f.sel = {}; render(); }
+  else if(t.id==='nm-bulk-go'){ const c = $('#nm-bulkcat').value; if(!c) return toast('Выберите категорию'); t.disabled = true;
+    const r = await sb.rpc('products_set_category', { p_ids:Object.keys(f.sel), p_cat:+c }); if(r.error){ t.disabled = false; return toast(errText(r.error)); }
+    toast('Категория назначена: '+r.data+' товарам'); f.sel = {}; await loadNom(); render(); }
+});
 function nmModalSync(e, f, cats, inp){
   const M = $('#modal'), has = !!M.querySelector('#nm-modal');
   if(!e){ if(has) M.innerHTML = ''; return; }
@@ -1526,9 +1542,10 @@ function wiponUpHtml(kind){
     <div class="stack" style="margin-top:8px">
       <span class="meta">${kind==='sales'?'Выгрузите продажи магазина из Wipon за любой период и загрузите файл. Дубликатов не будет: Silver проверяет номер каждого чека Wipon и добавляет только те, которых ещё нет. Даже если тот же файл или пересекающийся период загрузят случайно ещё раз — повторные чеки просто пропустятся.':'Выгрузите остатки магазина из Wipon и загрузите файл. Остатки этого магазина в Silver станут такими же, как в файле. Новые штрихкоды добавятся в базу товаров.'}</span>
       <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px">
-        <select id="wu-store-${kind}">${S.allStores.map(x=>`<option value="${x.id}" ${x.id===st?'selected':''}>${esc(BRAND[x.brand]+' · '+x.city+', '+x.address)}</option>`).join('')}</select>
+        <select id="wu-store-${kind}">${kind==='sales'?`<option value="" ${!WU.storeSales?'selected':''}>Магазин определить автоматически</option>`:`<option value="" ${!WU.store?'selected':''}>Магазин определить автоматически</option>`}${S.allStores.map(x=>`<option value="${x.id}" ${x.id===(kind==='sales'?WU.storeSales:WU.store)?'selected':''}>${esc(BRAND[x.brand]+' · '+x.city+', '+x.address)}</option>`).join('')}</select>
         ${kind==='stock'?`<label class="meta"><input type="checkbox" id="wu-zero" checked> товары, которых нет в файле, обнулить</label>`:''}
-        <label class="btn small primary" style="cursor:pointer">Выбрать файл Excel<input type="file" id="wu-file-${kind}" accept=".xlsx,.xls,.csv" hidden></label></div>
+        <label class="btn small primary" style="cursor:pointer">Выбрать файлы Excel (можно сразу все 7)<input type="file" id="wu-file-${kind}" accept=".xlsx,.xls,.csv" multiple hidden></label></div>
+      <span class="meta">${kind==='sales'?'Магазин Silver определяет сам — по продавцу в Wipon и по уже загруженным чекам.':'Склад Silver определяет сам — сравнивает остатки в файле с остатками каждого магазина и выбирает самый похожий.'} Если не получится, напишет, и тогда выберите магазин вручную и загрузите тот файл ещё раз.</span>
       ${WU.open===kind&&WU.msg?`<div class="cust">${WU.msg}</div>`:''}</div></details>`;
 }
 function wuNorm(h){ return String(h==null?'':h).toLowerCase().replace(/\s+/g,' ').trim(); }
@@ -1545,8 +1562,13 @@ async function wuRead(file){
   if(hi < 0) throw new Error('В файле не нашлась колонка со штрихкодом — это точно выгрузка из Wipon?');
   return { H: A[hi].map(wuNorm), rows: A.slice(hi+1).filter(r => r && r.some(c => c!=null && c!=='')) };
 }
-async function wuImport(kind, file){
-  const store = +$('#wu-store-'+kind).value, zero = !!($('#wu-zero')||{}).checked; WU.store = store; WU.open = kind; WU.msg = 'Читаем файл…'; render();
+async function wuImportMany(kind, files){
+  const sel = $('#wu-store-'+kind).value; if(sel && files.length>1) toast('Файлов несколько — магазин для каждого Silver определит сам'); if(kind==='sales') WU.storeSales = sel ? +sel : null; else WU.store = sel ? +sel : null; WU.open = kind; const out = [];
+  for(let k=0; k<files.length; k++){ WU.pre = files.length>1 ? `Файл ${k+1} из ${files.length} «${esc(files[k].name)}»: ` : ''; await wuImport(kind, files[k], sel && files.length===1 ? +sel : null); out.push(WU.msg); }
+  WU.pre = ''; WU.msg = out.join('<br>'); await wuLoadLast(); render();
+}
+async function wuImport(kind, file, forceStore){
+  let store = forceStore || null; const zero = !!($('#wu-zero')||{}).checked; WU.open = kind; WU.msg = (WU.pre||'')+'Читаем файл…'; render();
   try{
     const { H, rows } = await wuRead(file), name = c => c>=0 ? H[c] : '—';
     if(kind==='sales'){
@@ -1559,14 +1581,18 @@ async function wuImport(kind, file){
         .filter(r => r.no && r.at);
       if(!R.length) throw new Error('В файле нет строк продаж');
       const nos = [...new Set(R.map(r=>r.no))], dates = R.map(r=>r.at).sort();
-      WU.msg = `Нашли ${nos.length} чеков (${R.length} строк) за ${dates[0].slice(0,10)} — ${dates[dates.length-1].slice(0,10)}. Загружаем…`; render();
+      if(!store){ const emps = [...new Set(R.map(r=>r.emp).filter(Boolean).map(String))];
+        const { data:det, error:de } = await sb.rpc('wipon_detect_store', { p_nos: nos.slice(0, 3000), p_emps: emps }); if(de) throw de;
+        if(!det || !det.store) throw new Error(`не удалось понять, какой это магазин (продавцы в файле: ${esc(emps.join(', ')||'не указаны')}). Выберите магазин в списке и загрузите этот файл ещё раз.`);
+        store = det.store; WU.pre = (WU.pre||'') + `${esc(storeName(store))} (определён ${det.how}) — `; }
+      WU.msg = (WU.pre||'')+`нашли ${nos.length} чеков (${R.length} строк) за ${dates[0].slice(0,10)} — ${dates[dates.length-1].slice(0,10)}. Загружаем…`; render();
       const tot = { new:0, skipped:0, returns:0, new_products:0 };
       for(let i=0; i<nos.length; i+=400){
         const part = new Set(nos.slice(i, i+400)), { data, error } = await sb.rpc('wipon_sales_import', { p_store:store, p_rows: R.filter(r=>part.has(r.no)) });
         if(error) throw error; for(const k in tot) tot[k] += +(data||{})[k]||0;
-        WU.msg = `Загружаем… ${Math.min(i+400, nos.length)} из ${nos.length} чеков`; render();
+        WU.msg = (WU.pre||'')+`загружаем… ${Math.min(i+400, nos.length)} из ${nos.length} чеков`; render();
       }
-      WU.msg = `✅ Готово · ${esc(storeName(store))}: новых чеков ${tot.new}${tot.returns?', из них с возвратом '+tot.returns:''}; уже были в Silver и пропущены — ${tot.skipped}.${tot.new_products?` Новых товаров добавлено в базу: ${tot.new_products} (проверьте их в «Номенклатуре»).`:''}`;
+      WU.msg = (WU.pre||'')+`✅ ${esc(storeName(store))}: новых чеков ${tot.new}${tot.returns?', из них с возвратом '+tot.returns:''}; уже были в Silver и пропущены — ${tot.skipped}.${tot.new_products?` Новых товаров добавлено в базу: ${tot.new_products} (проверьте их в «Номенклатуре»).`:''}`;
       if(S.view==='sales'){ await loadSales(); }
     } else {
       const K = { bc: wuCol(H, ['штрих']), nm: wuCol(H, ['наимен','товар','назван'], ['штрих','катег']), qty: wuCol(H, ['остат','колич','кол-во'], ['сумм','стоим']),
@@ -1575,19 +1601,23 @@ async function wuImport(kind, file){
       const R = rows.map(r => ({ bc: String(r[K.bc]??'').trim(), name: K.nm>=0 ? r[K.nm] : null, qty: wuNum(r[K.qty]), cost: K.cost>=0 ? wuNum(r[K.cost]) || null : null, price: K.price>=0 ? wuNum(r[K.price]) || null : null, cat: K.cat>=0 ? r[K.cat] : null }))
         .filter(r => r.bc);
       if(!R.length) throw new Error('В файле нет строк с товарами');
-      WU.msg = `Нашли ${R.length} позиций, ${R.reduce((a,r)=>a+r.qty,0)} шт. Обновляем остатки…`; render();
+      if(!store){ const { data:det, error:de } = await sb.rpc('wipon_stock_detect', { p_rows: R.map(r=>({ bc:r.bc, qty:r.qty })) }); if(de) throw de;
+        const sc = (det && det.scores) || [], a = sc[0], b = sc[1];
+        if(!a || a.exact < 10 || (b && a.exact < b.exact * 1.5)) throw new Error('не удалось уверенно понять, какой это склад. Выберите магазин в списке и загрузите этот файл ещё раз.');
+        store = a.store; WU.pre = (WU.pre||'') + `${esc(storeName(store))} (определён по остаткам: совпало ${a.exact} позиций) — `; }
+      WU.msg = (WU.pre||'')+`нашли ${R.length} позиций, ${R.reduce((a,r)=>a+r.qty,0)} шт. Обновляем остатки…`; render();
       const { data, error } = await sb.rpc('wipon_stock_import', { p_store:store, p_rows:R, p_zero_missing: zero });
       if(error) throw error;
-      WU.msg = `✅ Остатки обновлены · ${esc(storeName(store))}: позиций в файле ${data.positions} (${data.units} шт.), изменилось ${data.changed}${data.zeroed?', обнулено отсутствующих в файле '+data.zeroed:''}.${data.new_products?` Новых товаров добавлено в базу: ${data.new_products}.`:''}`;
+      WU.msg = (WU.pre||'')+`✅ остатки обновлены · ${esc(storeName(store))}: позиций в файле ${data.positions} (${data.units} шт.), изменилось ${data.changed}${data.zeroed?', обнулено отсутствующих в файле '+data.zeroed:''}.${data.new_products?` Новых товаров добавлено в базу: ${data.new_products}.`:''}`;
       if(S.view==='stock'){ await loadStockView(); }
     }
-  }catch(e){ WU.msg = '❌ '+esc(errText(e)); }
-  await wuLoadLast(); render();
+  }catch(e){ WU.msg = (WU.pre||'')+'❌ '+esc(errText(e)); }
+
 }
 document.addEventListener('change', async e => { const id = e.target.id||'';
   if(['sf-from','sf-to','sf-kind'].includes(id)){ const F = (S.sf ||= { from:'', to:'', kind:'', lim:100 }); F[id.slice(3)] = e.target.value; F.lim = 100; await loadSales(); render(); return; }
-  const m = id.match(/^wu-file-(sales|stock)$/); if(m && e.target.files[0]){ const f = e.target.files[0]; e.target.value=''; wuImport(m[1], f); }
-  const s2 = (e.target.id||'').match(/^wu-store-/); if(s2) WU.store = +e.target.value; });
+  const m = id.match(/^wu-file-(sales|stock)$/); if(m && e.target.files[0]){ const F = [...e.target.files]; e.target.value=''; wuImportMany(m[1], F); }
+  if(id==='wu-store-sales') WU.storeSales = e.target.value ? +e.target.value : null; else if(id==='wu-store-stock') WU.store = e.target.value ? +e.target.value : null; });
 document.addEventListener('toggle', e => { const d = e.target; if(d.dataset && d.dataset.wuopen){ WU.open = d.open ? d.dataset.wuopen : (WU.open===d.dataset.wuopen ? null : WU.open); } }, true);
 function loadScriptOnce(src){ return new Promise((ok,no)=>{ if(document.querySelector(`script[src="${src}"]`)) return ok(); const el=document.createElement('script'); el.src=src; el.onload=ok; el.onerror=no; document.head.appendChild(el); }); }
 async function sagiImport(file){
