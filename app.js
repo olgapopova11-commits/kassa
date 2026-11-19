@@ -1598,6 +1598,7 @@ function renderPay(){
   ${isBoss()?storeFilterHtml():''}
   ${isBoss()?`<div class="filters"><label class="chip ${PYF.official?'ok':''}" style="cursor:pointer;padding:4px 10px"><input type="checkbox" id="py-official" ${PYF.official?'checked':''} style="margin-right:4px">только официально трудоустроенные</label>
     ${D?`<span class="meta" style="align-self:center">На карту ${PYF.official?'официальным':'всем'} за месяц: <b>${fmt(D.reduce((a,e)=>a+paySum(e).by('card'),0))}</b></span>`:''}</div>`:''}
+  <div class="card meta" style="margin-bottom:8px">💰 ${advanceText(PY.month)}</div>
   <p class="meta">Предварительный расчёт по продажам в кассе и табелю часов. Правила: ${['Курмангазы, Толе би, Гагарина — 12/10% по часам','MOON Курмангазы — 5%','Астана — 6% Sunshine, 3% MOON'].join(' · ')}.</p>
   <div class="grid2"><div>
    ${!D?'<div class="empty">Считаем…</div>':!D.length?'<div class="empty">За этот месяц нет часов в табеле</div>':`<div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Часы</th><th>Начислено</th><th>Бонусы / удержания</th><th>К выплате</th><th>Выплачено наличными</th><th>На карту</th><th>Остаток</th></tr></thead><tbody>
@@ -2093,6 +2094,7 @@ function renderAdm(){
   const L = AD.list, C = (L||[]).map(adCalc), sum = k => C.reduce((t,c)=>t+c[k],0), ep = L&&L[0] ? +L[0].ep_rate : 24.8;
   const num = (a,k,w=100) => `<input class="small" type="number" min="0" inputmode="numeric" value="${+a[k]||''}" data-adf="${a.id}:${k}" style="width:${w}px">`;
   $('#main').innerHTML = `<div class="row"><h2>Административный штат</h2><label class="meta">Месяц <input type="month" id="ad-month" value="${AD.month}"></label></div>
+  <div class="card meta" style="margin-bottom:8px">💰 ${advanceText(AD.month)}</div>
   <p class="meta">🔒 Эту вкладку видите только вы. Официальная часть на карту считается по единому платежу (${ep}% от официальной ставки): работнику на руки ставка минус удержанная доля (ОПВ, ВОСМС, ИПН), налоги целиком платит компания. Остаток до управленческой суммы — наличными. Суммы сохраняются сразу при вводе.</p>
   ${!L?'<div class="empty">Загружаем…</div>':`<div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Как считается</th><th>Начислено</th>${AD_F.slice(0,1).map(([,t])=>`<th>${t}</th>`).join('')}<th>К выплате</th><th>Офиц. ставка</th><th>На карту офиц.</th><th>Наличными</th>${AD_F.slice(1).map(([,t])=>`<th>${t}</th>`).join('')}<th>Остаток</th><th>Налоги ЕП</th><th></th></tr></thead><tbody>
     ${L.map((a,n)=>{ const c = C[n]; return `<tr><td><input value="${esc(a.name)}" data-adf="${a.id}:name" style="min-width:130px"><br><input value="${esc(a.position||'')}" data-adf="${a.id}:position" placeholder="должность" class="small" style="min-width:130px">${a.note?`<br><span class="meta">${esc(a.note)}</span>`:''}</td>
@@ -2247,6 +2249,7 @@ async function import1688(file){
     }
     PO.imp = `Готово: новых заказов ${tot.new}, обновлено ${tot.updated}. Позиций ${tot.items}, из них сразу связано с базой ${tot.linked}. Остальные свяжите при приёмке — Silver запомнит связь для следующих заказов.`;
     PO.mode = 'orders'; PO.filter = 'open'; PO.list = null; await loadPo(); render();
+    if('Translator' in self) translate1688();   // сразу переводим новые названия на русский
   }catch(e){ PO.imp = 'Не загрузилось: '+errText(e); render(); }
 }
 // перевод китайских названий на русский — встроенным переводчиком Chrome (бесплатно, прямо на компьютере)
@@ -2278,3 +2281,10 @@ async function importPhotos1688(raw){
     toast(`Фото из 1688 добавлены к ${n} позициям заказов`); PO.list = null; if(S.view==='po'){ await loadPo(); render(); }
   }catch(e){ toast('Фото из 1688 не загрузились: '+errText(e)); }
 }
+
+
+/* аванс выдаётся 15-го; если 15-е выпадает на субботу или воскресенье — в пятницу перед ними */
+function advanceDate(month){ const [y,m] = month.split('-').map(Number), d = new Date(y, m-1, 15), w = d.getDay(); if(w===6) d.setDate(14); if(w===0) d.setDate(13); return d; }
+function advanceText(month){ const d = advanceDate(month), today = new Date(); today.setHours(0,0,0,0);
+  const s = d.toLocaleDateString('ru-RU',{ day:'numeric', month:'long', weekday:'long' }), diff = Math.round((d - today)/864e5);
+  return `Аванс в этом месяце: <b>${s}</b>${diff>0?` — через ${diff} дн.`:diff===0?' — <b>сегодня</b>':' — уже прошёл'} (обычно 15-го, если выпадает на выходные — в пятницу перед ними).`; }
