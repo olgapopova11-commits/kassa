@@ -588,8 +588,14 @@ setInterval(async () => {
 async function loadAudit(){
   if(!S.auStore || !S.stores.some(x=>x.id===S.auStore)) S.auStore = S.store;
   const { data: open } = await sb.from('audits').select('id,store_id,status,started_at').eq('store_id', S.auStore).eq('status','counting').limit(1);
-  S.audit = open && open[0] || null; S.auditRows = [];
-  if(S.audit){ const { data } = await sb.rpc('audit_diff', { p_audit:S.audit.id, p_include_uncounted:false }); S.auditRows = (data&&data.rows)||[]; }
+  S.audit = open && open[0] || null; S.auditRows = []; const A = (S.au ||= { tab:'sheet', flt:'all', unc:false });
+  if(S.audit){
+    const sh = await sb.rpc('audit_sheets_list', { p_audit:S.audit.id }); A.sheets = sh.data || [];
+    let sid = A.sheet; try{ sid = sid || localStorage.getItem('au_sheet_'+S.audit.id); }catch(_){}
+    A.sheet = A.sheets.some(x=>x.id===sid) ? sid : null;
+    const [it, rv] = await Promise.all([ A.sheet ? sb.rpc('audit_sheet_items', { p_sheet:A.sheet }) : Promise.resolve({ data:[] }), sb.rpc('audit_review', { p_audit:S.audit.id, p_include_uncounted:A.tab==='review'&&A.unc }) ]);
+    A.items = it.data || []; S.auditRows = rv.data || [];
+  }
 }
 function docSearchHtml(ph){
   return `<div class="row"><input id="dq" style="flex:1" placeholder="${ph||'Скан штрихкода или название'}" value="${esc(S.dq)}" autocomplete="off"><button class="btn" id="dq-add">Добавить</button></div>
@@ -608,7 +614,7 @@ function renderWh(){
   $('#main').innerHTML = `<h2>Склад</h2>${head}<div class="grid2"><div class="card stack">
     <div class="row" style="flex-wrap:wrap"><span class="label">${m==='transfer'?'Откуда':'Магазин'}</span>${storeSel('d-store', d.store)}
       ${m==='transfer'?`<span class="label">Куда</span>${storeSel('d-to', d.to)}`:''}</div>
-    ${m==='receipt'?`<input id="d-supplier" placeholder="Поставщик (например, 1688, Иу, рынок)" value="${esc(d.supplier)}">`:''}
+    ${m==='receipt'?`<input id="d-supplier" placeholder="Поставщик (например, Китай, Иу, рынок, наша студия)" value="${esc(d.supplier)}">`:''}
     ${m==='writeoff'?`<input id="d-reason" placeholder="Причина списания *" value="${esc(d.reason)}">`:''}
     ${m==='capitalize'||m==='receipt'?`<input id="d-note" placeholder="Комментарий" value="${esc(d.note)}">`:''}
     ${docSearchHtml()}
@@ -652,22 +658,67 @@ function renderTransfers(){
   </div>`).join(''):'<div class="empty">Перемещений пока нет</div>'}`;
 }
 function renderAudit(head){
-  const a = S.audit;
+  const a = S.audit, A = S.au || {}, boss = S.me && ['owner','manager'].includes(S.me.role);
+  const rows = S.auditRows || [], rec = rows.filter(r=>r.recount);
+  const sheetName = (A.sheets||[]).find(x=>x.id===A.sheet)?.name;
+  const R = A.flt==='diff' ? rows.filter(r=>r.diff!==0) : A.flt==='rec' ? rec : rows;
   $('#main').innerHTML = `<h2>Склад</h2>${head}
-    <div class="card stack"><div class="row" style="flex-wrap:wrap"><b>Ревизия</b><select id="au-store" aria-label="Магазин ревизии">${S.stores.map(st=>`<option value="${st.id}" ${st.id===S.auStore?'selected':''}>${esc(BRAND[st.brand]+' · '+st.city+', '+st.address)}</option>`).join('')}</select>${a?`<span class="meta">начата ${new Date(a.started_at).toLocaleString('ru-RU')}</span>`:''}</div>
+    <div class="card stack"><div class="row" style="flex-wrap:wrap"><b>Ревизия</b><select id="au-store" aria-label="Магазин ревизии">${S.stores.map(st=>`<option value="${st.id}" ${st.id===S.auStore?'selected':''}>${esc(BRAND[st.brand]+' · '+st.city+', '+st.address)}</option>`).join('')}</select>${a?`<span class="meta">начата ${new Date(a.started_at).toLocaleString('ru-RU')} · листов ${(A.sheets||[]).length}</span>`:''}</div>
     ${!a?`<button class="btn primary" id="au-start">Начать ревизию в этом магазине</button>`:`
-      <p class="meta" style="margin:0">Сканировать можно одновременно с нескольких телефонов и компьютеров — каждый скан прибавляет +1 к общему счёту, ничего не затирается. Таблица обновляется сама каждые 10 секунд. Ручная правка числа в колонке «Посчитано» заменяет общий итог по товару — используйте её только для исправления.</p>
-      ${docSearchHtml('Сканируйте товар — каждое сканирование +1')}
-      <div class="scroll"><table><thead><tr><th>Товар</th><th>Посчитано</th><th>По базе</th><th>Разница</th></tr></thead><tbody>
-      ${S.auditRows.map(r=>`<tr><td>${esc(r.name)}<br><span class="meta num">${esc(r.barcode)}</span></td>
-        <td><input class="small" type="number" min="0" id="ac-${r.product_id}" data-acset="${r.product_id}" value="${r.counted??0}"></td>
-        <td class="num">${r.expected}</td><td class="num" style="color:${r.diff<0?'var(--bad)':r.diff>0?'var(--ok)':'inherit'}">${r.diff>0?'+':''}${r.diff}</td></tr>`).join('') || '<tr><td colspan="4" class="meta">Пока ничего не посчитано</td></tr>'}</tbody></table></div>
-      ${isBoss()?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start">
-        <button class="btn" id="au-uncounted">Показать и непосчитанные</button>
-        <button class="btn primary" id="au-close">Закрыть: поправить только посчитанные</button>
-        <button class="btn" id="au-close-full">Закрыть полностью (непосчитанные = 0)</button></div>`:'<p class="meta">Закрыть ревизию может менеджер.</p>'}`}
+      <div class="seg" style="display:inline-flex;align-self:flex-start">${[['sheet','Мой лист'+(sheetName?' · '+sheetName:'')],['review','Сверка всех листов']].map(([k,v])=>`<button data-autab="${k}" aria-pressed="${A.tab===k}">${esc(v)}</button>`).join('')}</div>
+      ${rec.length?`<div class="cust"><b>🔁 На пересчёт (${rec.length}):</b> ${rec.map(r=>esc(r.name)+' <span class="meta num">'+esc(r.barcode)+'</span>').join(' · ')}</div>`:''}
+      ${A.tab==='sheet'?auSheetHtml(A):auReviewHtml(A, R, boss)}`}
     </div>`;
 }
+function auSheetHtml(A){
+  const S_ = A.sheets||[], items = A.items||[], units = items.reduce((t,i)=>t+i.qty,0);
+  const pick = `<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
+    ${S_.length?`<select id="au-sheet"><option value="">— выберите свой лист —</option>${S_.map(x=>`<option value="${x.id}" ${x.id===A.sheet?'selected':''}>${esc(x.name)} · ${x.units} шт.</option>`).join('')}</select><span class="meta">или</span>`:''}
+    <input id="au-sheet-name" placeholder="Новый лист: имя или «ноутбук 3»" style="min-width:200px"><button class="btn small" id="au-sheet-new">＋ Создать лист</button></div>`;
+  if(!A.sheet) return `<p class="meta" style="margin:0">У каждого, кто сканирует, свой лист: видно, что именно он посчитал, и он сам может быстро исправить ошибку. Все листы складываются в общую сверку. На этом компьютере лист запомнится.</p>${pick}`;
+  return `${pick}
+    ${docSearchHtml('Сканируйте товар — каждый скан +1 в ваш лист')}
+    <div class="meta">В вашем листе: ${items.length} поз. · ${units} шт.</div>
+    <div class="scroll"><table><thead><tr><th>Товар</th><th>Посчитано в листе</th><th></th></tr></thead><tbody>
+    ${items.map(i=>`<tr><td>${esc(i.name)}<br><span class="meta num">${esc(i.barcode)}</span></td>
+      <td><input class="small" type="number" min="0" data-asq="${i.product_id}" value="${i.qty}" inputmode="numeric" style="width:80px"></td>
+      <td><button class="btn small" data-asdel="${i.product_id}" title="Убрать из листа">✕</button></td></tr>`).join('') || '<tr><td colspan="3" class="meta">Пока пусто — начинайте сканировать</td></tr>'}</tbody></table></div>`;
+}
+function auReviewHtml(A, R, boss){
+  return `<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">${(A.sheets||[]).map(x=>`<span class="chip">${esc(x.name)} · ${x.positions} поз. · ${x.units} шт.</span>`).join('') || '<span class="meta">Листов пока нет</span>'}</div>
+    <div class="filters">${[['all','Все'],['diff','Расхождения'],['rec','На пересчёт']].map(([k,v])=>`<button class="btn small ${A.flt===k?'primary':''}" data-auflt="${k}">${v}</button>`).join('')}
+      <label class="meta" style="align-self:center"><input type="checkbox" id="au-unc" ${A.unc?'checked':''}> показать и непосчитанные</label></div>
+    <p class="meta" style="margin:0">«Сканы» — сумма всех листов. ${boss?'В колонке «Итог» менеджер может поставить правильное число после пересчёта — оно заменит сумму сканов. «На пересчёт» — товар появится у всех сверху списка.':''}</p>
+    <div class="scroll"><table><thead><tr><th>Товар</th><th>По листам</th><th>Сканы</th><th>Итог</th><th>По базе</th><th>Разница</th>${boss?'<th></th>':''}</tr></thead><tbody>
+    ${R.map(r=>`<tr style="${r.recount?'background:var(--soft)':''}"><td>${esc(r.name)}<br><span class="meta num">${esc(r.barcode)}</span></td>
+      <td class="meta">${(r.sheets||[]).map(x=>esc(x.name)+': '+x.qty).join('<br>')||'—'}</td>
+      <td class="num">${r.scanned}</td>
+      <td>${boss?`<input class="small" type="number" min="0" data-afin="${r.product_id}" value="${r.manual??''}" placeholder="${r.counted??0}" style="width:70px">${r.manual!=null?`<br><button class="btn small" data-aclr="${r.product_id}" title="Вернуть сумму сканов">↺ сканы</button>`:''}`:`<b class="num">${r.counted??0}</b>`}</td>
+      <td class="num">${r.expected}</td><td class="num" style="color:${r.diff<0?'var(--bad)':r.diff>0?'var(--ok)':'inherit'}"><b>${r.diff>0?'+':''}${r.diff}</b></td>
+      ${boss?`<td><button class="btn small ${r.recount?'primary':''}" data-arec="${r.product_id}" data-on="${r.recount?1:0}">${r.recount?'✓ на пересчёте':'🔁 На пересчёт'}</button></td>`:''}</tr>`).join('') || `<tr><td colspan="${boss?7:6}" class="meta">Ничего нет</td></tr>`}</tbody></table></div>
+    ${isBoss()?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start">
+      <button class="btn primary" id="au-close">Закрыть: поправить только посчитанные</button>
+      <button class="btn" id="au-close-full">Закрыть полностью (непосчитанные = 0)</button></div>
+      <span class="meta">После закрытия остатки в магазине станут равны колонке «Итог»: недостача спишется, излишек оприходуется.</span>`:'<p class="meta">Закрыть ревизию может менеджер.</p>'}`;
+}
+document.addEventListener('click', async e => {
+  if(S.view!=='wh' || S.wmode!=='audit') return; const t = e.target.closest('button'); if(!t) return; const d = t.dataset, A = S.au || {};
+  const done = async (r, msg) => { if(r && r.error) return toast(errText(r.error)); if(msg) toast(msg); await loadAudit(); render(); };
+  if(d.autab){ A.tab = d.autab; render(); await loadAudit(); render(); }
+  else if(d.auflt){ A.flt = d.auflt; render(); }
+  else if(t.id==='au-sheet-new'){ const name = $('#au-sheet-name').value.trim(); const r = await sb.rpc('audit_sheet_open', { p_audit:S.audit.id, p_name:name });
+    if(r.error) return toast(errText(r.error)); A.sheet = r.data; A.tab = 'sheet'; try{ localStorage.setItem('au_sheet_'+S.audit.id, r.data); }catch(_){} await done(null); $('#dq') && $('#dq').focus(); }
+  else if(d.asdel){ await done(await sb.rpc('audit_sheet_count', { p_sheet:A.sheet, p_product:d.asdel, p_delta:0, p_set:0 })); }
+  else if(d.arec){ await done(await sb.rpc('audit_final', { p_audit:S.audit.id, p_product:d.arec, p_recount: d.on!=='1' })); }
+  else if(d.aclr){ await done(await sb.rpc('audit_final', { p_audit:S.audit.id, p_product:d.aclr, p_clear:true })); }
+});
+document.addEventListener('change', async e => {
+  if(S.view!=='wh' || S.wmode!=='audit' || !S.audit) return; const t = e.target, d = t.dataset, A = S.au || {};
+  if(t.id==='au-sheet'){ A.sheet = t.value || null; try{ if(A.sheet) localStorage.setItem('au_sheet_'+S.audit.id, A.sheet); }catch(_){} await loadAudit(); render(); }
+  else if(t.id==='au-unc'){ A.unc = t.checked; await loadAudit(); render(); }
+  else if(d.asq){ const r = await sb.rpc('audit_sheet_count', { p_sheet:A.sheet, p_product:d.asq, p_delta:0, p_set:Math.max(0,+t.value||0) }); if(r.error) toast(errText(r.error)); await loadAudit(); render(); }
+  else if(d.afin){ const r = await sb.rpc('audit_final', t.value==='' ? { p_audit:S.audit.id, p_product:d.afin, p_clear:true } : { p_audit:S.audit.id, p_product:d.afin, p_manual:Math.max(0,+t.value||0) }); if(r.error) toast(errText(r.error)); await loadAudit(); render(); }
+});
 function dnewHtml(){
   const n = S.dnew, cats = S.dnewCats || [];
   return `<div class="cust stack" style="gap:6px"><b>Новый товар в базу</b><span class="meta">Например, изделие из нашей студии. После сохранения товар сразу встанет в эту приёмку.</span>
@@ -704,7 +755,8 @@ function docAdd(p){
   S.dq=''; S.dfound=[]; render(); $('#dq') && $('#dq').focus();
 }
 async function auditAdd(p){
-  const { error } = await sb.rpc('audit_count', { p_audit:S.audit.id, p_product:p.id, p_delta:1, p_set:null });
+  const A = S.au || {}; if(!A.sheet){ S.dq=''; S.dfound=[]; render(); return toast('Сначала выберите или создайте свой лист'); }
+  const { error } = await sb.rpc('audit_sheet_count', { p_sheet:A.sheet, p_product:p.id, p_delta:1, p_set:null });
   if(error) return toast(errText(error));
   S.dq=''; S.dfound=[]; await loadAudit(); render(); $('#dq') && $('#dq').focus();
 }
@@ -1216,7 +1268,7 @@ function renderNom(){
      </div>
      <datalist id="nm-mats">${['Серебро 925','Нержавейка','Мед сплав','Пластик','мельхиор','Жемчуг','Кожа','другой'].map(m=>`<option value="${m}">`).join('')}</datalist>
      <datalist id="nm-colors">${['золото','серебро','цветной','черный'].map(m=>`<option value="${m}">`).join('')}</datalist>
-     ${inp('purchase_url','Ссылка на закуп (1688 и т.п.)')}
+     ${inp('purchase_url','Ссылка на закуп')}
      <div class="row" style="justify-content:flex-start;gap:16px"><label><input type="checkbox" data-nf="is_basic" ${e.is_basic?'checked':''}> Базовый товар (для рекомендаций дозаказа)</label>
        <label><input type="checkbox" data-nf="archived" ${e.archived?'checked':''}> В архиве</label></div>
      <div class="row"><span>${e.id&&e.barcode?`<button class="btn small" data-labels='${esc(JSON.stringify([{n:e.name,b:e.barcode,p:+e.price,q:1}]))}'>Этикетка</button>`:''}</span>
@@ -1477,7 +1529,7 @@ async function loadPo(){
 }
 function renderPo(){
   const modes = [['orders','Заказы'],['new','Новый заказ'],['suggest','Что дозаказать'],['an','Аналитика закупа']].filter(([k])=>poEdit() || k!=='new');
-  const head = `<div class="row" style="flex-wrap:wrap"><h2>Закуп</h2><span class="row" style="gap:6px">${(PO.list||[]).some(o=>(o.supplier&&/[\u4e00-\u9fff]/.test(o.supplier)&&!o.supplier_ru)||(o.items||[]).some(i=>i.supplier_title&&!i.title_ru))?`<button class="btn small" id="po-tr">🌐 Перевести названия на русский</button>`:''}${poEdit()?`<label class="btn small" style="cursor:pointer">⬆ Загрузить заказы из 1688<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label>`:''}</span></div>
+  const head = `<div class="row" style="flex-wrap:wrap"><h2>Закуп</h2><span class="row" style="gap:6px">${(PO.list||[]).some(o=>(o.supplier&&/[\u4e00-\u9fff]/.test(o.supplier)&&!o.supplier_ru)||(o.items||[]).some(i=>i.supplier_title&&!i.title_ru))?`<button class="btn small" id="po-tr">🌐 Перевести названия на русский</button>`:''}${poEdit()?`<label class="btn small" style="cursor:pointer">⬆ Загрузить заказы из Китая (Excel)<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label>`:''}</span></div>
   ${PO.imp?`<div class="card meta" style="margin-bottom:8px">${esc(PO.imp)}</div>`:''}
   <div class="seg" style="display:inline-flex;margin-bottom:10px">${modes.map(([k,v])=>`<button data-pomode="${k}" aria-pressed="${PO.mode===k}">${v}</button>`).join('')}</div>`;
   let body = '';
@@ -1497,7 +1549,7 @@ function renderPo(){
     <div class="filters">${[['open','Заказано и в пути'],['received','Получены'],['cancelled','Отменённые'],['all','Все']].map(([k,v])=>`<button class="btn small ${PO.filter===k?'primary':''}" data-pofilter="${k}">${v}</button>`).join('')}</div>
     ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Заказов нет</div>':L.map(o=>{ const goods=(o.items||[]).reduce((a,i)=>a+i.qty*(+i.unit_cost||0),0), units=(o.items||[]).reduce((a,i)=>a+i.qty,0);
       return `<div class="card" style="margin-bottom:10px"><div class="row" style="flex-wrap:wrap"><b>${poBulkOk()&&['ordered','transit'].includes(o.status)?`<input type="checkbox" data-posel="${o.id}" ${(PO.sel||{})[o.id]?'checked':''} style="margin-right:6px" aria-label="Выбрать заказ">`:''}№${o.number} · ${esc(o.supplier||'поставщик не указан')}${o.supplier_ru?` <span style="font-weight:400">(${esc(o.supplier_ru)})</span>`:''} → ${o.store?esc(storeName(o.store)):'<span class="meta">магазин выберете при приёмке</span>'}</b><span class="chip ${PO_ST[o.status][0]}">${PO_ST[o.status][1]}${o.status==='received'&&!o.receipt_id&&o.source==='1688'?' · история':''}</span></div>
-        ${o.source==='1688'?`<div class="meta">1688 №${esc(o.ext_no)}${o.ext_status?' · '+esc(ST1688[o.ext_status]||o.ext_status):''}${o.track?' · трек '+esc(o.track):''}</div>`:''}
+        ${o.source==='1688'?`<div class="meta">Китай, заказ №${esc(o.ext_no)}${o.track?' · трек '+esc(o.track):''}</div>`:''}
         <div class="meta">заказ от ${dshort(o.created_at)}${o.eta?' · ждём к '+dshort(o.eta):''}${o.shipped_at?' · отправлен '+dshort(o.shipped_at):''}${o.received_at?' · получен '+dshort(o.received_at):''} · ${esc(o.by||'')}${o.note?' · '+esc(o.note):''}</div>
         <div class="scroll"><table><tbody>${(o.items||[]).map(i=>poItemRow(o,i)).join('')}</tbody></table></div>
         ${PO.rcv&&PO.rcv.id===o.id?poRcvHtml(o):''}
@@ -1512,7 +1564,7 @@ function renderPo(){
     const d = PO.d || (PO.d = poNew()), tot = d.items.reduce((a,i)=>a+i.qty*(+i.cost||0),0);
     body = `<div class="card stack">
       <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px">
-        <input id="po-supplier" placeholder="Поставщик (1688, Иу, рынок…)" value="${esc(d.supplier)}" style="flex:1;min-width:180px">
+        <input id="po-supplier" placeholder="Поставщик (Китай, Иу, рынок…)" value="${esc(d.supplier)}" style="flex:1;min-width:180px">
         <label class="meta">Куда <select id="po-store">${S.allStores.map(st=>`<option value="${st.id}" ${+d.store===st.id?'selected':''}>${esc(storeName(st.id))}</option>`).join('')}</select></label>
         <label class="meta">Ждём к <input type="date" id="po-eta" value="${d.eta}"></label>
         <label class="meta">Валюта <select id="po-cur">${Object.keys(CUR).map(c=>`<option ${d.cur===c?'selected':''}>${c}</option>`).join('')}</select></label>
@@ -1520,7 +1572,7 @@ function renderPo(){
         <label class="meta">Доставка по Китаю, ${CUR[d.cur]} <input id="po-cargo" type="number" min="0" inputmode="numeric" value="${esc(d.cargo)}" style="width:110px"></label>
         <label class="meta">+ % доставка до Казахстана <input id="po-pct" type="number" min="0" step="1" inputmode="numeric" value="${esc(d.pct)}" style="width:60px"></label></div>
       <span class="meta">Курс Нацбанка сегодня: ${['CNY','USD','RUB'].map(c=>c+' '+(fxNow(c)?fxNow(c).toFixed(2):'—')).join(' · ')}. Себестоимость пересчитается по курсу на день приёмки.</span>
-      <input id="po-note" placeholder="Комментарий (номер заказа на 1688, трек-номер…)" value="${esc(d.note)}">
+      <input id="po-note" placeholder="Комментарий (номер заказа в Китае, трек-номер…)" value="${esc(d.note)}">
       <div class="row"><input id="po-q" placeholder="Добавить товар: штрихкод или название" value="${esc(PO.q)}" style="flex:1" autocomplete="off"></div>
       ${PO.found.length?`<div class="list">${PO.found.slice(0,10).map(p=>`<button class="prod" data-poadd="${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}</span></span><span class="price num">${fmt(p.price)}</span></button>`).join('')}</div>`:''}
       ${d.items.length?(()=>{ const rt = poRate(d), un = d.items.reduce((a,i)=>a+(+i.qty||0),0); return `<div class="scroll"><table><thead><tr><th>Товар</th><th>Кол-во</th><th>Цена за шт., ${CUR[d.cur]}</th><th>Сумма, ${CUR[d.cur]}</th><th>Себестоимость шт. ≈</th><th></th></tr></thead><tbody>
@@ -1911,7 +1963,6 @@ document.addEventListener('click', async e => {
   else if(d.trrecv){ const { error } = await sb.rpc('receive_transfer', { p_transfer:d.trrecv }); if(error) toast(errText(error)); else { toast('Перемещение принято'); await loadWhSide(); render(); } }
   else if(d.labels){ printLabels(JSON.parse(d.labels)); }
   else if(t.id==='au-start'){ const { error } = await sb.rpc('audit_start', { p_store:S.auStore||S.store }); if(error) toast(errText(error)); await loadAudit(); render(); }
-  else if(t.id==='au-uncounted'){ const { data } = await sb.rpc('audit_diff', { p_audit:S.audit.id, p_include_uncounted:true }); S.auditRows=(data&&data.rows)||[]; render(); }
   else if(t.id==='au-close'||t.id==='au-close-full'){ const full=t.id==='au-close-full';
     modal(`<h2>Закрыть ревизию?</h2><p>${full?'Все товары, которые не посчитали, будут обнулены в этом магазине.':'Остатки поправятся только по посчитанным товарам.'}</p>
       <div class="row"><button class="btn" data-close>Отмена</button><button class="btn primary" data-auclose="${full?1:0}">Закрыть ревизию</button></div>`); }
@@ -1968,7 +2019,6 @@ document.addEventListener('change', async e => {
   if(t.id==='d-store'){ S.doc.store=+t.value; }
   if(t.id==='d-to'){ S.doc.to=+t.value; }
   if(t.id==='au-store'){ S.auStore = +t.value; S.audit = null; S.auditRows = []; render(); await loadAudit(); render(); }
-  if(d.acset){ sb.rpc('audit_count', { p_audit:S.audit.id, p_product:d.acset, p_delta:0, p_set:Math.max(0,+t.value||0) }).then(async r=>{ if(r.error) toast(errText(r.error)); await loadAudit(); render(); }); }
   if(t.id==='stsort'){ S.stockSort = t.value; S.stockDir='desc'; loadStockView().then(render); }
 });
 document.addEventListener('input', e => {
@@ -2229,6 +2279,7 @@ const nf = n => Math.round(+n||0).toLocaleString('ru-RU');
 function flowIdeas(D){
   const I = [], pct = (a,b) => b ? Math.round(a/b*100) : 0, inst = D.instock.pos || 0;
   if(!D.ordered.pos && !D.transit.pos) I.push(['warn','Закупы не заведены в Silver','Заказы поставщикам пока не видны — не видно, что едет и когда придёт.','Заводите каждый заказ во вкладке «Закуп»: тогда здесь будет видно товар в пути, а приёмка подтянет его в один клик.','po']);
+  if(D.to_astana && D.to_astana.docs && D.to_astana.oldest && (Date.now()-new Date(D.to_astana.oldest))/864e5 > 4) I.push(['bad','Застряло в пути в Астану',`${nf(D.to_astana.units)} шт. отправлены из Алматы больше 4 дней назад и ещё не приняты в Астане.`,'Айжан: пересчитать и принять перемещение во вкладке «Склад» → «Перемещения». Пока товар не принят, его нельзя продать в Астане.','wh']);
   if(!D.received.pos) I.push(['warn',`Нет приёмок в Silver за ${D.days} дней`,'Новые поступления проходят мимо программы, поэтому не видно, какие новинки ещё не сфотографированы и не на сайте.','Проводите приёмку новых товаров во вкладке «Склад» — после этого они сразу попадут в этот контроль.','wh']);
   if((D.hot_no_site||[]).length) I.push(['bad','Продаются, но нет на сайте',`${(D.hot_no_site||[]).length} ходовых товаров за ${D.days} дней не найдены на сайтах — теряем онлайн-заказы.`,'Добавить их на сайт в первую очередь (список ниже). Позже — автоматически из карточки товара.','site']);
   if(D.photo.no) I.push([pct(D.photo.no,inst)>30?'bad':'warn','Нет фото',`${nf(D.photo.no)} из ${nf(inst)} позиций в наличии (${pct(D.photo.no,inst)}%) без фото.`,'Начать с ходовых и с залежавшихся дорогих — им фото нужнее всего. Следующий этап: загрузка фото с линейкой и красивое фото для сайта через ИИ.','nom']);
@@ -2247,8 +2298,10 @@ function renderFlow(){
   ${!D?'<div class="empty">Считаем…</div>':`
   <div class="fl-chain">
     ${step('🧾','Заказано', nf(D.ordered.units)+' шт.', nf(D.ordered.pos)+' позиций у поставщиков', D.ordered.pos?'ok':'warn')}
-    ${step('🚚','В пути', nf(D.transit.units)+' шт.', nf(D.transit.pos)+' позиций', D.transit.pos?'ok':'warn')}
+    ${step('🚚','В пути из Китая', nf(D.transit.units)+' шт.', nf(D.transit.pos)+' позиций', D.transit.pos?'ok':'warn')}
     ${step('📥','Принято', nf(D.received.units)+' шт.', `${nf(D.received.pos)} позиций за ${D.days} дней`, D.received.pos?'ok':'warn')}
+    ${(()=>{ const T = D.to_astana || { units:0, pos:0, docs:0 }, age = T.oldest ? Math.floor((Date.now()-new Date(T.oldest))/864e5) : 0;
+      return step('🚛','В пути в Астану', nf(T.units)+' шт.', T.docs ? `${nf(T.pos)} позиций · ${nf(T.docs)} отправок${age?' · самая старая '+age+' дн.':''}` : 'сейчас ничего не едет', T.docs ? (age>4?'bad':'ok') : ''); })()}
     ${step('📷','Фото', nf(D.photo.ok), bar(D.photo.ok, D.photo.no), st(D.photo.ok, D.photo.no))}
     ${step('🏷','Карточка', nf(D.card.ok), bar(D.card.ok, D.card.no), st(D.card.ok, D.card.no))}
     ${step('🌐','На сайте', nf(D.site.ok), bar(D.site.ok, D.site.no), st(D.site.ok, D.site.no))}
@@ -2320,7 +2373,7 @@ document.addEventListener('input', e => {
 /* ---------- загрузка заказов из выгрузки 1688 (已买到的货品 → 导出) ---------- */
 const ST1688 = { '等待卖家发货':'ждёт отправки продавцом', '等待买家确认收货':'отправлен, ждёт подтверждения получения', '已收货':'получен', '交易成功':'сделка завершена', '交易关闭':'закрыт' };
 async function import1688(file){
-  PO.imp = 'Читаем файл 1688…'; render();
+  PO.imp = 'Читаем файл заказов…'; render();
   try{
     await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
     const wb = XLSX.read(await file.arrayBuffer(), { type:'array' });
@@ -2328,7 +2381,7 @@ async function import1688(file){
     const h = (A[0]||[]).map(x=>String(x||'').trim()), c = name => h.indexOf(name);
     const K = { no:c('订单编号'), seller:c('卖家公司名'), login:c('卖家会员名'), ship:c('运费(元)'), adj:c('涨价或折扣(元)'), status:c('订单状态'), created:c('订单创建时间'), track:c('运单号'),
       title:c('货品标题'), price:c('单价(元)'), qty:c('数量'), unit:c('单位'), art:c('货号'), offer:c('Offer ID'), sku:c('SKU ID'), skuArt:c('单品货号') };
-    if(K.no<0 || K.title<0 || K.price<0) throw new Error('Это не выгрузка заказов 1688: нет колонок 订单编号 / 货品标题 / 单价');
+    if(K.no<0 || K.title<0 || K.price<0) throw new Error('Это не файл заказов из Китая: нет колонок 订单编号 / 货品标题 / 单价');
     const num = v => +String(v??'').replace(/[^\d.\-]/g,'') || 0, str = v => v==null ? null : String(v).trim() || null;
     const orders = []; let cur = null;
     for(const r of A.slice(1)){
@@ -2373,8 +2426,8 @@ async function importPhotos1688(raw){
     const rows = data.map(([o,f,i])=>({ o, f, i: i.map(u => u.startsWith('http') ? u : 'https://'+u) }));
     let n = 0;
     for(let k=0; k<rows.length; k+=150){ const { data:d, error } = await sb.rpc('po_photos_set', { p: rows.slice(k, k+150) }); if(error) throw error; n += +d||0; }
-    toast(`Фото из 1688 добавлены к ${n} позициям заказов`); PO.list = null; if(S.view==='po'){ await loadPo(); render(); }
-  }catch(e){ toast('Фото из 1688 не загрузились: '+errText(e)); }
+    toast(`Фото добавлены к ${n} позициям заказов`); PO.list = null; if(S.view==='po'){ await loadPo(); render(); }
+  }catch(e){ toast('Фото не загрузились: '+errText(e)); }
 }
 
 
