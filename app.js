@@ -234,7 +234,7 @@ function renderShell(){
   renderHeader();
 }
 // вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
-const GROUPS = [['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['flow','stock','wh','po','nom','site']],
+const GROUPS = [['home','🔔','Внимание',['attn']],['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['flow','stock','wh','po','nom','site']],
   ['clients','💳','Клиенты',['promo','content','bonus','certs']],['analytics','📈','Аналитика',['analytics','profit']],['team','👥','Сотрудники',['me','emps','cons','pay','adm']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 function renderNav(){
@@ -267,7 +267,7 @@ function render(){
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, attn:renderAttn })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -580,6 +580,7 @@ function subscribeReqs(){
   sb.rpc('requests_list', { p_status:'pending' }).then(({data}) => setReqBadge((data||[]).length));
 }
 async function loadWhSide(){
+  { const { data } = await sb.rpc('receipts_transit', { p_store:null }); S.trIn = data || []; }
   if(S.wmode==='requests'){ await loadReqs(); return; }
   if(S.wmode==='transfer'){ const { data } = await sb.rpc('transfers_list', { p_store: isBoss()?null:S.store }); S.trList = data||[]; }
   else if(S.wmode==='audit'){ await loadAudit(); }
@@ -612,7 +613,7 @@ function renderWh(){
   if(!S.wmode) S.wmode = whModes()[0][0];
   const m = S.wmode, d = S.doc && S.doc.mode===m ? S.doc : (S.doc = newDoc(m));
   const head = `<div class="filters">${whModes().map(([k,v])=>`<button class="btn small ${k===m?'primary':''}" data-wmode="${k}">${v.t}</button>`).join('')}</div>
-    <p class="meta">${WH[m].hint}</p>`;
+    <p class="meta">${WH[m].hint}</p>${transitHtml()}`;
   if(m==='requests') return renderReqs(head);
   if(m==='audit') return renderAudit(head);
   if(m==='transfer' && !isBoss()){ $('#main').innerHTML = `<h2>Склад</h2>${head}${renderTransfers()}`; return; }
@@ -1237,15 +1238,15 @@ async function loadNom(){
   const f = S.nm; f.data = null;
   if(!f.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); f.cats = data || []; }
   sb.rpc('po_incoming').then(({data}) => { S.inc = data || {}; });
-  const { data, error } = await sb.rpc('product_list2', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:50, p_sort:f.sort||null, p_desc:!!f.desc });
-  if(error){ toast(errText(error)); f.data = { rows:[], total:0 }; } else f.data = data;
+  const { data, error } = await sb.rpc('product_list2', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:50, p_sort:f.sort||null, p_desc:!!f.desc, p_noprice:!!f.noprice });
+  if(error){ toast(errText(error)); f.data = { rows:[], total:0 }; } else { f.data = data; S.nmNoPrice = data.noprice; }
 }
 function renderNom(){
   const f = S.nm, D = f.data, e = f.ed, cats = f.cats || [];
   const inp = (k, label, extra='') => `<label class="stack" style="gap:4px"><span class="label">${label}</span><input data-nf="${k}" value="${esc(e[k]??'')}" ${extra}></label>`;
   $('#main').innerHTML = `<div class="row"><h2>Номенклатура</h2><button class="btn primary" id="nm-new">+ Новый товар</button></div>
     <div class="filters"><input id="nm-q" placeholder="Штрихкод, артикул или название" value="${esc(f.q)}" style="flex:1;min-width:180px">
-      <select id="nm-cat"><option value="">Все категории</option><option value="-1" ${String(f.cat)==='-1'?'selected':''}>⚠ Без категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+      <select id="nm-cat"><option value="">Все категории</option><option value="-1" ${String(f.cat)==='-1'?'selected':''}>⚠ Без категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select><label class="chip ${f.noprice?'warn':''}" style="cursor:pointer;padding:4px 10px"><input type="checkbox" id="nm-noprice" ${f.noprice?'checked':''} style="margin-right:4px">без розничной цены${S.nmNoPrice!=null?' ('+S.nmNoPrice+')':''}</label>
       <label class="meta" style="align-self:center"><input type="checkbox" id="nm-arch" ${f.arch?'checked':''}> архив</label></div>
     ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}. Нажмите на название, чтобы открыть карточку. Категорию можно менять прямо в таблице.</p>
     ${nmCanEdit()&&Object.keys(f.sel||{}).length?`<div class="cust row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;margin-bottom:8px"><b>Выбрано: ${Object.keys(f.sel).length}</b>
@@ -1759,6 +1760,66 @@ document.addEventListener('change', async e => { const t = e.target;
   if(t.dataset && t.dataset.ename){ const v = t.value.trim(); const em = (S.emps||[]).find(x=>x.id===t.dataset.ename); if(!v || !em){ if(em) t.value = em.full_name; return; } em.full_name = v; await updEmp(em.id, { full_name:v }); }
 });
 
+/* ---------- приёмки в пути (Астана): пересчитать и подтвердить ---------- */
+function transitHtml(){
+  const L = S.trIn || []; if(!L.length) return '';
+  const can = r => !isViewer() && canEdit(r.store_id) && (S.me.role!=='purchaser');
+  S.trc = S.trc || {};
+  return `<div class="card stack" style="margin:8px 0 12px;border-color:var(--warn,#d90);gap:8px"><b>🚚 Ожидают приёмки (${L.length})</b>
+    <span class="meta">Товар отправлен в магазин, но ещё не на остатках. Когда коробка придёт — пересчитайте, впишите фактическое количество и подтвердите. Только после этого товар можно продавать.</span>
+    ${L.map(r=>{ const open = S.trOpen===r.id, C = S.trc[r.id] || {}, units = (r.items||[]).reduce((a,i)=>a+i.qty,0);
+      return `<div style="border-top:1px solid var(--line);padding-top:8px"><div class="row" style="flex-wrap:wrap;gap:6px">
+        <button class="btn small" data-tropen="${r.id}" style="border:0;background:none;padding:0;font-weight:600;text-align:left">${open?'▾':'▸'} №${r.number||''} · ${esc(r.store)} · ${units} шт.</button>
+        <span class="meta">${new Date(r.created_at).toLocaleDateString('ru-RU')}${r.by?' · отправил(а) '+esc(r.by):''}${r.note?' · '+esc(r.note):''}</span></div>
+      ${open?`<div class="scroll" style="margin-top:6px"><table><thead><tr><th></th><th>Товар</th><th>Отправлено</th><th>Пришло</th></tr></thead><tbody>${(r.items||[]).map(i=>`<tr><td>${thumb(i)}</td><td>${esc(i.name)}<br><span class="meta num">${esc(i.barcode||'')}${+i.price>0?' · '+fmt(i.price):' · <span style="color:var(--bad)">нет цены</span>'}</span></td><td class="num">${i.qty}</td>
+        <td>${can(r)?`<input type="number" min="0" inputmode="numeric" data-trc="${r.id}:${i.product_id}" value="${C[i.product_id]??''}" placeholder="${i.qty}" style="width:70px;${C[i.product_id]!=null&&+C[i.product_id]!==i.qty?'border-color:var(--bad)':''}">`:'<span class="meta">—</span>'}</td></tr>`).join('')}</tbody></table></div>
+        ${can(r)?`<div class="row" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn small" data-trall="${r.id}">Всё сходится</button><button class="btn small primary" data-trok="${r.id}">✅ Подтвердить приёмку</button></div>`:'<span class="meta">Подтверждает менеджер этого магазина.</span>'}`:''}</div>`; }).join('')}</div>`;
+}
+document.addEventListener('click', async e => { if(S.view!=='wh') return; const t = e.target.closest('button'); if(!t) return; const d = t.dataset; S.trc = S.trc || {};
+  if(d.tropen){ S.trOpen = S.trOpen===d.tropen ? null : d.tropen; render(); }
+  else if(d.trall){ const r = (S.trIn||[]).find(x=>x.id===d.trall); if(!r) return; S.trc[r.id] = {}; r.items.forEach(i=>S.trc[r.id][i.product_id]=i.qty); render(); }
+  else if(d.trok){ const r = (S.trIn||[]).find(x=>x.id===d.trok); if(!r) return; const C = S.trc[r.id] || {};
+    const miss = r.items.filter(i=>C[i.product_id]==null||C[i.product_id]==='').length; if(miss) return toast(`Впишите, сколько пришло, по всем товарам (осталось ${miss}) или нажмите «Всё сходится»`);
+    t.disabled = true; const { data, error } = await sb.rpc('receipt_confirm', { p_id:r.id, p_items:r.items.map(i=>({ product_id:i.product_id, counted:+C[i.product_id] })) });
+    if(error){ t.disabled = false; return toast(errText(error)); }
+    const diff = (data&&data.diff)||[]; toast(diff.length ? `Принято с расхождениями: ${diff.length} поз. — владелец увидит в приёмке` : 'Приёмка подтверждена, товар на остатках');
+    delete S.trc[r.id]; S.trOpen = null; await loadWhSide(); render(); }
+});
+document.addEventListener('change', e => { const t = e.target; if(S.view!=='wh' || !t.dataset || !t.dataset.trc) return; const [rid, pid] = t.dataset.trc.split(':'); S.trc = S.trc || {}; S.trc[rid] = S.trc[rid] || {}; S.trc[rid][pid] = t.value===''?null:+t.value; render(); });
+
+/* ---------- «Требует внимания»: всё, что ждёт действия, на одном экране ---------- */
+async function loadAttn(){ const { data, error } = await sb.rpc('attention'); if(error) toast(errText(error)); S.attn = data || {}; }
+function renderAttn(){
+  const A = S.attn; if(!A){ $('#main').innerHTML = '<h2>Требует внимания</h2><div class="empty">Проверяем…</div>'; return; }
+  const today = new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'}), dayOf = t => t ? new Date(t).toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'}) : null;
+  const ago = t => { if(!t) return 'ни разу'; const d = Math.round((new Date(today) - new Date(dayOf(t)))/864e5); return d<=0 ? 'сегодня '+new Date(t).toLocaleTimeString('ru-RU',{timeZone:'Asia/Almaty',hour:'2-digit',minute:'2-digit'}) : d===1 ? 'вчера' : d+' дн. назад'; };
+  const items = [];
+  const add = (lvl, title, text, view, btn) => items.push({ lvl, title, text, view, btn });
+  const hp = (A.hours||[]).reduce((a,h)=>a+h.pending,0), ho = (A.hours||[]).reduce((a,h)=>a+h.open_old,0);
+  if(hp || ho) add('warn', `Часы консультантов: ждут подтверждения ${hp}${ho?`, не отмечен уход ${ho}`:''}`, (A.hours||[]).map(h=>esc(storeName(h.store_id))+': '+(h.pending?h.pending+' ждут':'')+(h.open_old?' · без ухода '+h.open_old:'')).join(' · '), 'pay', 'Открыть табель');
+  if(A.transit) add(A.transit_old?'bad':'warn', `Товар едет в магазин, не принят: ${A.transit}${A.transit_old?` (из них ${A.transit_old} дольше 4 дней)`:''}`, 'Пока приёмку не подтвердили после пересчёта, товар не на остатках и его нельзя продать.', 'wh', 'К приёмкам');
+  if(A.transfers_old) add('bad', `Перемещения в пути дольше 3 дней: ${A.transfers_old}`, 'Отправлены, но не приняты в магазине-получателе.', 'wh', 'К перемещениям');
+  if(A.writeoffs) add('warn', `Списания ждут решения: ${A.writeoffs}`, '', 'wh', 'К списаниям');
+  if(A.requests) add('warn', `Запросы на оприходование: ${A.requests}`, 'Продавцы просят поставить товар на остаток.', 'wh', 'К запросам');
+  if(A.noprice) add('bad', `Товары в наличии без розничной цены: ${A.noprice}`, 'Касса не продаст товар с ценой 0 — поставьте цену в «Номенклатуре» (фильтр «без розничной цены»).', 'nom', 'Поставить цены');
+  const W = (A.wipon||[]).filter(w => dayOf(w.sales)!==today);
+  if(W.length) add('warn', `Продажи из Wipon сегодня не загружены: ${W.length} маг.`, W.map(w=>esc(storeName(w.store_id))+' — '+ago(w.sales)).join(' · '), 'sales', 'Загрузить продажи');
+  if(A.cons_nophone) add('warn', `Консультанты без телефона: ${A.cons_nophone}`, 'Без телефона консультант не сможет пользоваться ботом смен и зарплаты.', 'cons', 'Вписать телефоны');
+  if(A.cons_notg) add('', `Телефон есть, но бот не подключён: ${A.cons_notg}`, 'Попросите открыть бота и нажать «Поделиться номером».', 'cons', 'Список');
+  if(A.nophoto) add('', `Товары в наличии без фото: ${A.nophoto.toLocaleString('ru-RU')}`, 'Без фото товар не выложить на сайт и в Instagram. Начните с ходовых — «Путь товара» покажет их первыми.', 'flow', 'Путь товара');
+  const col = { bad:'var(--bad)', warn:'var(--warn,#d90)', '':'var(--line)' };
+  $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap"><h2 style="margin:0">Требует внимания</h2><button class="btn small" id="attn-ref">Обновить</button></div>
+  <p class="meta" style="margin:4px 0 12px">Всё, что ждёт действия, по вашим магазинам. Когда пункт закрыт — он исчезает отсюда.</p>
+  ${items.length ? `<div class="stack" style="gap:8px">${items.sort((a,b)=>({bad:0,warn:1,'':2}[a.lvl]-{bad:0,warn:1,'':2}[b.lvl])).map(i=>`<div class="card row" style="flex-wrap:wrap;gap:10px;border-left:4px solid ${col[i.lvl]}"><div style="flex:1;min-width:220px"><b>${i.title}</b>${i.text?`<br><span class="meta">${i.text}</span>`:''}</div><button class="btn small" data-attngo="${i.view}">${i.btn} →</button></div>`).join('')}</div>`
+    : '<div class="card" style="text-align:center;padding:24px">✅ Всё в порядке — ничего не ждёт</div>'}
+  <div class="card" style="margin-top:14px"><b>Загрузки из Wipon</b><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Магазин</th><th>Продажи</th><th>Остатки</th></tr></thead><tbody>
+    ${(A.wipon||[]).map(w=>`<tr><td>${esc(storeName(w.store_id))}</td><td style="color:${dayOf(w.sales)===today?'var(--ok)':'inherit'}">${ago(w.sales)}</td><td>${ago(w.stock)}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+document.addEventListener('click', async e => { if(S.view!=='attn') return; const t = e.target.closest('button'); if(!t) return;
+  if(t.id==='attn-ref'){ S.attn = null; render(); await loadAttn(); render(); }
+  else if(t.dataset.attngo){ const v = t.dataset.attngo; if(!(S.tabs||[]).some(x=>x[0]===v)) return toast('У вас нет доступа к этой вкладке'); if(v==='nom'){ S.nm = S.nm || {}; S.nm.noprice = true; } S.view = v; render(); scrollTo(0,0); await loadView(); }
+});
+
 function loadScriptOnce(src){ return new Promise((ok,no)=>{ if(document.querySelector(`script[src="${src}"]`)) return ok(); const el=document.createElement('script'); el.src=src; el.onload=ok; el.onerror=no; document.head.appendChild(el); }); }
 async function sagiImport(file){
   const brand = BK.brand; BK.imp = 'Читаем файл…'; render();
@@ -2080,8 +2141,8 @@ document.addEventListener('click', async e => { if(S.view!=='pay') return; const
 
 /* ---------- доступ к вкладкам по ролям ---------- */
 const ALL_TABS = [['pos','Продажа'],['analytics','Аналитика'],['shifts','Смены'],['cash','Расходы'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты'],['bonus','Бонусные карты'],['nom','Номенклатура'],['site','Сайт'],['emps','Сотрудники']];
-const EXTRA_TABS = [['pay','Зарплата'],['cons','Консультанты'],['po','Закуп'],['promo','Акции'],['content','Контент'],['flow','Путь товара'],['profit','Рентабельность']];
-const EXTRA_DEF = { pay:['manager','purchaser','viewer','accountant'], cons:['manager'], po:['manager','purchaser','viewer','accountant'], promo:['manager','purchaser','viewer','accountant'], content:['manager','purchaser','viewer'], flow:['manager','viewer','accountant'], profit:['viewer'] };
+const EXTRA_TABS = [['attn','Требует внимания'],['pay','Зарплата'],['cons','Консультанты'],['po','Закуп'],['promo','Акции'],['content','Контент'],['flow','Путь товара'],['profit','Рентабельность']];
+const EXTRA_DEF = { attn:['manager','purchaser','viewer','accountant'], pay:['manager','purchaser','viewer','accountant'], cons:['manager'], po:['manager','purchaser','viewer','accountant'], promo:['manager','purchaser','viewer','accountant'], content:['manager','purchaser','viewer'], flow:['manager','viewer','accountant'], profit:['viewer'] };
 ALL_TABS.push(...EXTRA_TABS);
 const BOSS_ONLY = ['analytics','bonus','nom','site','emps'];
 function defaultTabs(role){ const boss = ['manager','viewer','accountant'].includes(role);
@@ -2363,6 +2424,7 @@ document.addEventListener('change', async e => {
   if(t.id==='bk-sort'){ BK.sort=t.value; BK.off=0; render(); await loadBonus(); render(); }
   if(t.id==='cf-store'){ S.cf.store=t.value; await loadCerts(); render(); }
   if(t.id==='nm-cat'){ S.nm.cat=t.value; S.nm.off=0; render(); await loadNom(); render(); }
+  if(t.id==='nm-noprice'){ S.nm.noprice=t.checked; S.nm.off=0; render(); await loadNom(); render(); }
   if(t.id==='nm-arch'){ S.nm.arch=t.checked; S.nm.off=0; render(); await loadNom(); render(); }
   if(t.id==='nm-photo'){ nmPhoto(t.files[0]); }
   if(d.nf && (t.type==='checkbox' || t.tagName==='SELECT')){ S.nm.ed[d.nf] = t.type==='checkbox' ? t.checked : t.value; }
@@ -2422,6 +2484,7 @@ async function loadView(){
   if(S.view==='certs'){ await loadCerts(); render(); }
   if(S.view==='emps'){ await loadEmps(); render(); }
   if(S.view==='cons'){ render(); await loadEmps(); render(); }
+  if(S.view==='attn'){ render(); await loadAttn(); render(); }
   if(S.view==='pay'){ render(); await loadPay(); render(); }
   if(S.view==='profit'){ render(); await loadProfit(); render(); }
   if(S.view==='po'){ render(); await loadPo(); render(); }
