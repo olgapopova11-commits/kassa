@@ -10,7 +10,7 @@ const ROLE = { owner:'Владелец', manager:'Менеджер', consultant:
 const BRAND = { moon:'MOON', sunshine:'Sunshine' };
 
 const S = {
-  me:null, stores:[], store:null, view:'pos', catalog:[], catalogAt:null,
+  me:null, stores:[], store:null, view:(location.hash.slice(1).replace(/[^a-z]/g,'')||'pos'), catalog:[], catalogAt:null,
   q:'', found:[], stock:{},
   cf:{ st:'active', q:'', store:'' }, cart:[], discType:'pct', disc:0, pays:{}, certCode:'', cert:null, certQ:'', certList:null,
   phone:'', cust:null, custMsg:'', bonusSpend:0,
@@ -211,7 +211,7 @@ async function boot(){
   S.store = ls.get('kassa_store', null) || (me.store_ids||[])[0] || (S.stores[0]||{}).id;
   if(!S.stores.some(s=>s.id===S.store)) S.store = (S.stores[0]||{}).id;
   { const [a, e] = await Promise.all([sb.rpc('get_tab_access'), sb.rpc('get_tab_edit')]); S.tabAccess = a.data || {}; S.tabEdit = e.data || {}; }
-  renderShell(); await loadPosShift(); await loadCatalog(); loadPromos().then(()=>{ if(S.view==='pos') render(); }); render(); flushQueue(); subscribeReqs();
+  renderShell(); await loadPosShift(); if(S.view!=='pos') render(); await loadCatalog(); loadPromos().then(()=>{ if(S.view==='pos') render(); }); render(); flushQueue(); subscribeReqs(); if(S.view!=='pos') loadView();
 }
 
 /* ---------- каркас ---------- */
@@ -265,6 +265,7 @@ function renderHeader(){
   if($('#tg-link')) $('#tg-link').onclick = () => tgLogin('link');
 }
 function render(){
+  if(location.hash.slice(1)!==S.view) try{ history.replaceState(null,'','#'+S.view); }catch(_){}
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
@@ -1879,7 +1880,10 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('nav.tabs button, nav.subtabs button'); if(!b) return;
   if(b.dataset.group){ const g = GROUPS.find(x=>x[0]===b.dataset.group), av = g[3].filter(v => (S.tabs||[]).some(t=>t[0]===v)); const last = (S.lastView||{})[g[0]]; S.view = av.includes(last) ? last : av[0]; }
   else S.view = b.dataset.view;
-  render(); scrollTo(0,0);
+  render(); scrollTo(0,0); await loadView();
+});
+// данные для открытой вкладки (при переходе и после обновления страницы)
+async function loadView(){
   if(S.view==='shifts'){ await loadShifts(); render(); }
   if(S.view==='sales'){ await loadSales(); render(); }
   if(S.view==='certs'){ await loadCerts(); render(); }
@@ -1898,7 +1902,7 @@ document.addEventListener('click', async e => {
   if(S.view==='bonus'){ render(); await loadBonus(); render(); }
   if(S.view==='cash'){ render(); await loadCash(); render(); }
   if(S.view==='analytics'){ S.an=null; render(); await loadAnalytics(); render(); }
-});
+}
 
 sb.auth.onAuthStateChange((ev) => { if(ev==='SIGNED_OUT') renderLogin(); });
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
