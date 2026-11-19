@@ -444,10 +444,10 @@ function showReceipt(s, number, offline){
 /* ---------- чеки и возвраты ---------- */
 async function loadSales(){
   if(!navigator.onLine) return;
-  { const qq = S.salesQ.trim(); const num = /^\d+$/.test(qq) ? +qq : null;
-    const { data, error } = await sb.rpc('sales_list', { p_stores: selStores(), p_number: num, p_limit: 200 });
-    if(error) return toast(errText(error)); S.sales = data || [];
-    if(qq && !/^\d+$/.test(qq)){ const p = normPhone(qq); S.sales = S.sales.filter(s => (p && s.customers && s.customers.phone===p) || s.sale_items.some(i=>i.products&&(i.products.name||'').toLowerCase().includes(qq.toLowerCase()))); }
+  { const F = (S.sf ||= { from:'', to:'', kind:'', lim:100 });
+    const { data, error } = await sb.rpc('sales_list2', { p_stores: selStores(), p_from: F.from||null, p_to: F.to||null, p_kind: F.kind||null, p_q: S.salesQ.trim()||null, p_offset: 0, p_limit: F.lim });
+    if(error) return toast(errText(error)); S.sales = (data && data.rows) || []; S.salesTotal = data ? data.total : 0; S.salesSum = data ? data.sum : 0;
+    if(wiponOk()) wuLoadLast();
     return; }
   let q = sb.from('sales').select('id,number,kind,created_at,total,store_id,original_sale_id,is_certificate_sale,note,customers(phone,name),employees(full_name),sale_items(product_id,qty,price,discount,total,products(name,barcode)),sale_payments(method,amount,certificate_code)')
     .in('store_id', selStores()).order('created_at',{ascending:false}).limit(200);
@@ -463,15 +463,19 @@ function returnedQty(saleId){
 }
 function renderSales(){
   $('#main').innerHTML = `<h2>Чеки и возвраты</h2>${wiponUpHtml('sales')}${storeFilterHtml()}
-    <div class="filters"><input id="sq" style="flex:1" placeholder="Номер чека, телефон клиента или товар" value="${esc(S.salesQ)}"><button class="btn" id="sq-go">Найти</button></div>
+    ${(()=>{ const F = S.sf || { from:'', to:'', kind:'' }; return `<div class="filters"><label class="meta">с <input type="date" id="sf-from" value="${F.from}"></label><label class="meta">по <input type="date" id="sf-to" value="${F.to}"></label>
+      <select id="sf-kind">${[['','Все чеки'],['sale','Только продажи'],['return','Только возвраты'],['with_return','Продажи, по которым был возврат'],['no_return','Продажи без возврата']].map(([k,v])=>`<option value="${k}" ${F.kind===k?'selected':''}>${v}</option>`).join('')}</select>
+      ${F.from||F.to||F.kind||S.salesQ?'<button class="btn small" id="sf-reset">Сбросить</button>':''}</div>`; })()}
+    <div class="filters"><input id="sq" style="flex:1" placeholder="Товар (название или штрихкод), номер чека или телефон клиента" value="${esc(S.salesQ)}"><button class="btn" id="sq-go">Найти</button></div>
+    ${S.salesTotal!=null?`<p class="meta">Найдено чеков: <b>${(S.salesTotal||0).toLocaleString('ru-RU')}</b> · сумма продаж минус возвраты: <b>${fmt(S.salesSum||0)}</b>${S.salesTotal>S.sales.length?` · показаны последние ${S.sales.length}`:''}</p>`:''}
     ${S.sales.length?`<div class="scroll"><table><thead><tr><th>№</th><th>Когда</th>${isBoss()?'<th>Магазин</th>':''}<th>Товары</th><th>Сумма</th><th>Оплата</th><th>Клиент</th><th></th></tr></thead><tbody>
-    ${S.sales.map(s=>`<tr><td class="num">${s.number}${s.kind==='return'?' <span class="chip zero">возврат</span>':''}</td>
+    ${S.sales.map(s=>`<tr><td class="num">${s.number}${s.kind==='return'?' <span class="chip zero">возврат</span>':''}${s.has_return?' <span class="chip warn">был возврат</span>':''}${s.wipon_id?'<br><span class="meta">Wipon '+esc(String(s.wipon_id).replace('-R',''))+'</span>':''}</td>
       <td class="num">${new Date(s.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}<br><span class="meta">${esc(s.employees&&s.employees.full_name||'')}</span></td>${isBoss()?`<td>${esc(storeName(s.store_id))}</td>`:''}
       <td>${s.is_certificate_sale?esc(s.note):s.sale_items.map(i=>esc(i.products?i.products.name:'')+' × '+i.qty).join('<br>')}</td>
       <td class="num">${fmt(s.total)}</td><td>${s.sale_payments.map(p=>PAY[p.method]+(p.certificate_code?' '+esc(p.certificate_code):'')).join(', ')}</td>
       <td>${s.customers?esc(s.customers.phone):'—'}</td>
-      <td>${s.kind==='sale'&&!s.is_certificate_sale?`<button class="btn small" data-ret="${s.id}">Возврат</button>`:''}</td></tr>`).join('')}</tbody></table></div>`
-    : '<div class="empty">Чеков пока нет</div>'}`;
+      <td>${s.kind==='sale'&&!s.is_certificate_sale?`<button class="btn small" data-ret="${s.id}">Возврат</button>`:''}</td></tr>`).join('')}</tbody></table></div>${S.salesTotal>S.sales.length?`<button class="btn" id="sf-more" style="width:100%;margin-top:8px">Показать ещё</button>`:''}`
+    : '<div class="empty">Чеков по этим условиям нет</div>'}`;
 }
 function openReturn(id){
   const s = S.sales.find(x=>x.id===id); const back = returnedQty(id);
@@ -1507,14 +1511,20 @@ async function loadBonus(){
 async function openBonusClient(id){ BK.cur = id; BK.card = null; render(); const { data, error } = await sb.rpc('bonus_client', { p_customer:id, p_brand:BK.brand }); if(error) toast(errText(error)); BK.card = data; render(); }
 const dshort = d => d ? new Date(d).toLocaleDateString('ru-RU') : '—';
 /* ---------- загрузка выгрузок Wipon: продажи и остатки ---------- */
-const WU = { store:null, msg:'' };
+const WU = { store:null, msg:'', last:null };
+async function wuLoadLast(){ const { data } = await sb.rpc('wipon_last'); WU.last = data || {}; if(['sales','stock'].includes(S.view)) render(); }
+const wuDt = v => v ? new Date(v).toLocaleString('ru-RU',{ day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Asia/Almaty' }) : '—';
 const wiponOk = () => S.me && (['owner','manager','purchaser'].includes(S.me.role));
 function wiponUpHtml(kind){
   if(!wiponOk()) return '';
-  const st = WU.store || S.store;
-  return `<details class="card" style="margin-bottom:10px" ${WU.open===kind?'open':''} data-wuopen="${kind}"><summary><b>⬆ ${kind==='sales'?'Загрузить продажи из Wipon':'Обновить остатки из Wipon'}</b> <span class="meta">— Excel-выгрузка, по одному магазину</span></summary>
+  const st = WU.store || S.store, L = WU.last || {}, last = id => L[kind+':'+id];
+  if(!WU.last && !WU.loading){ WU.loading = true; wuLoadLast().finally(()=>{ WU.loading = false; }); }
+  const allAt = S.allStores.map(x=>last(x.id)&&last(x.id).at).filter(Boolean).sort();
+  return `<details class="card" style="margin-bottom:10px" ${WU.open===kind?'open':''} data-wuopen="${kind}"><summary><b>⬆ ${kind==='sales'?'Загрузить продажи из Wipon':'Обновить остатки из Wipon'}</b> <span class="meta">— последняя загрузка: ${allAt.length?wuDt(allAt[allAt.length-1]):'—'}</span></summary>
+    <div class="scroll" style="margin-top:8px"><table><thead><tr><th>Магазин</th><th>Последняя загрузка</th>${kind==='sales'?'<th>Продажи в Silver по</th>':''}<th>Кто загрузил</th></tr></thead><tbody>
+      ${S.allStores.map(x=>{ const l = last(x.id); return `<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td class="num">${l?wuDt(l.at):'—'}</td>${kind==='sales'?`<td class="num">${l&&l.to?wuDt(l.to):'—'}</td>`:''}<td>${l&&l.by?esc(l.by):'<span class="meta">—</span>'}</td></tr>`; }).join('')}</tbody></table></div>
     <div class="stack" style="margin-top:8px">
-      <span class="meta">${kind==='sales'?'Выгрузите продажи магазина из Wipon за любой период и загрузите файл. Чеки, которые уже есть в Silver, пропустятся — добавятся только новые, ничего не задвоится.':'Выгрузите остатки магазина из Wipon и загрузите файл. Остатки этого магазина в Silver станут такими же, как в файле. Новые штрихкоды добавятся в базу товаров.'}</span>
+      <span class="meta">${kind==='sales'?'Выгрузите продажи магазина из Wipon за любой период и загрузите файл. Дубликатов не будет: Silver проверяет номер каждого чека Wipon и добавляет только те, которых ещё нет. Даже если тот же файл или пересекающийся период загрузят случайно ещё раз — повторные чеки просто пропустятся.':'Выгрузите остатки магазина из Wipon и загрузите файл. Остатки этого магазина в Silver станут такими же, как в файле. Новые штрихкоды добавятся в базу товаров.'}</span>
       <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px">
         <select id="wu-store-${kind}">${S.allStores.map(x=>`<option value="${x.id}" ${x.id===st?'selected':''}>${esc(BRAND[x.brand]+' · '+x.city+', '+x.address)}</option>`).join('')}</select>
         ${kind==='stock'?`<label class="meta"><input type="checkbox" id="wu-zero" checked> товары, которых нет в файле, обнулить</label>`:''}
@@ -1572,9 +1582,11 @@ async function wuImport(kind, file){
       if(S.view==='stock'){ await loadStockView(); }
     }
   }catch(e){ WU.msg = '❌ '+esc(errText(e)); }
-  render();
+  await wuLoadLast(); render();
 }
-document.addEventListener('change', e => { const m = (e.target.id||'').match(/^wu-file-(sales|stock)$/); if(m && e.target.files[0]){ const f = e.target.files[0]; e.target.value=''; wuImport(m[1], f); }
+document.addEventListener('change', async e => { const id = e.target.id||'';
+  if(['sf-from','sf-to','sf-kind'].includes(id)){ const F = (S.sf ||= { from:'', to:'', kind:'', lim:100 }); F[id.slice(3)] = e.target.value; F.lim = 100; await loadSales(); render(); return; }
+  const m = id.match(/^wu-file-(sales|stock)$/); if(m && e.target.files[0]){ const f = e.target.files[0]; e.target.value=''; wuImport(m[1], f); }
   const s2 = (e.target.id||'').match(/^wu-store-/); if(s2) WU.store = +e.target.value; });
 document.addEventListener('toggle', e => { const d = e.target; if(d.dataset && d.dataset.wuopen){ WU.open = d.open ? d.dataset.wuopen : (WU.open===d.dataset.wuopen ? null : WU.open); } }, true);
 function loadScriptOnce(src){ return new Promise((ok,no)=>{ if(document.querySelector(`script[src="${src}"]`)) return ok(); const el=document.createElement('script'); el.src=src; el.onload=ok; el.onerror=no; document.head.appendChild(el); }); }
@@ -1962,7 +1974,9 @@ document.addEventListener('click', async e => {
   else if(t.id==='cert-change'){ S.cert=null; S.certCode=''; S.pays.certificate=0; syncPays(); render(); }
   else if(t.id==='clear'){ S.cart=[]; S.disc=0; S.pays={}; S.certCode=''; S.cert=null; S.certQ=''; render(); }
   else if(t.id==='checkout') checkout();
-  else if(t.id==='sq-go'){ await loadSales(); render(); }
+  else if(t.id==='sq-go'){ (S.sf ||= {lim:100}).lim = 100; await loadSales(); render(); }
+  else if(t.id==='sf-more'){ S.sf.lim += 100; t.disabled = true; await loadSales(); render(); }
+  else if(t.id==='sf-reset'){ S.sf = { from:'', to:'', kind:'', lim:100 }; S.salesQ = ''; await loadSales(); render(); }
   else if(d.ret) openReturn(d.ret);
   else if(t.id==='stq-go'){ await loadStockView(); render(); }
   else if(t.id==='stf-clear'){ S.stockF={}; await loadStockView(); render(); }
