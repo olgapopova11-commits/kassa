@@ -747,7 +747,7 @@ function dnewHtml(){
 document.addEventListener('click', async e => {
   if(S.view!=='wh') return; const t = e.target.closest('button'); if(!t) return;
   if(t.id==='dn-open'){ const q = (S.dq||'').trim(); S.dnew = { name: /^\d{6,}$/.test(q)?'':q, bc: /^\d{6,}$/.test(q)?q:'', brand:'', cat:'', color:'', mat:'', price:'', cost:'' }; render();
-    if(!S.dnewCats){ const { data } = await sb.from('categories').select('id,name').order('name'); S.dnewCats = data||[]; render(); } $('#dn-name') && $('#dn-name').focus(); }
+    if(!S.dnewCats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); S.dnewCats = data||[]; render(); } $('#dn-name') && $('#dn-name').focus(); }
   else if(t.id==='dn-cancel'){ S.dnew = null; render(); }
   else if(t.id==='dn-save'){ const n = S.dnew; for(const [k,id] of [['name','dn-name'],['brand','dn-brand'],['cat','dn-cat'],['color','dn-color'],['mat','dn-mat'],['price','dn-price'],['cost','dn-cost'],['bc','dn-bc']]) n[k] = $('#'+id).value.trim();
     if(!n.name) return toast('Укажите название'); if(!n.brand) return toast('Отметьте бренд: MOON, Sunshine или оба'); t.disabled = true;
@@ -1239,7 +1239,7 @@ function renderStockAn(){
 const NM_EMPTY = () => ({ id:null, is_group:false, barcode:'', sku:'', name:'', price:'', cost:'', brand:'', category_id:'', material:'', color:'', supplier:'', purchase_url:'', photo_url:'', is_basic:false, archived:false, sites:[] });
 async function loadNom(){
   const f = S.nm; f.data = null;
-  if(!f.cats){ const { data } = await sb.from('categories').select('id,name').order('name'); f.cats = data || []; }
+  if(!f.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); f.cats = data || []; }
   sb.rpc('po_incoming').then(({data}) => { S.inc = data || {}; });
   const { data, error } = await sb.rpc('product_list2', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:50, p_sort:f.sort||null, p_desc:!!f.desc });
   if(error){ toast(errText(error)); f.data = { rows:[], total:0 }; } else f.data = data;
@@ -2051,7 +2051,7 @@ document.addEventListener('click', async e => {
     t.disabled = true; const { data, error } = await sb.rpc('po_close_archive_many', { p_ids:ids }); if(error){ t.disabled=false; return toast(errText(error)); }
     toast(`Отмечено как уже принятые: ${data}`); PO.sel = {}; PO.archDate = ''; await loadPo(); render(); }
   else if(d.pocreate){ const o = (PO.list||[]).find(x=>(x.items||[]).some(i=>i.item_id===d.pocreate)), i = o.items.find(x=>x.item_id===d.pocreate);
-    if(!PO.cats){ const { data } = await sb.from('categories').select('id,name').order('name'); PO.cats = data||[]; }
+    if(!PO.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); PO.cats = data||[]; }
     const landed = poLanded(i.price_cur!=null?i.price_cur:(i.unit_cost||0)/(+o.rate||1), +o.rate_now||+o.rate||1, o.delivery_pct??10, o.cargo, (o.items||[]).reduce((a,x)=>a+x.qty,0));
     PO.mk = { item:i.item_id, name:(i.title_ru||i.supplier_title||'').replace(/цвет:.*$/i,'').slice(0,70).trim(), color:colorRu(i.spec||i.title_ru||''), brand:'', cat:'', price:'', landed:Math.round(landed) }; PO.lnk = null; render();
     if(i.spec && /[\u4e00-\u9fff]/.test(i.spec)) trZh(i.spec).then(ru => { if(ru && PO.mk && PO.mk.item===i.item_id){ PO.mk.specRu = ru; if(!PO.mk.color) PO.mk.color = colorRu(ru); render(); } }); }
@@ -2286,7 +2286,7 @@ boot();
 const PR = { list:null, cats:null, edit:null };
 const todayAlm = () => new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'});
 async function loadPromos(){
-  const [a, c] = await Promise.all([sb.from('promotions').select('*').order('created_at',{ascending:false}), PR.cats ? null : sb.from('categories').select('id,name').order('name')]);
+  const [a, c] = await Promise.all([sb.from('promotions').select('*').order('created_at',{ascending:false}), PR.cats ? null : sb.from('categories').select('id,name').eq('hidden',false).order('name')]);
   if(a.error){ PR.list = PR.list||[]; return; } PR.list = a.data || []; if(c) PR.cats = c.data || [];
 }
 const promoLive = (p, store) => { const d = todayAlm(); return p.active && (!p.starts || p.starts <= d) && (!p.ends || p.ends >= d) && (!p.stores || !p.stores.length || p.stores.includes(store)); };
