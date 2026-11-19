@@ -224,12 +224,12 @@ function renderShell(){
   tabs.push(['pay', isBoss() ? 'Зарплата' : 'Моя зарплата']);
   if(['owner','viewer'].includes(S.me.role)) tabs.push(['profit','Рентабельность']);
   if(['owner','manager','purchaser','viewer','accountant'].includes(S.me.role)) tabs.push(['po','Закуп']);
-  if(tabs.length && !tabs.some(([v]) => v===S.view)) S.view = tabs[0][0];
   tabs.push(['promo','Акции']);
   if(isBoss()) tabs.push(['flow','Путь товара']);
   if(S.me.role==='owner') tabs.push(['adm','Административный штат']);
   if(!['owner','viewer','accountant'].includes(S.me.role)) tabs.push(['me','Мой кабинет']);
   if(isViewer()){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pos' && (v!=='emps' || S.me.role==='accountant'))); if(!S.view || S.view==='pos' || (S.view==='emps' && S.me.role!=='accountant')) S.view = 'analytics'; }
+  if(tabs.length && !tabs.some(([v]) => v===S.view)) S.view = tabs[0][0];
 
   S.tabs = tabs;
   $('#app').innerHTML = `<header id="hdr"></header><nav class="subtabs" id="subnav" role="tablist"></nav><main id="main"></main>
