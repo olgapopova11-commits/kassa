@@ -555,7 +555,7 @@ async function loadReqs(){ const { data, error } = await sb.rpc('requests_list',
 function setReqBadge(n){ S.reqCount=n; renderNav(); }
 function renderReqs(head){
   const st = S.reqSt||'pending';
-  $('#main').innerHTML = `<h2>Склад</h2>${head}
+  $('#main').innerHTML = `${head}
     <div class="filters">${[['pending','Ждут решения'],['approved','Оприходованы'],['rejected','Отклонены']].map(([k,v])=>`<button class="btn small ${st===k?'primary':''}" data-reqst="${k}">${v}</button>`).join('')}</div>
     ${!(S.reqs||[]).length?'<div class="empty">Запросов нет</div>':S.reqs.map(r=>`<div class="card" style="margin-bottom:8px"><div class="row" style="justify-content:flex-start;align-items:flex-start">${thumb(r)}
       <div style="flex:1"><b>${esc(r.name)}</b><br><span class="meta num">${esc(r.barcode)} · ${fmt(r.price)}</span><br>
@@ -609,68 +609,85 @@ function docSearchHtml(ph){
   return `<div class="row"><input id="dq" style="flex:1" placeholder="${ph||'Скан штрихкода или название'}" value="${esc(S.dq)}" autocomplete="off"><button class="btn" id="dq-add">Добавить</button></div>
     ${S.dfound.length?`<div class="list">${S.dfound.slice(0,10).map(p=>`<button class="prod" data-dadd="${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}</span></span><span class="price num">${fmt(p.price)}</span></button>`).join('')}</div>`:''}`;
 }
+const WH_ICO = { requests:'📨', receipt:'📥', capitalize:'➕', writeoff:'🗑', transfer:'🔁', audit:'📋' };
+function whCss(){ if(document.getElementById('wh-css')) return; const st = document.createElement('style'); st.id = 'wh-css'; st.textContent = `
+  .wh-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 4px}.wh-tabs button{border:1px solid var(--line);background:var(--card,transparent);border-radius:999px;padding:6px 14px;cursor:pointer;font:inherit;color:inherit}
+  .wh-tabs button[aria-pressed="true"]{background:var(--accent,#222);color:var(--accent-fg,#fff);border-color:transparent}
+  .wh-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:14px;align-items:start}@media(max-width:900px){.wh-grid{grid-template-columns:1fr}}
+  .wh-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}.wh-fields label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted,#888)}
+  .wh-fields select,.wh-fields input{width:100%}
+  .wh-items td{padding:5px 6px;vertical-align:middle}.wh-items input{width:72px;padding:4px 6px}
+  .wh-foot{position:sticky;bottom:0;background:var(--card,var(--bg,#fff));border-top:1px solid var(--line);padding:10px 0 2px;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+  .wh-hist{border:1px solid var(--line);border-radius:12px;margin-bottom:8px;overflow:hidden}.wh-hist>summary{list-style:none;cursor:pointer;padding:9px 12px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 10px;align-items:center}
+  .wh-hist>summary::-webkit-details-marker{display:none}.wh-hist[open]>summary{border-bottom:1px solid var(--line)}.wh-hist .wh-body{padding:8px 12px}
+  .wh-hist .wh-body table td{padding:3px 6px;font-size:13px}`; document.head.append(st); }
+function whItemsTable(items){ return `<table class="wh-items"><tbody>${items.map(i=>`<tr><td>${esc(i.name)}<br><span class="meta num">${esc(i.barcode||'')}</span></td><td class="num">× ${i.qty}</td></tr>`).join('')}</tbody></table>`; }
 function renderWh(){
+  whCss();
   if(!S.wmode) S.wmode = whModes()[0][0];
   const m = S.wmode, d = S.doc && S.doc.mode===m ? S.doc : (S.doc = newDoc(m));
-  const head = `<div class="filters">${whModes().map(([k,v])=>`<button class="btn small ${k===m?'primary':''}" data-wmode="${k}">${v.t}</button>`).join('')}</div>
-    <p class="meta">${WH[m].hint}</p>${transitHtml()}`;
+  const head = `<h2 style="margin:0">Склад</h2><div class="wh-tabs" role="tablist">${whModes().map(([k,v])=>`<button data-wmode="${k}" aria-pressed="${k===m}">${WH_ICO[k]||''} ${v.t}</button>`).join('')}</div>
+    <p class="meta" style="margin:2px 0 10px">${WH[m].hint}</p>${transitHtml()}`;
   if(m==='requests') return renderReqs(head);
   if(m==='audit') return renderAudit(head);
-  if(m==='transfer' && !isBoss()){ $('#main').innerHTML = `<h2>Склад</h2>${head}${renderTransfers()}`; return; }
+  if(m==='transfer' && !isBoss()){ $('#main').innerHTML = `${head}${renderTransfers()}`; return; }
   const storeSel = (id, val) => `<select id="${id}">${S.stores.map(st=>`<option value="${st.id}" ${st.id===val?'selected':''}>${esc(BRAND[st.brand]+' · '+st.city+', '+st.address)}</option>`).join('')}</select>`;
-  const total = d.items.reduce((a,i)=>a+i.qty,0);
-  $('#main').innerHTML = `<h2>Склад</h2>${head}<div class="grid2"><div class="card stack">
-    <div class="row" style="flex-wrap:wrap"><span class="label">${m==='transfer'?'Откуда':'Магазин'}</span>${storeSel('d-store', d.store)}
-      ${m==='transfer'?`<span class="label">Куда</span>${storeSel('d-to', d.to)}`:''}</div>
-    ${m==='receipt'?`<input id="d-supplier" placeholder="Поставщик (например, Китай, Иу, рынок, наша студия)" value="${esc(d.supplier)}">`:''}
-    ${m==='writeoff'?`<input id="d-reason" placeholder="Причина списания *" value="${esc(d.reason)}">`:''}
-    ${m==='capitalize'||m==='receipt'?`<input id="d-note" placeholder="Комментарий" value="${esc(d.note)}">`:''}
+  const total = d.items.reduce((a,i)=>a+i.qty,0), retail = d.items.reduce((a,i)=>a+(+i.price||0)*i.qty,0), cost = d.items.reduce((a,i)=>a+(+i.cost||0)*i.qty,0);
+  const title = { receipt:'Новая приёмка', capitalize:'Новое оприходование', writeoff:'Новое списание', transfer:'Новое перемещение' }[m];
+  $('#main').innerHTML = `${head}<div class="wh-grid"><div class="card stack" style="gap:10px">
+    <b style="font-size:16px">${title}</b>
+    <div class="wh-fields">
+      <label>${m==='transfer'?'Откуда':'Магазин'}${storeSel('d-store', d.store)}</label>
+      ${m==='transfer'?`<label>Куда${storeSel('d-to', d.to)}</label>`:''}
+      ${m==='receipt'?`<label>Поставщик<input id="d-supplier" placeholder="Китай, Иу, рынок, наша студия…" value="${esc(d.supplier)}"></label>`:''}
+      ${m==='writeoff'?`<label>Причина списания *<input id="d-reason" placeholder="брак, потеря, подарок…" value="${esc(d.reason)}"></label>`:''}
+      ${m==='capitalize'||m==='receipt'?`<label>Комментарий<input id="d-note" placeholder="необязательно" value="${esc(d.note)}"></label>`:''}
+    </div>
     ${docSearchHtml()}
     ${(m==='receipt'||m==='capitalize')&&isBoss()&&!isViewer()?(S.dnew?dnewHtml():`<button class="btn small" id="dn-open" style="align-self:flex-start">+ Новый товар (нет в базе)</button>`):''}
-    ${d.items.length?`<div class="scroll"><table><thead><tr><th>Товар</th><th>Кол-во</th>${m==='receipt'?'<th>Закуп, ₸</th>':''}<th></th></tr></thead><tbody>
-      ${d.items.map((i,n)=>`<tr><td>${esc(i.name)}<br><span class="meta num">${esc(i.barcode)}</span></td>
-        <td><input class="small" type="number" min="1" id="dqty-${n}" data-dqty="${n}" value="${i.qty}" inputmode="numeric"></td>
-        ${m==='receipt'?`<td><input class="small" type="number" min="0" id="dcost-${n}" data-dcost="${n}" value="${i.cost??''}" inputmode="numeric"></td>`:''}
-        <td><button class="btn small" data-ddel="${n}">✕</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Добавьте товары сканером или поиском</div>'}
-    <div class="row"><span class="meta">Позиций: ${d.items.length} · штук: ${total}</span>
+    ${d.items.length?`<div class="scroll"><table class="wh-items"><thead><tr><th></th><th>Товар</th><th>Кол-во</th>${m==='receipt'?'<th>Закуп, ₸</th>':''}<th>Розница</th><th></th></tr></thead><tbody>
+      ${d.items.map((i,n)=>`<tr><td>${thumb(i)}</td><td>${esc(i.name)}<br><span class="meta num">${esc(i.barcode)}</span></td>
+        <td><input type="number" min="1" id="dqty-${n}" data-dqty="${n}" value="${i.qty}" inputmode="numeric"></td>
+        ${m==='receipt'?`<td><input type="number" min="0" id="dcost-${n}" data-dcost="${n}" value="${i.cost??''}" inputmode="numeric" placeholder="0"></td>`:''}
+        <td class="num">${+i.price>0?fmt(i.price):'<span style="color:var(--bad)">нет цены</span>'}</td>
+        <td><button class="btn small" data-ddel="${n}" title="Убрать">✕</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty" style="padding:18px">Сканируйте штрихкоды или найдите товар по названию — он появится здесь</div>'}
+    <div class="wh-foot"><span class="meta">Позиций <b>${d.items.length}</b> · штук <b>${total}</b>${retail?` · в рознице <b>${fmt(retail)}</b>`:''}${m==='receipt'&&cost?` · закуп <b>${fmt(cost)}</b>`:''}</span>
       <button class="btn primary" id="d-post" ${d.items.length?'':'disabled'}>${{receipt:'Провести приёмку',capitalize:'Оприходовать',writeoff:'Отправить на подтверждение',transfer:'Отправить'}[m]}</button></div>
   </div><div>${m==='transfer'?renderTransfers():m==='writeoff'?renderWoReqs()+renderWhList():renderWhList()}</div></div>`;
 }
 function renderWoReqs(){
   const L = S.woReqs||[]; if(!L.length) return '';
-  const ST = { pending:['warn','ждёт подтверждения'], approved:['ok','списано'], rejected:['zero','отклонено'] };
-  return `<h2>Запросы на списание</h2>${L.slice(0,30).map(r=>`<div class="card" style="margin-bottom:8px">
-    <div class="row"><b>${esc(storeName(r.store))}</b><span class="chip ${ST[r.status][0]}">${ST[r.status][1]}</span></div>
-    <div class="meta">${tm(r.created_at)} · ${esc(r.by||'')} · причина: ${esc(r.reason)}${r.decided_by?' · решение: '+esc(r.decided_by):''}${r.note?' ('+esc(r.note)+')':''}</div>
-    <div>${(r.items||[]).map(i=>esc(i.name)+' × '+i.qty+' <span class="meta num">'+esc(i.barcode||'')+'</span>').join('<br>')}</div>
-    <div class="meta">Сумма по рознице: ${fmt((r.items||[]).reduce((a,i)=>a+(+i.price||0)*i.qty,0))}</div>
-    ${r.status==='pending'&&r.can_decide?`<div class="row" style="justify-content:flex-start"><button class="btn small primary" data-wook="${r.id}">Списать</button><button class="btn small" data-wono="${r.id}">Отклонить</button></div>`:''}
-  </div>`).join('')}`;
+  const ST = { pending:['warn','ждёт решения'], approved:['ok','списано'], rejected:['zero','отклонено'] };
+  return `<h3 style="margin:0 0 8px">Запросы на списание</h3>${L.slice(0,30).map(r=>{ const sum = (r.items||[]).reduce((a,i)=>a+(+i.price||0)*i.qty,0), q = (r.items||[]).reduce((a,i)=>a+i.qty,0);
+    return `<details class="wh-hist" ${r.status==='pending'?'open':''}><summary><span class="chip ${ST[r.status][0]}">${ST[r.status][1]}</span><span><b>${esc(storeName(r.store))}</b> · ${q} шт. · ${fmt(sum)}<br><span class="meta">${esc(r.reason)}</span></span><span class="meta">${tm(r.created_at)}</span></summary>
+    <div class="wh-body"><div class="meta">Запросил(а) ${esc(r.by||'—')}${r.decided_by?' · решение: '+esc(r.decided_by):''}${r.note?' («'+esc(r.note)+'»)':''}</div>${whItemsTable(r.items||[])}
+    ${r.status==='pending'&&r.can_decide?`<div class="row" style="justify-content:flex-start;gap:6px;margin-top:6px"><button class="btn small primary" data-wook="${r.id}">Списать</button><button class="btn small" data-wono="${r.id}">Отклонить</button></div>`:''}</div></details>`; }).join('')}<div style="height:10px"></div>`;
 }
 function renderWhList(){
-  return `<h2>Последние документы</h2>${S.whList.length?S.whList.map(x=>`<div class="card" style="margin-bottom:8px">
-    <div class="row"><b>${esc(WH[x.kind]?WH[x.kind].t:x.kind)}${x.number?' №'+x.number:''}</b><span class="meta">${new Date(x.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span></div>
-    <div class="meta">${esc(storeName(x.store))} · ${esc(x.by||'')}${x.supplier?' · '+esc(x.supplier):''}${x.reason?' · '+esc(x.reason):''}</div>
-    <div>${(x.items||[]).map(i=>esc(i.name)+' × '+i.qty).join('<br>')}</div>
-    ${x.kind!=='writeoff'&&x.items?`<button class="btn small" data-labels='${esc(JSON.stringify(x.items.map(i=>({n:i.name,b:i.barcode,p:i.price,q:i.qty}))))}'>Этикетки</button>`:''}
-  </div>`).join(''):'<div class="empty">Документов пока нет</div>'}`;
+  const L = S.whList || [];
+  return `<h3 style="margin:0 0 8px">Последние документы</h3>${L.length?L.map(x=>{ const q = (x.items||[]).reduce((a,i)=>a+i.qty,0);
+    return `<details class="wh-hist"><summary><span>${WH_ICO[x.kind]||''}</span><span><b>${esc(WH[x.kind]?WH[x.kind].t:x.kind)}${x.number?' №'+x.number:''}</b> · ${esc(storeName(x.store))}<br><span class="meta">${(x.items||[]).length} поз. · ${q} шт.${x.supplier?' · '+esc(x.supplier):''}${x.reason?' · '+esc(x.reason):''}</span></span>
+      <span class="meta" style="text-align:right">${new Date(x.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}<br>${esc(x.by||'')}</span></summary>
+    <div class="wh-body">${whItemsTable(x.items||[])}
+      ${x.kind!=='writeoff'&&x.items?`<button class="btn small" style="margin-top:6px" data-labels='${esc(JSON.stringify(x.items.map(i=>({n:i.name,b:i.barcode,p:i.price,q:i.qty}))))}'>🏷 Этикетки</button>`:''}</div></details>`; }).join(''):'<div class="empty">Документов пока нет</div>'}`;
 }
 function renderTransfers(){
-  return `<h2>Перемещения</h2>${S.trList.length?S.trList.map(t=>`<div class="card" style="margin-bottom:8px">
-    <div class="row"><b>№${t.number}: ${esc(storeName(t.from))} → ${esc(storeName(t.to))}</b>
-      <span class="chip ${({received:'ok',rejected:'zero',awaiting:'warn',sent:'warn'})[t.status]||''}">${({received:'принято',sent:'в пути',awaiting:'ждёт подтверждения',rejected:'отклонено'})[t.status]||t.status}</span></div>
-    <div class="meta">Отправила ${esc(t.sent_by||'')} ${new Date(t.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}${t.received_by?' · приняла '+esc(t.received_by):''}${t.approved_by?(t.status==='rejected'?' · отклонил(а) ':' · подтвердил(а) ')+esc(t.approved_by):''}${t.decision_note?' · «'+esc(t.decision_note)+'»':''}${t.status==='awaiting'?'<br>Между городами: товар спишется со склада после подтверждения менеджера города-получателя.':''}</div>
-    <div>${(t.items||[]).map(i=>esc(i.name)+' × '+i.qty).join('<br>')}</div>
-    ${t.can_decide&&!isViewer()?`<div class="row" style="justify-content:flex-start;gap:8px"><button class="btn small primary" data-trok="${t.id}">Подтвердить</button><button class="btn small" data-trno="${t.id}">Отклонить</button></div>`:''}
-    ${t.status==='sent'&&!isViewer()&&(isBoss()||t.to===S.store)?`<button class="btn small primary" data-trrecv="${t.id}">Принять в ${esc(storeName(t.to))}</button>`:''}
-  </div>`).join(''):'<div class="empty">Перемещений пока нет</div>'}`;
+  const ST = { received:['ok','принято'], sent:['warn','в пути'], awaiting:['warn','ждёт подтверждения'], rejected:['zero','отклонено'] };
+  return `<h3 style="margin:0 0 8px">Перемещения</h3>${S.trList.length?S.trList.map(t=>{ const st = ST[t.status]||['',t.status], q = (t.items||[]).reduce((a,i)=>a+i.qty,0), act = (t.can_decide&&!isViewer()) || (t.status==='sent'&&!isViewer()&&(isBoss()||t.to===S.store));
+    return `<details class="wh-hist" ${act?'open':''}><summary><span class="chip ${st[0]}">${st[1]}</span><span><b>№${t.number}</b> ${esc(storeName(t.from))} → ${esc(storeName(t.to))}<br><span class="meta">${(t.items||[]).length} поз. · ${q} шт.</span></span>
+      <span class="meta" style="text-align:right">${new Date(t.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span></summary>
+    <div class="wh-body"><div class="meta">Отправил(а) ${esc(t.sent_by||'—')}${t.received_by?' · принял(а) '+esc(t.received_by):''}${t.approved_by?(t.status==='rejected'?' · отклонил(а) ':' · подтвердил(а) ')+esc(t.approved_by):''}${t.decision_note?' · «'+esc(t.decision_note)+'»':''}</div>
+      ${whItemsTable(t.items||[])}
+      <div class="row" style="justify-content:flex-start;gap:6px;margin-top:6px;flex-wrap:wrap">
+      ${t.can_decide&&!isViewer()?`<button class="btn small primary" data-trok="${t.id}">Подтвердить</button><button class="btn small" data-trno="${t.id}">Отклонить</button>`:''}
+      ${t.status==='sent'&&!isViewer()&&(isBoss()||t.to===S.store)?`<button class="btn small primary" data-trrecv="${t.id}">Принять в ${esc(storeName(t.to))}</button>`:''}</div></div></details>`; }).join(''):'<div class="empty">Перемещений пока нет</div>'}`;
 }
 function renderAudit(head){
   const a = S.audit, A = S.au || {}, boss = S.me && ['owner','manager'].includes(S.me.role);
   const rows = S.auditRows || [], rec = rows.filter(r=>r.recount);
   const sheetName = (A.sheets||[]).find(x=>x.id===A.sheet)?.name;
   const R = A.flt==='diff' ? rows.filter(r=>r.diff!==0) : A.flt==='rec' ? rec : rows;
-  $('#main').innerHTML = `<h2>Склад</h2>${head}
+  $('#main').innerHTML = `${head}
     <div class="card stack"><div class="row" style="flex-wrap:wrap"><b>Ревизия</b><select id="au-store" aria-label="Магазин ревизии">${S.stores.map(st=>`<option value="${st.id}" ${st.id===S.auStore?'selected':''}>${esc(BRAND[st.brand]+' · '+st.city+', '+st.address)}</option>`).join('')}</select>${a?`<span class="meta">начата ${new Date(a.started_at).toLocaleString('ru-RU')} · листов ${(A.sheets||[]).length}</span>`:''}</div>
     ${!a?`<button class="btn primary" id="au-start">Начать ревизию в этом магазине</button>`:`
       <div class="seg" style="display:inline-flex;align-self:flex-start">${[['sheet','Мой лист'+(sheetName?' · '+sheetName:'')],['review','Сверка всех листов']].map(([k,v])=>`<button data-autab="${k}" aria-pressed="${A.tab===k}">${esc(v)}</button>`).join('')}</div>
@@ -759,7 +776,7 @@ document.addEventListener('click', async e => {
 function docAdd(p){
   if(S.wmode==='audit') return auditAdd(p);
   const d = S.doc, it = d.items.find(i=>i.pid===p.id);
-  if(it) it.qty++; else d.items.push({ pid:p.id, name:p.name, barcode:p.barcode, price:p.price, qty:1, cost:null });
+  if(it) it.qty++; else d.items.push({ pid:p.id, name:p.name, barcode:p.barcode, price:p.price, photo_url:p.photo_url, qty:1, cost:null });
   S.dq=''; S.dfound=[]; render(); $('#dq') && $('#dq').focus();
 }
 async function auditAdd(p){
@@ -1238,7 +1255,7 @@ async function loadNom(){
   const f = S.nm; f.data = null;
   if(!f.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); f.cats = data || []; }
   sb.rpc('po_incoming').then(({data}) => { S.inc = data || {}; });
-  const { data, error } = await sb.rpc('product_list2', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:50, p_sort:f.sort||null, p_desc:!!f.desc, p_noprice:!!f.noprice });
+  const { data, error } = await sb.rpc('product_list2', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:50, p_sort:f.sort||null, p_desc:!!f.desc });
   if(error){ toast(errText(error)); f.data = { rows:[], total:0 }; } else { f.data = data; S.nmNoPrice = data.noprice; }
 }
 function renderNom(){
@@ -1246,7 +1263,7 @@ function renderNom(){
   const inp = (k, label, extra='') => `<label class="stack" style="gap:4px"><span class="label">${label}</span><input data-nf="${k}" value="${esc(e[k]??'')}" ${extra}></label>`;
   $('#main').innerHTML = `<div class="row"><h2>Номенклатура</h2><button class="btn primary" id="nm-new">+ Новый товар</button></div>
     <div class="filters"><input id="nm-q" placeholder="Штрихкод, артикул или название" value="${esc(f.q)}" style="flex:1;min-width:180px">
-      <select id="nm-cat"><option value="">Все категории</option><option value="-1" ${String(f.cat)==='-1'?'selected':''}>⚠ Без категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select><label class="chip ${f.noprice?'warn':''}" style="cursor:pointer;padding:4px 10px"><input type="checkbox" id="nm-noprice" ${f.noprice?'checked':''} style="margin-right:4px">без розничной цены${S.nmNoPrice!=null?' ('+S.nmNoPrice+')':''}</label>
+      <select id="nm-cat"><option value="">Все категории</option><option value="-1" ${String(f.cat)==='-1'?'selected':''}>⚠ Без категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
       <label class="meta" style="align-self:center"><input type="checkbox" id="nm-arch" ${f.arch?'checked':''}> архив</label></div>
     ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}. Нажмите на название, чтобы открыть карточку. Категорию можно менять прямо в таблице.</p>
     ${nmCanEdit()&&Object.keys(f.sel||{}).length?`<div class="cust row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;margin-bottom:8px"><b>Выбрано: ${Object.keys(f.sel).length}</b>
@@ -1769,23 +1786,23 @@ function transitHtml(){
     <span class="meta">Товар отправлен в магазин, но ещё не на остатках. Когда коробка придёт — пересчитайте, впишите фактическое количество и подтвердите. Только после этого товар можно продавать.</span>
     ${L.map(r=>{ const open = S.trOpen===r.id, C = S.trc[r.id] || {}, units = (r.items||[]).reduce((a,i)=>a+i.qty,0);
       return `<div style="border-top:1px solid var(--line);padding-top:8px"><div class="row" style="flex-wrap:wrap;gap:6px">
-        <button class="btn small" data-tropen="${r.id}" style="border:0;background:none;padding:0;font-weight:600;text-align:left">${open?'▾':'▸'} №${r.number||''} · ${esc(r.store)} · ${units} шт.</button>
+        <button class="btn small" data-rcopen="${r.id}" style="border:0;background:none;padding:0;font-weight:600;text-align:left">${open?'▾':'▸'} №${r.number||''} · ${esc(r.store)} · ${units} шт.</button>
         <span class="meta">${new Date(r.created_at).toLocaleDateString('ru-RU')}${r.by?' · отправил(а) '+esc(r.by):''}${r.note?' · '+esc(r.note):''}</span></div>
       ${open?`<div class="scroll" style="margin-top:6px"><table><thead><tr><th></th><th>Товар</th><th>Отправлено</th><th>Пришло</th></tr></thead><tbody>${(r.items||[]).map(i=>`<tr><td>${thumb(i)}</td><td>${esc(i.name)}<br><span class="meta num">${esc(i.barcode||'')}${+i.price>0?' · '+fmt(i.price):' · <span style="color:var(--bad)">нет цены</span>'}</span></td><td class="num">${i.qty}</td>
-        <td>${can(r)?`<input type="number" min="0" inputmode="numeric" data-trc="${r.id}:${i.product_id}" value="${C[i.product_id]??''}" placeholder="${i.qty}" style="width:70px;${C[i.product_id]!=null&&+C[i.product_id]!==i.qty?'border-color:var(--bad)':''}">`:'<span class="meta">—</span>'}</td></tr>`).join('')}</tbody></table></div>
-        ${can(r)?`<div class="row" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn small" data-trall="${r.id}">Всё сходится</button><button class="btn small primary" data-trok="${r.id}">✅ Подтвердить приёмку</button></div>`:'<span class="meta">Подтверждает менеджер этого магазина.</span>'}`:''}</div>`; }).join('')}</div>`;
+        <td>${can(r)?`<input type="number" min="0" inputmode="numeric" data-rcc="${r.id}:${i.product_id}" value="${C[i.product_id]??''}" placeholder="${i.qty}" style="width:70px;${C[i.product_id]!=null&&+C[i.product_id]!==i.qty?'border-color:var(--bad)':''}">`:'<span class="meta">—</span>'}</td></tr>`).join('')}</tbody></table></div>
+        ${can(r)?`<div class="row" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px"><button class="btn small" data-rcall="${r.id}">Всё сходится</button><button class="btn small primary" data-rcok="${r.id}">✅ Подтвердить приёмку</button></div>`:'<span class="meta">Подтверждает менеджер этого магазина.</span>'}`:''}</div>`; }).join('')}</div>`;
 }
 document.addEventListener('click', async e => { if(S.view!=='wh') return; const t = e.target.closest('button'); if(!t) return; const d = t.dataset; S.trc = S.trc || {};
-  if(d.tropen){ S.trOpen = S.trOpen===d.tropen ? null : d.tropen; render(); }
-  else if(d.trall){ const r = (S.trIn||[]).find(x=>x.id===d.trall); if(!r) return; S.trc[r.id] = {}; r.items.forEach(i=>S.trc[r.id][i.product_id]=i.qty); render(); }
-  else if(d.trok){ const r = (S.trIn||[]).find(x=>x.id===d.trok); if(!r) return; const C = S.trc[r.id] || {};
+  if(d.rcopen){ S.trOpen = S.trOpen===d.rcopen ? null : d.rcopen; render(); }
+  else if(d.rcall){ const r = (S.trIn||[]).find(x=>x.id===d.rcall); if(!r) return; S.trc[r.id] = {}; r.items.forEach(i=>S.trc[r.id][i.product_id]=i.qty); render(); }
+  else if(d.rcok){ const r = (S.trIn||[]).find(x=>x.id===d.rcok); if(!r) return; const C = S.trc[r.id] || {};
     const miss = r.items.filter(i=>C[i.product_id]==null||C[i.product_id]==='').length; if(miss) return toast(`Впишите, сколько пришло, по всем товарам (осталось ${miss}) или нажмите «Всё сходится»`);
     t.disabled = true; const { data, error } = await sb.rpc('receipt_confirm', { p_id:r.id, p_items:r.items.map(i=>({ product_id:i.product_id, counted:+C[i.product_id] })) });
     if(error){ t.disabled = false; return toast(errText(error)); }
     const diff = (data&&data.diff)||[]; toast(diff.length ? `Принято с расхождениями: ${diff.length} поз. — владелец увидит в приёмке` : 'Приёмка подтверждена, товар на остатках');
     delete S.trc[r.id]; S.trOpen = null; await loadWhSide(); render(); }
 });
-document.addEventListener('change', e => { const t = e.target; if(S.view!=='wh' || !t.dataset || !t.dataset.trc) return; const [rid, pid] = t.dataset.trc.split(':'); S.trc = S.trc || {}; S.trc[rid] = S.trc[rid] || {}; S.trc[rid][pid] = t.value===''?null:+t.value; render(); });
+document.addEventListener('change', e => { const t = e.target; if(S.view!=='wh' || !t.dataset || !t.dataset.rcc) return; const [rid, pid] = t.dataset.rcc.split(':'); S.trc = S.trc || {}; S.trc[rid] = S.trc[rid] || {}; S.trc[rid][pid] = t.value===''?null:+t.value; render(); });
 
 /* ---------- «Требует внимания»: всё, что ждёт действия, на одном экране ---------- */
 async function loadAttn(){ const { data, error } = await sb.rpc('attention'); if(error) toast(errText(error)); S.attn = data || {}; }
@@ -1801,7 +1818,7 @@ function renderAttn(){
   if(A.transfers_old) add('bad', `Перемещения в пути дольше 3 дней: ${A.transfers_old}`, 'Отправлены, но не приняты в магазине-получателе.', 'wh', 'К перемещениям');
   if(A.writeoffs) add('warn', `Списания ждут решения: ${A.writeoffs}`, '', 'wh', 'К списаниям');
   if(A.requests) add('warn', `Запросы на оприходование: ${A.requests}`, 'Продавцы просят поставить товар на остаток.', 'wh', 'К запросам');
-  if(A.noprice) add('bad', `Товары в наличии без розничной цены: ${A.noprice}`, 'Касса не продаст товар с ценой 0 — поставьте цену в «Номенклатуре» (фильтр «без розничной цены»).', 'nom', 'Поставить цены');
+  if(A.noprice) add('bad', `Товары в наличии без розничной цены: ${A.noprice}`, 'Касса не продаст товар с ценой 0. Найдите их в «Номенклатуре» и поставьте цену: '+(A.noprice_names||[]).map(esc).join(', '), 'nom', 'Номенклатура');
   const W = (A.wipon||[]).filter(w => dayOf(w.sales)!==today);
   if(W.length) add('warn', `Продажи из Wipon сегодня не загружены: ${W.length} маг.`, W.map(w=>esc(storeName(w.store_id))+' — '+ago(w.sales)).join(' · '), 'sales', 'Загрузить продажи');
   if(A.cons_nophone) add('warn', `Консультанты без телефона: ${A.cons_nophone}`, 'Без телефона консультант не сможет пользоваться ботом смен и зарплаты.', 'cons', 'Вписать телефоны');
@@ -1817,7 +1834,7 @@ function renderAttn(){
 }
 document.addEventListener('click', async e => { if(S.view!=='attn') return; const t = e.target.closest('button'); if(!t) return;
   if(t.id==='attn-ref'){ S.attn = null; render(); await loadAttn(); render(); }
-  else if(t.dataset.attngo){ const v = t.dataset.attngo; if(!(S.tabs||[]).some(x=>x[0]===v)) return toast('У вас нет доступа к этой вкладке'); if(v==='nom'){ S.nm = S.nm || {}; S.nm.noprice = true; } S.view = v; render(); scrollTo(0,0); await loadView(); }
+  else if(t.dataset.attngo){ const v = t.dataset.attngo; if(!(S.tabs||[]).some(x=>x[0]===v)) return toast('У вас нет доступа к этой вкладке'); S.view = v; render(); scrollTo(0,0); await loadView(); }
 });
 
 function loadScriptOnce(src){ return new Promise((ok,no)=>{ if(document.querySelector(`script[src="${src}"]`)) return ok(); const el=document.createElement('script'); el.src=src; el.onload=ok; el.onerror=no; document.head.appendChild(el); }); }
@@ -2424,7 +2441,6 @@ document.addEventListener('change', async e => {
   if(t.id==='bk-sort'){ BK.sort=t.value; BK.off=0; render(); await loadBonus(); render(); }
   if(t.id==='cf-store'){ S.cf.store=t.value; await loadCerts(); render(); }
   if(t.id==='nm-cat'){ S.nm.cat=t.value; S.nm.off=0; render(); await loadNom(); render(); }
-  if(t.id==='nm-noprice'){ S.nm.noprice=t.checked; S.nm.off=0; render(); await loadNom(); render(); }
   if(t.id==='nm-arch'){ S.nm.arch=t.checked; S.nm.off=0; render(); await loadNom(); render(); }
   if(t.id==='nm-photo'){ nmPhoto(t.files[0]); }
   if(d.nf && (t.type==='checkbox' || t.tagName==='SELECT')){ S.nm.ed[d.nf] = t.type==='checkbox' ? t.checked : t.value; }
