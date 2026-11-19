@@ -1232,7 +1232,7 @@ async function loadNom(){
   const f = S.nm; f.data = null;
   if(!f.cats){ const { data } = await sb.from('categories').select('id,name').order('name'); f.cats = data || []; }
   sb.rpc('po_incoming').then(({data}) => { S.inc = data || {}; });
-  const { data, error } = await sb.rpc('product_list', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:50 });
+  const { data, error } = await sb.rpc('product_list2', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:50, p_sort:f.sort||null, p_desc:!!f.desc });
   if(error){ toast(errText(error)); f.data = { rows:[], total:0 }; } else f.data = data;
 }
 function renderNom(){
@@ -1243,7 +1243,7 @@ function renderNom(){
       <select id="nm-cat"><option value="">Все категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
       <label class="meta" style="align-self:center"><input type="checkbox" id="nm-arch" ${f.arch?'checked':''}> архив</label></div>
     ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}. Нажмите на название, чтобы открыть карточку.</p>
-    <div class="scroll"><table class="nm-table"><thead><tr><th></th><th>Название</th><th>Категория</th><th>Штрихкод</th><th>Закуп</th><th>Цена</th><th>Остаток</th><th>Сайт</th></tr></thead><tbody>
+    <div class="scroll"><table class="nm-table"><thead><tr><th></th>${[['name','Название'],['category','Категория'],['barcode','Штрихкод'],['cost','Закуп'],['price','Цена'],['stock','Остаток'],['site','Сайт']].map(([k,v])=>`<th><button data-nmsort="${k}" style="border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;white-space:nowrap" title="Сортировать">${v} ${f.sort===k?(f.desc?'▼':'▲'):'<span class="meta">↕</span>'}</button></th>`).join('')}</tr></thead><tbody>
     ${D.rows.map(p=>{ const inc = (S.inc||{})[p.id], L = (p.sites||[]).filter(x=>x.url);
       return `<tr style="${e&&e.id===p.id?'background:var(--soft)':''}"><td>${thumb(p)}</td>
       <td style="min-width:200px"><button class="linkbtn" data-nmopen="${p.id}" style="border:0;background:none;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit"><b>${esc(p.name)}</b></button>${p.is_group?' <span class="chip">общий штрихкод</span>':''}<br><span class="meta">${esc([{moon:'MOON',sunshine:'Sunshine',both:'MOON и Sunshine'}[p.brand]||'', p.color, p.material].filter(Boolean).join(' · '))}</span></td>
@@ -1337,7 +1337,7 @@ async function nmPhoto(file){
 }
 
 /* ---------- сайт ↔ база ---------- */
-const SITE_ST = [['review','Проверить'],['auto','Связано автоматически'],['confirmed','Подтверждено'],['none','Без пары'],['rejected','Нет в базе']];
+const SITE_ST = [['review','Проверить'],['auto','Связано автоматически'],['confirmed','Подтверждено'],['none','Без пары'],['rejected','Нет на сайте']];
 const SITE_NAME = { moon:'mooncollection.kz', sunshine:'sunshinejewelry.kz' };
 async function loadSite(){
   const f = S.st; f.data = null;
@@ -1368,7 +1368,7 @@ function renderSite(){
       <div class="row" style="justify-content:flex-end;flex-wrap:wrap;margin-top:8px">
         ${r.product_id&&r.status!=='confirmed'?`<button class="btn small primary" data-stok="${key}" data-pid="${r.product_id}">Верно</button>`:''}
         <button class="btn small" data-stopen="${key}">${open?'Скрыть':'Выбрать другой товар'}</button>
-        ${r.status!=='rejected'?`<button class="btn small" data-stno="${key}">Нет в базе</button>`:''}
+        ${r.status!=='rejected'?`<button class="btn small" data-stno="${key}">Нет на сайте</button>`:''}
       </div>
       ${open?`<div class="cust stack" style="margin-top:8px">
         <span class="label">Похожие товары в базе</span>
@@ -1384,7 +1384,7 @@ async function siteSet(key, pid, status){
   const [site, uid] = key.split(':');
   const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product:pid||null, p_status:status });
   if(error) return toast(errText(error));
-  toast(status==='confirmed'?'Связь подтверждена':'Отмечено: нет в базе');
+  toast(status==='confirmed'?'Связь подтверждена':'Отмечено: нет на сайте');
   S.st.open=null; S.st.cands=null; await loadSite(); render();
 }
 
@@ -1868,6 +1868,7 @@ document.addEventListener('click', async e => {
   else if(d.sgroup){ const g=d.sgroup; S.sel = S.stores.filter(st => g==='all' || st.brand===g || st.city===g).map(st=>st.id); onSelChange(); }
   else if(d.sone){ const id=+d.sone; selStores(); S.sel = t.checked ? [...new Set([...S.sel, id])] : S.sel.filter(x=>x!==id); if(!S.sel.length) S.sel=[id]; onSelChange(); }
   else if(t.id==='nm-new'){ nmOpen({}); }
+  else if(d.nmsort){ const f = S.nm, k = d.nmsort; if(f.sort===k) f.desc = !f.desc; else { f.sort = k; f.desc = ['cost','price','stock','site'].includes(k); } f.off = 0; render(); await loadNom(); render(); }
   else if(t.id==='nm-close'){ S.nm.ed=null; render(); }
   else if(t.id==='nm-save'){ t.disabled=true; await nmSave(); }
   else if(d.nmopen){ const p=(S.nm.data&&S.nm.data.rows||[]).find(r=>r.id===d.nmopen); if(p) nmOpen(p); }
