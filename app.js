@@ -444,6 +444,11 @@ function showReceipt(s, number, offline){
 /* ---------- чеки и возвраты ---------- */
 async function loadSales(){
   if(!navigator.onLine) return;
+  { const qq = S.salesQ.trim(); const num = /^\d+$/.test(qq) ? +qq : null;
+    const { data, error } = await sb.rpc('sales_list', { p_stores: selStores(), p_number: num, p_limit: 200 });
+    if(error) return toast(errText(error)); S.sales = data || [];
+    if(qq && !/^\d+$/.test(qq)){ const p = normPhone(qq); S.sales = S.sales.filter(s => (p && s.customers && s.customers.phone===p) || s.sale_items.some(i=>i.products&&(i.products.name||'').toLowerCase().includes(qq.toLowerCase()))); }
+    return; }
   let q = sb.from('sales').select('id,number,kind,created_at,total,store_id,original_sale_id,is_certificate_sale,note,customers(phone,name),employees(full_name),sale_items(product_id,qty,price,discount,total,products(name,barcode)),sale_payments(method,amount,certificate_code)')
     .in('store_id', selStores()).order('created_at',{ascending:false}).limit(200);
   const qq = S.salesQ.trim();
@@ -457,7 +462,7 @@ function returnedQty(saleId){
   const m = {}; S.sales.filter(s=>s.original_sale_id===saleId).forEach(s=>s.sale_items.forEach(i=>m[i.product_id]=(m[i.product_id]||0)+i.qty)); return m;
 }
 function renderSales(){
-  $('#main').innerHTML = `<h2>Чеки и возвраты</h2>${storeFilterHtml()}
+  $('#main').innerHTML = `<h2>Чеки и возвраты</h2>${wiponUpHtml('sales')}${storeFilterHtml()}
     <div class="filters"><input id="sq" style="flex:1" placeholder="Номер чека, телефон клиента или товар" value="${esc(S.salesQ)}"><button class="btn" id="sq-go">Найти</button></div>
     ${S.sales.length?`<div class="scroll"><table><thead><tr><th>№</th><th>Когда</th>${isBoss()?'<th>Магазин</th>':''}<th>Товары</th><th>Сумма</th><th>Оплата</th><th>Клиент</th><th></th></tr></thead><tbody>
     ${S.sales.map(s=>`<tr><td class="num">${s.number}${s.kind==='return'?' <span class="chip zero">возврат</span>':''}</td>
@@ -510,7 +515,7 @@ function renderStock(){
   const act = key => String(S.stockSort)===String(key);
   const arrow = key => !act(key) ? '↕' : key==='name' ? (S.stockDir==='asc'?'Я→А':'А→Я') : (S.stockDir==='asc'?'↑':'↓');
   const th = (key, label) => `<th><button class="btn small" data-ssort="${key}" style="${act(key)?'background:var(--ink);color:var(--surface)':''}">${label} ${arrow(key)}</button></th>`;
-  $('#main').innerHTML = `<h2>Остатки по магазинам</h2>
+  $('#main').innerHTML = `<h2>Остатки по магазинам</h2>${wiponUpHtml('stock')}
     <div class="filters"><input id="stq" style="flex:1;min-width:200px" placeholder="Название, штрихкод или артикул" value="${esc(S.stockQ)}">
       ${(()=>{ const o=S.fopts||{categories:[],materials:[],colors:[]}, f=S.stockF||{}; const sel=(k,ph,items)=>`<select data-stf="${k}" aria-label="${ph}"><option value="">${ph}</option>${items.map(([v,t])=>`<option value="${esc(v)}" ${String(f[k]||'')===String(v)?'selected':''}>${esc(t)}</option>`).join('')}</select>`;
         return sel('category','Все категории',(o.categories||[]).map(c=>[c.id,c.name])) + sel('material','Все материалы',(o.materials||[]).map(m=>[m,m])) + sel('color','Все цвета',(o.colors||[]).map(m=>[m,m]))
@@ -1391,7 +1396,8 @@ function siteBaseOnlyHtml(f){
   ${!f.data?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Здесь пусто</div>':`<div class="scroll"><table><thead><tr><th></th><th>Товар</th><th>Категория</th><th>Штрихкод</th><th>Цена</th><th>Остаток</th><th></th></tr></thead><tbody>
   ${L.map(p=>`<tr><td>${thumb(p)}</td><td><b>${esc(p.name)}</b>${p.is_group?' <span class="chip">общий штрихкод</span>':''}</td><td>${esc(p.category||'—')}</td><td class="num">${esc(p.barcode)}</td><td class="num">${fmt(p.price)}</td>
     <td class="num">${p.stock>0?'<span class="chip ok">'+p.stock+'</span>':'<span class="meta">0</span>'}</td>
-    <td>${isBoss()&&!isViewer()?`<button class="btn small" data-stbfind="${p.id}">${f.bfind===p.id?'Скрыть':'Найти на сайте'}</button>`:''}</td></tr>
+    <td style="white-space:nowrap">${wiponOk()&&!isViewer()?`<button class="btn small" data-stbfind="${p.id}">${f.bfind===p.id?'Скрыть':'Найти на сайте'}</button>
+      ${p.is_group?`<button class="btn small" data-stbgrp="${p.id}" data-on="0" title="Снять отметку">✓ общий штрихкод</button>`:`<button class="btn small" data-stbgrp="${p.id}" data-on="1" title="Под этим штрихкодом много разных изделий одной цены">Отметить как общий штрихкод</button>`}`:''}</td></tr>
     ${f.bfind===p.id?`<tr><td></td><td colspan="6"><div class="cust stack" style="gap:4px"><input id="st-bq" placeholder="Название карточки на сайте" value="${esc(f.bq||'')}" autocomplete="off">
       ${(f.bfound||[]).filter(x=>x.site===f.site).map(x=>`<button class="prod" data-stblink="${x.site}:${x.uid}" data-pid="${p.id}">${thumb({photo_url:x.photo})}<span><b>${esc(x.title)}</b><br><span class="meta">${x.linked_to?'сейчас связан с: '+esc(x.linked_to):'не связан'}</span></span><span class="price num">${fmt(x.price)}</span></button>`).join('')}</div></td></tr>`:''}`).join('')}</tbody></table></div>
   ${f.off||L.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-stpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+L.length} из ${f.baseTotal}</span><button class="btn" data-stpage="1" ${L.length===50?'':'disabled'}>Дальше</button></div>`:''}`}`;
@@ -1404,6 +1410,8 @@ document.addEventListener('click', async e => {
     const { data } = await sb.rpc('site_candidates', { p_site:site, p_uid:+uid }); const G = (data||[]).filter(c=>c.grp); t.disabled = false;
     if(G.length===1){ const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product:G[0].product_id, p_status:'confirmed' }); if(error) return toast(errText(error)); toast('Связано с «'+G[0].name+'»'); await loadSite(); render(); }
     else { f.open = d.stgrp; f.cands = data||[]; f.cq = ''; f.cfound = []; render(); toast(G.length ? 'Подходит несколько общих штрихкодов — выберите нужный' : 'Общего штрихкода с такой ценой нет — выберите товар вручную'); } }
+  else if(d.stbgrp){ t.disabled = true; const on = d.on==='1'; const { data, error } = await sb.rpc('product_mark_group', { p_id:d.stbgrp, p_on:on }); if(error){ t.disabled = false; return toast(errText(error)); }
+    toast(on ? (data.linked ? `Отмечен как общий штрихкод и сразу связан с ${data.linked} карточками сайта той же цены` : 'Отмечен как общий штрихкод. Карточек сайта с такой же ценой и типом пока не нашлось') : 'Отметка снята'); await loadSite(); render(); }
   else if(d.stblink){ const [site, uid] = d.stblink.split(':'); const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product:d.pid, p_status:'confirmed' });
     if(error) return toast(errText(error)); toast('Связано с карточкой сайта'); f.bfind = null; await loadSite(); render(); }
 });
@@ -1498,6 +1506,77 @@ async function loadBonus(){
 }
 async function openBonusClient(id){ BK.cur = id; BK.card = null; render(); const { data, error } = await sb.rpc('bonus_client', { p_customer:id, p_brand:BK.brand }); if(error) toast(errText(error)); BK.card = data; render(); }
 const dshort = d => d ? new Date(d).toLocaleDateString('ru-RU') : '—';
+/* ---------- загрузка выгрузок Wipon: продажи и остатки ---------- */
+const WU = { store:null, msg:'' };
+const wiponOk = () => S.me && (['owner','manager','purchaser'].includes(S.me.role));
+function wiponUpHtml(kind){
+  if(!wiponOk()) return '';
+  const st = WU.store || S.store;
+  return `<details class="card" style="margin-bottom:10px" ${WU.open===kind?'open':''} data-wuopen="${kind}"><summary><b>⬆ ${kind==='sales'?'Загрузить продажи из Wipon':'Обновить остатки из Wipon'}</b> <span class="meta">— Excel-выгрузка, по одному магазину</span></summary>
+    <div class="stack" style="margin-top:8px">
+      <span class="meta">${kind==='sales'?'Выгрузите продажи магазина из Wipon за любой период и загрузите файл. Чеки, которые уже есть в Silver, пропустятся — добавятся только новые, ничего не задвоится.':'Выгрузите остатки магазина из Wipon и загрузите файл. Остатки этого магазина в Silver станут такими же, как в файле. Новые штрихкоды добавятся в базу товаров.'}</span>
+      <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px">
+        <select id="wu-store-${kind}">${S.allStores.map(x=>`<option value="${x.id}" ${x.id===st?'selected':''}>${esc(BRAND[x.brand]+' · '+x.city+', '+x.address)}</option>`).join('')}</select>
+        ${kind==='stock'?`<label class="meta"><input type="checkbox" id="wu-zero" checked> товары, которых нет в файле, обнулить</label>`:''}
+        <label class="btn small primary" style="cursor:pointer">Выбрать файл Excel<input type="file" id="wu-file-${kind}" accept=".xlsx,.xls,.csv" hidden></label></div>
+      ${WU.open===kind&&WU.msg?`<div class="cust">${WU.msg}</div>`:''}</div></details>`;
+}
+function wuNorm(h){ return String(h==null?'':h).toLowerCase().replace(/\s+/g,' ').trim(); }
+function wuCol(H, tests, not){ for(const t of tests){ const i = H.findIndex(h => (typeof t==='function' ? t(h) : h.includes(t)) && !(not||[]).some(n=>h.includes(n))); if(i>=0) return i; } return -1; }
+function wuDate(v){ if(v instanceof Date){ const p = n => String(n).padStart(2,'0'); return `${v.getFullYear()}-${p(v.getMonth()+1)}-${p(v.getDate())} ${p(v.getHours())}:${p(v.getMinutes())}:${p(v.getSeconds())}`; }
+  const m = String(v||'').trim().match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})[ ,T]*(\d{1,2})?:?(\d{2})?:?(\d{2})?/); if(m){ const y = m[3].length===2 ? '20'+m[3] : m[3]; return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')} ${(m[4]||'00').padStart(2,'0')}:${m[5]||'00'}:${m[6]||'00'}`; }
+  const m2 = String(v||'').trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):?(\d{2})?/); if(m2) return `${m2[1]}-${m2[2]}-${m2[3]} ${m2[4]}:${m2[5]}:${m2[6]||'00'}`; return null; }
+const wuNum = v => typeof v==='number' ? v : +String(v??'').replace(/\s/g,'').replace(',','.').replace(/[^\d.\-]/g,'') || 0;
+async function wuRead(file){
+  await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+  const wb = XLSX.read(await file.arrayBuffer(), { type:'array', cellDates:true });
+  const A = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, raw:true, defval:null });
+  const hi = A.slice(0, 25).findIndex(r => (r||[]).some(c => /штрих/.test(wuNorm(c))));
+  if(hi < 0) throw new Error('В файле не нашлась колонка со штрихкодом — это точно выгрузка из Wipon?');
+  return { H: A[hi].map(wuNorm), rows: A.slice(hi+1).filter(r => r && r.some(c => c!=null && c!=='')) };
+}
+async function wuImport(kind, file){
+  const store = +$('#wu-store-'+kind).value, zero = !!($('#wu-zero')||{}).checked; WU.store = store; WU.open = kind; WU.msg = 'Читаем файл…'; render();
+  try{
+    const { H, rows } = await wuRead(file), name = c => c>=0 ? H[c] : '—';
+    if(kind==='sales'){
+      const K = { no: wuCol(H, [h=>/продаж/.test(h)&&/(номер|№|id)/.test(h), h=>/чек/.test(h)&&/(номер|№)/.test(h), 'номер', '№'], ['фиск']), emp: wuCol(H, ['продавец','сотрудник','кассир']),
+        at: wuCol(H, ['дата']), pay: wuCol(H, ['оплат']), nm: wuCol(H, ['наимен','товар','назван'], ['штрих','катег','колич']), cat: wuCol(H, ['категор']), bc: wuCol(H, ['штрих']),
+        qty: wuCol(H, ['колич','кол-во','кол.'], ['сумм']), total: wuCol(H, ['сумма','итого','стоимость'], ['скид','себест']), ret: wuCol(H, ['возврат']) };
+      if(K.no<0 || K.at<0 || K.bc<0 || K.total<0) throw new Error(`Не нашлись нужные колонки (номер продажи: ${name(K.no)}, дата: ${name(K.at)}, штрихкод: ${name(K.bc)}, сумма: ${name(K.total)}). Пришлите файл в чат — я подстрою загрузку.`);
+      const R = rows.map(r => ({ no: String(r[K.no]??'').replace(/\D/g,''), emp: K.emp>=0 ? r[K.emp] : null, at: wuDate(r[K.at]), pay: K.pay>=0 ? String(r[K.pay]??'') : '', name: K.nm>=0 ? r[K.nm] : null,
+        cat: K.cat>=0 ? r[K.cat] : null, bc: String(r[K.bc]??'').trim(), qty: K.qty>=0 ? wuNum(r[K.qty]) || 1 : 1, total: wuNum(r[K.total]), ret: K.ret>=0 ? /^(да|yes|true|1)$/i.test(String(r[K.ret]??'').trim()) : false }))
+        .filter(r => r.no && r.at);
+      if(!R.length) throw new Error('В файле нет строк продаж');
+      const nos = [...new Set(R.map(r=>r.no))], dates = R.map(r=>r.at).sort();
+      WU.msg = `Нашли ${nos.length} чеков (${R.length} строк) за ${dates[0].slice(0,10)} — ${dates[dates.length-1].slice(0,10)}. Загружаем…`; render();
+      const tot = { new:0, skipped:0, returns:0, new_products:0 };
+      for(let i=0; i<nos.length; i+=400){
+        const part = new Set(nos.slice(i, i+400)), { data, error } = await sb.rpc('wipon_sales_import', { p_store:store, p_rows: R.filter(r=>part.has(r.no)) });
+        if(error) throw error; for(const k in tot) tot[k] += +(data||{})[k]||0;
+        WU.msg = `Загружаем… ${Math.min(i+400, nos.length)} из ${nos.length} чеков`; render();
+      }
+      WU.msg = `✅ Готово · ${esc(storeName(store))}: новых чеков ${tot.new}${tot.returns?', из них с возвратом '+tot.returns:''}; уже были в Silver и пропущены — ${tot.skipped}.${tot.new_products?` Новых товаров добавлено в базу: ${tot.new_products} (проверьте их в «Номенклатуре»).`:''}`;
+      if(S.view==='sales'){ await loadSales(); }
+    } else {
+      const K = { bc: wuCol(H, ['штрих']), nm: wuCol(H, ['наимен','товар','назван'], ['штрих','катег']), qty: wuCol(H, ['остат','колич','кол-во'], ['сумм','стоим']),
+        cost: wuCol(H, ['себестоим','закуп']), price: wuCol(H, ['розн','цена прод','цена'], ['закуп','себест']), cat: wuCol(H, ['категор']) };
+      if(K.bc<0 || K.qty<0) throw new Error(`Не нашлись колонки штрихкода или остатка (штрихкод: ${name(K.bc)}, остаток: ${name(K.qty)}). Пришлите файл в чат — я подстрою загрузку.`);
+      const R = rows.map(r => ({ bc: String(r[K.bc]??'').trim(), name: K.nm>=0 ? r[K.nm] : null, qty: wuNum(r[K.qty]), cost: K.cost>=0 ? wuNum(r[K.cost]) || null : null, price: K.price>=0 ? wuNum(r[K.price]) || null : null, cat: K.cat>=0 ? r[K.cat] : null }))
+        .filter(r => r.bc);
+      if(!R.length) throw new Error('В файле нет строк с товарами');
+      WU.msg = `Нашли ${R.length} позиций, ${R.reduce((a,r)=>a+r.qty,0)} шт. Обновляем остатки…`; render();
+      const { data, error } = await sb.rpc('wipon_stock_import', { p_store:store, p_rows:R, p_zero_missing: zero });
+      if(error) throw error;
+      WU.msg = `✅ Остатки обновлены · ${esc(storeName(store))}: позиций в файле ${data.positions} (${data.units} шт.), изменилось ${data.changed}${data.zeroed?', обнулено отсутствующих в файле '+data.zeroed:''}.${data.new_products?` Новых товаров добавлено в базу: ${data.new_products}.`:''}`;
+      if(S.view==='stock'){ await loadStockView(); }
+    }
+  }catch(e){ WU.msg = '❌ '+esc(errText(e)); }
+  render();
+}
+document.addEventListener('change', e => { const m = (e.target.id||'').match(/^wu-file-(sales|stock)$/); if(m && e.target.files[0]){ const f = e.target.files[0]; e.target.value=''; wuImport(m[1], f); }
+  const s2 = (e.target.id||'').match(/^wu-store-/); if(s2) WU.store = +e.target.value; });
+document.addEventListener('toggle', e => { const d = e.target; if(d.dataset && d.dataset.wuopen){ WU.open = d.open ? d.dataset.wuopen : (WU.open===d.dataset.wuopen ? null : WU.open); } }, true);
 function loadScriptOnce(src){ return new Promise((ok,no)=>{ if(document.querySelector(`script[src="${src}"]`)) return ok(); const el=document.createElement('script'); el.src=src; el.onload=ok; el.onerror=no; document.head.appendChild(el); }); }
 async function sagiImport(file){
   const brand = BK.brand; BK.imp = 'Читаем файл…'; render();
