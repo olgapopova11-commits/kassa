@@ -52,6 +52,7 @@ async function onSelChange(){
   if(S.view==='cash') await loadCash();
   if(S.view==='pay') await loadPay();
   if(S.view==='profit') await loadProfit();
+  if(S.view==='flow') await loadFlow();
   render();
 }
 function normPhone(v){ let d=String(v||'').replace(/\D/g,''); if(d.length===11&&(d[0]==='7'||d[0]==='8')) d=d.slice(1); if(d.length===10) return '+7'+d; return null; }
@@ -225,6 +226,7 @@ function renderShell(){
   if(['owner','manager','purchaser','viewer','accountant'].includes(S.me.role)) tabs.push(['po','Закуп']);
   if(tabs.length && !tabs.some(([v]) => v===S.view)) S.view = tabs[0][0];
   tabs.push(['promo','Акции']);
+  if(isBoss()) tabs.push(['flow','Путь товара']);
   if(S.me.role==='owner') tabs.push(['adm','Административный штат']);
   if(!['owner','viewer','accountant'].includes(S.me.role)) tabs.push(['me','Мой кабинет']);
   if(isViewer()){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pos' && (v!=='emps' || S.me.role==='accountant'))); if(!S.view || S.view==='pos' || (S.view==='emps' && S.me.role!=='accountant')) S.view = 'analytics'; }
@@ -235,7 +237,7 @@ function renderShell(){
   renderHeader();
 }
 // вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
-const GROUPS = [['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['stock','wh','po','nom','site']],
+const GROUPS = [['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['flow','stock','wh','po','nom','site']],
   ['clients','💳','Клиенты',['promo','bonus','certs']],['analytics','📈','Аналитика',['analytics','profit']],['team','👥','Сотрудники',['me','emps','pay','adm']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 function renderNav(){
@@ -266,7 +268,7 @@ function render(){
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -1888,6 +1890,7 @@ document.addEventListener('click', async e => {
   if(S.view==='promo'){ render(); await loadPromos(); render(); }
   if(S.view==='me'){ render(); await loadMe(); render(); }
   if(S.view==='adm'){ render(); await loadAdm(); render(); }
+  if(S.view==='flow'){ render(); await loadFlow(); render(); }
   if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); }
   if(S.view==='stock' && !S.stockRows.length){ await loadStockView(); render(); }
   if(S.view==='site'){ render(); await loadSite(); render(); }
@@ -2072,4 +2075,55 @@ document.addEventListener('change', async e => {
   a[k] = t.type==='checkbox' ? t.checked : t.value;
   const { error } = await sb.rpc('admin_pay_save', { p:{ ...a } }); if(error){ toast(errText(error)); return; }
   render();
+});
+
+
+/* ---------- путь товара: инфографика цепочки и что где застряло ---------- */
+const FL = { days:30, data:null };
+async function loadFlow(){ FL.data = null; const { data, error } = await sb.rpc('product_flow', { p_days:FL.days, p_stores:selStores() }); if(error) toast(errText(error)); FL.data = data || null; }
+const nf = n => Math.round(+n||0).toLocaleString('ru-RU');
+function flowIdeas(D){
+  const I = [], pct = (a,b) => b ? Math.round(a/b*100) : 0, inst = D.instock.pos || 0;
+  if(!D.ordered.pos && !D.transit.pos) I.push(['warn','Закупы не заведены в Silver','Заказы поставщикам пока не видны — не видно, что едет и когда придёт.','Заводите каждый заказ во вкладке «Закуп»: тогда здесь будет видно товар в пути, а приёмка подтянет его в один клик.','po']);
+  if(!D.received.pos) I.push(['warn',`Нет приёмок в Silver за ${D.days} дней`,'Новые поступления проходят мимо программы, поэтому не видно, какие новинки ещё не сфотографированы и не на сайте.','Проводите приёмку новых товаров во вкладке «Склад» — после этого они сразу попадут в этот контроль.','wh']);
+  if((D.hot_no_site||[]).length) I.push(['bad','Продаются, но нет на сайте',`${(D.hot_no_site||[]).length} ходовых товаров за ${D.days} дней не найдены на сайтах — теряем онлайн-заказы.`,'Добавить их на сайт в первую очередь (список ниже). Позже — автоматически из карточки товара.','site']);
+  if(D.photo.no) I.push([pct(D.photo.no,inst)>30?'bad':'warn','Нет фото',`${nf(D.photo.no)} из ${nf(inst)} позиций в наличии (${pct(D.photo.no,inst)}%) без фото.`,'Начать с ходовых и с залежавшихся дорогих — им фото нужнее всего. Следующий этап: загрузка фото с линейкой и красивое фото для сайта через ИИ.','nom']);
+  if(D.card.no) I.push(['warn','Карточка не заполнена',`${nf(D.card.no)} позиций без категории или материала — их не найти фильтром и не проанализировать.`,'Дозаполнить в «Номенклатуре». Следующий этап: ИИ сам предложит категорию и характеристики по фото.','nom']);
+  if(D.stale.pos) I.push(['bad','Залежи 90+ дней',`${nf(D.stale.pos)} позиций (${nf(D.stale.units)} шт.) не продавались 90 дней — это ${fmt(D.stale.retail)} в рознице. Из них ${nf(D.stale.no_photo)} без фото и ${nf(D.stale.no_site)} не на сайте.`,'Идеи: 1) перевести в магазин, где такой товар продаётся; 2) сделать подборку «последний шанс» в сторис; 3) акция в «Акциях» — подарок или −20% к чеку; 4) сфотографировать и выложить на сайт — часть не продаётся просто потому, что её не видно.','analytics']);
+  return I;
+}
+function renderFlow(){
+  const D = FL.data;
+  const step = (ico, t, main, sub, state, soon) => `<div class="fl-step ${soon?'soon':state||''}"><div class="fl-ico">${ico}</div><b>${t}</b><div class="fl-num">${main}</div><div class="meta">${sub}</div>${soon?'<span class="chip">скоро</span>':''}</div>`;
+  const bar = (ok, no) => { const p = ok+no ? Math.round(ok/(ok+no)*100) : 0; return `<div class="fl-bar"><span style="width:${p}%"></span></div><div class="meta">${p}% готово · не хватает у ${nf(no)}</div>`; };
+  const st = (ok,no) => { const p = ok+no ? ok/(ok+no) : 1; return p>=.85?'ok':p>=.5?'warn':'bad'; };
+  const list = (L, cols) => `<div class="list" style="margin-top:6px">${L.map(p=>`<div class="prod" style="grid-template-columns:44px minmax(0,1fr) auto">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode||'')} · в наличии ${nf(p.qty)}${p.units?' · продано '+nf(p.units):''}</span><br>${p.no_photo?'<span class="chip zero">нет фото</span>':''}${p.no_card?'<span class="chip warn">карточка</span>':''}${p.no_site?'<span class="chip warn">нет на сайте</span>':''}</span><span class="price num">${cols==='retail'?fmt(p.retail):fmt(p.price)}</span></div>`).join('')}</div>`;
+  $('#main').innerHTML = `<div class="row"><h2>Путь товара</h2><div class="seg">${[30,90].map(d=>`<button data-fldays="${d}" aria-pressed="${FL.days===d}">${d} дней</button>`).join('')}</div></div>
+  ${storeFilterHtml()}
+  ${!D?'<div class="empty">Считаем…</div>':`
+  <div class="fl-chain">
+    ${step('🧾','Заказано', nf(D.ordered.units)+' шт.', nf(D.ordered.pos)+' позиций у поставщиков', D.ordered.pos?'ok':'warn')}
+    ${step('🚚','В пути', nf(D.transit.units)+' шт.', nf(D.transit.pos)+' позиций', D.transit.pos?'ok':'warn')}
+    ${step('📥','Принято', nf(D.received.units)+' шт.', `${nf(D.received.pos)} позиций за ${D.days} дней`, D.received.pos?'ok':'warn')}
+    ${step('📷','Фото', nf(D.photo.ok), bar(D.photo.ok, D.photo.no), st(D.photo.ok, D.photo.no))}
+    ${step('🏷','Карточка', nf(D.card.ok), bar(D.card.ok, D.card.no), st(D.card.ok, D.card.no))}
+    ${step('🌐','На сайте', nf(D.site.ok), bar(D.site.ok, D.site.no), st(D.site.ok, D.site.no))}
+    ${step('📣','Посты и контент-план','—','публикации в Instagram по плану на 2 недели','',true)}
+    ${step('💰','Продано', nf(D.sold.units)+' шт.', `${nf(D.sold.checks)} чеков за ${D.days} дней`, 'ok')}
+    ${step('🕸','Залежи 90+ дней', nf(D.stale.pos)+' поз.', fmt(D.stale.retail)+' в рознице', D.stale.pos?'bad':'ok')}
+  </div>
+  <p class="meta">В наличии сейчас ${nf(D.instock.pos)} позиций, ${nf(D.instock.units)} шт. на ${fmt(D.instock.retail)}. Фото, карточка и сайт считаются по товарам в наличии.</p>
+  <h2 style="margin-top:18px">Где застряло и что сделать</h2>
+  <div class="stack">${flowIdeas(D).map(([lvl,t,why,todo,go])=>`<div class="card fl-idea ${lvl}"><b>${lvl==='bad'?'🔴':'🟡'} ${t}</b><div>${why}</div><div class="meta">💡 ${todo}</div>${(S.tabs||[]).some(x=>x[0]===go)?`<button class="btn small" data-flgo="${go}" style="align-self:flex-start">Открыть «${(S.tabs.find(x=>x[0]===go)||[])[1]}»</button>`:''}</div>`).join('') || '<div class="empty">Ничего не застряло 👍</div>'}</div>
+  <div class="grid2" style="margin-top:14px">
+    <div><h3>🔥 Продаются, но нет на сайте</h3>${(D.hot_no_site||[]).length?list(D.hot_no_site):'<div class="meta">Нет</div>'}</div>
+    <div><h3>🕸 Самые дорогие залежи</h3>${(D.stale_top||[]).length?list(D.stale_top,'retail'):'<div class="meta">Нет</div>'}</div>
+  </div>
+  ${(D.new_not_ready||[]).length?`<h3 style="margin-top:14px">📥 Новые поступления, которые ещё не готовы к продаже онлайн</h3>${list(D.new_not_ready)}`:''}`}`;
+}
+document.addEventListener('click', async e => {
+  if(S.view!=='flow') return; const t = e.target.closest('button'); if(!t) return;
+  if(t.dataset.fldays){ FL.days = +t.dataset.fldays; render(); await loadFlow(); render(); }
+  else if(t.dataset.flgo){ const b = document.querySelector(`nav button[data-view="${t.dataset.flgo}"]`); S.view = t.dataset.flgo; const g = groupOf(S.view); (S.lastView ||= {})[g[0]] = S.view; render(); scrollTo(0,0);
+    if(S.view==='po'){ await loadPo(); render(); } else if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); } else if(S.view==='site'){ await loadSite(); render(); } else if(S.view==='nom'){ await loadNom(); render(); } else if(S.view==='analytics'){ S.an=null; await loadAnalytics(); render(); } }
 });

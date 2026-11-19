@@ -140,3 +140,12 @@ details.dd .dd-panel label:hover{background:var(--bg)}
 .cheer{position:fixed;left:50%;top:22%;transform:translateX(-50%);z-index:61;background:var(--surface);color:var(--ink);border:2px solid #f2c94c;border-radius:16px;padding:18px 22px;box-shadow:0 12px 40px rgba(0,0,0,.25);display:flex;flex-direction:column;gap:6px;text-align:center;max-width:min(420px,90vw);animation:cheer-in .35s ease-out}
 .cheer b{font-size:24px}
 @keyframes cheer-in{from{transform:translate(-50%,20px) scale(.9);opacity:0}to{transform:translate(-50%,0) scale(1);opacity:1}}
+.fl-chain{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;counter-reset:fl;margin:10px 0}
+.fl-step{position:relative;border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--surface);display:flex;flex-direction:column;gap:4px;border-top:4px solid var(--line)}
+.fl-step.ok{border-top-color:var(--ok)}.fl-step.warn{border-top-color:#e2a400}.fl-step.bad{border-top-color:var(--bad)}
+.fl-step.soon{opacity:.6;border-style:dashed}
+.fl-step::before{counter-increment:fl;content:counter(fl);position:absolute;top:8px;right:10px;font-size:12px;color:var(--muted)}
+.fl-ico{font-size:22px;line-height:1}
+.fl-num{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.fl-bar{height:6px;border-radius:3px;background:var(--soft);overflow:hidden}.fl-bar span{display:block;height:100%;background:var(--ok)}
+.fl-idea{display:flex;flex-direction:column;gap:6px;border-left:4px solid #e2a400}.fl-idea.bad{border-left-color:var(--bad)}
