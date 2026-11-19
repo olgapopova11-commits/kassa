@@ -1245,7 +1245,7 @@ function renderNom(){
       <label class="meta" style="align-self:center"><input type="checkbox" id="nm-arch" ${f.arch?'checked':''}> архив</label></div>
     ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}</p>
     <div class="list">${D.rows.map(p=>`<div style="${e&&e.id===p.id?'background:var(--soft);':''}border-radius:10px"><button class="prod" data-nmopen="${p.id}" style="background:transparent">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta">${esc(nmInfo(p))}</span><br><span class="meta num">${esc(p.barcode)}${p.sku?' · арт. '+esc(p.sku):''} · остаток ${p.stock}${(S.inc||{})[p.id]?' · <b>заказано '+((S.inc[p.id].ordered||0)+(S.inc[p.id].transit||0))+'</b>'+(S.inc[p.id].transit?' (в пути '+S.inc[p.id].transit+')':''):''}</span>
-      ${p.is_basic?'<span class="chip">базовый</span>':''}</span><span class="price num">${fmt(p.price)}</span></button>${nmSiteLinks(p)}</div>`).join('') || '<div class="empty">Ничего не найдено</div>'}</div>
+      </span><span class="price num">${fmt(p.price)}</span></button>${nmSiteLinks(p)}</div>`).join('') || '<div class="empty">Ничего не найдено</div>'}</div>
     ${f.off||D.rows.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-nmpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-nmpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`}
    </div>
    <div>${!e?'<div class="card empty">Выберите товар слева или создайте новый</div>':`<div class="card stack">
@@ -1269,7 +1269,7 @@ function renderNom(){
      <datalist id="nm-mats">${['Серебро 925','Нержавейка','Мед сплав','Пластик','мельхиор','Жемчуг','Кожа','другой'].map(m=>`<option value="${m}">`).join('')}</datalist>
      <datalist id="nm-colors">${['золото','серебро','цветной','черный'].map(m=>`<option value="${m}">`).join('')}</datalist>
      ${inp('purchase_url','Ссылка на закуп')}
-     <div class="row" style="justify-content:flex-start;gap:16px"><label><input type="checkbox" data-nf="is_basic" ${e.is_basic?'checked':''}> Базовый товар (для рекомендаций дозаказа)</label>
+     <div class="row" style="justify-content:flex-start;gap:16px">
        <label><input type="checkbox" data-nf="archived" ${e.archived?'checked':''}> В архиве</label></div>
      <div class="row"><span>${e.id&&e.barcode?`<button class="btn small" data-labels='${esc(JSON.stringify([{n:e.name,b:e.barcode,p:+e.price,q:1}]))}'>Этикетка</button>`:''}</span>
        <button class="btn primary" id="nm-save">${e.id?'Сохранить':'Создать товар'}</button></div>
@@ -1318,7 +1318,8 @@ const SITE_ST = [['review','Проверить'],['auto','Связано авт�
 const SITE_NAME = { moon:'mooncollection.kz', sunshine:'sunshinejewelry.kz' };
 async function loadSite(){
   const f = S.st; f.data = null;
-  const { data, error } = await sb.rpc('site_list', { p_site:f.site, p_status:f.status, p_q:f.q.trim(), p_offset:f.off, p_limit:50 });
+  if(!f.parts || f.partsSite!==f.site){ const r = await sb.rpc('site_parts', { p_site:f.site }); f.parts = r.data || []; f.partsSite = f.site; if(!f.parts.some(x=>x.part===f.part)) f.part = null; }
+  const { data, error } = await sb.rpc('site_list', { p_site:f.site, p_status:f.status, p_q:f.q.trim(), p_offset:f.off, p_limit:50, p_part:f.part||null });
   if(error){ toast(errText(error)); f.data = { rows:[], counts:{} }; } else f.data = data;
 }
 function siteImg(u){ return u ? `<img class="thumb" style="width:64px;height:64px" src="${esc(thumbUrl(u))}" data-full="${esc(u)}" alt="" loading="lazy" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : '<span class="thumb" style="width:64px;height:64px"></span>'; }
@@ -1329,6 +1330,8 @@ function renderSite(){
     <div class="filters">${Object.entries(SITE_NAME).map(([k,v])=>`<button class="btn small ${f.site===k?'primary':''}" data-stsite="${k}">${v}</button>`).join('')}</div>
     <div class="filters">${SITE_ST.map(([k,v])=>`<button class="btn small ${f.status===k?'primary':''}" data-ststatus="${k}">${v} · ${cnt(k)}</button>`).join('')}
       <input id="st-q" placeholder="Поиск: название или штрихкод" value="${esc(f.q)}" style="flex:1;min-width:200px"></div>
+    <div class="filters"><select id="st-part" aria-label="Категория на сайте"><option value="">Все категории сайта</option>${(f.parts||[]).map(x=>`<option value="${esc(x.part)}" ${f.part===x.part?'selected':''}>${esc(x.name || 'Без названия: '+(x.sample||[]).slice(0,2).join(', '))} · ${x.n}</option>`).join('')}</select>
+      ${f.part?(()=>{ const P = (f.parts||[]).find(x=>x.part===f.part); return P && /^\d+$/.test(P.part) ? `<input id="st-part-name" placeholder="Назовите раздел, например «Авторская работа»" value="${esc(P.name||'')}" style="min-width:240px"><button class="btn small" id="st-part-save">Сохранить название</button>` : ''; })():''}</div>
     ${!D?'<div class="empty">Загружаем…</div>':!D.rows.length?'<div class="empty">Здесь пусто</div>':D.rows.map(r=>{ const key=r.site+':'+r.uid, open=f.open===key;
       return `<div class="card" style="margin-bottom:8px">
       <div class="grid2" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:center">
@@ -1584,10 +1587,10 @@ function renderPo(){
   }
   if(PO.mode==='suggest'){
     const L = PO.sug;
-    body = `<p class="meta">Товары, которых по сети не хватит на ближайшие 30 дней при текущих продажах (с учётом того, что уже заказано и едет). Базовые товары показаны всегда, остальные — если за месяц продано от 3 шт.</p>
+    body = `<p class="meta">Все товары, которые продавались за последние 30 дней и которых по сети не хватит на следующие 30 дней, — по скорости продаж, сверху самые ходовые. Учтено то, что уже заказано и едет. Если товар не нужен или сезон прошёл — просто не заказывайте его.</p>
     ${!L?'<div class="empty">Считаем…</div>':!L.length?'<div class="empty">Всего хватает</div>':`<div class="scroll"><table><thead><tr><th></th><th>Товар</th><th>Продано за 30 дн.</th><th>Остаток</th><th>Заказано / в пути</th><th>Дозаказать</th><th></th></tr></thead><tbody>
-      ${L.map(p=>`<tr><td>${thumb(p)}</td><td>${esc(p.name)}${p.is_basic?' <span class="chip">базовый</span>':''}<br><span class="meta num">${esc(p.barcode)}${p.cost?' · закуп '+fmt(p.cost):''}</span>${p.purchase_url?` · <a href="${esc(p.purchase_url)}" target="_blank" rel="noopener" class="meta">ссылка</a>`:''}</td>
-        <td class="num">${p.sold30}</td><td class="num" ${p.stock<=0?'style="color:var(--bad)"':''}>${p.stock}</td><td class="num">${p.incoming||'—'}</td><td class="num"><b>${p.need}</b></td>
+      ${L.map(p=>`<tr><td>${thumb(p)}</td><td>${esc(p.name)}<br><span class="meta num">${esc(p.barcode)}${p.cost?' · закуп '+fmt(p.cost):''}</span>${p.purchase_url?` · <a href="${esc(p.purchase_url)}" target="_blank" rel="noopener" class="meta">ссылка</a>`:''}</td>
+        <td class="num">${p.sold30}</td><td class="num" ${p.stock<=0?'style="color:var(--bad)"':''}>${p.stock}${p.days_left!=null?`<br><span class="meta">хватит на ${p.days_left} дн.</span>`:''}</td><td class="num">${p.incoming||'—'}</td><td class="num"><b>${p.need}</b></td>
         <td>${poEdit()?`<button class="btn small" data-posug="${p.id}" data-need="${p.need}" data-cost="${p.cost??''}">В заказ</button>`:''}</td></tr>`).join('')}</tbody></table></div>`}`;
   }
   if(PO.mode==='an'){
@@ -1942,6 +1945,7 @@ document.addEventListener('click', async e => {
     if(error) toast(errText(error)); else { toast(d.reqok?'Оприходовано':'Отклонено'); S.stock={}; await loadReqs(); render(); } }
   else if(d.bmode){ if(d.bmode==='spend'){ S.pays.bonus = Math.min(maxBonus(), totals().total); } else { delete S.pays.bonus; } syncPays(); render(); }
   else if(d.cfst){ S.cf.st=d.cfst; render(); await loadCerts(); render(); }
+  else if(t.id==='st-part-save'){ const r = await sb.rpc('site_part_name_set', { p_part:S.st.part, p_name:$('#st-part-name').value }); if(r.error) return toast(errText(r.error)); toast('Название раздела сохранено'); S.st.parts=null; await loadSite(); render(); }
   else if(d.stsite){ S.st.site=d.stsite; S.st.off=0; S.st.open=null; render(); await loadSite(); render(); }
   else if(d.ststatus){ S.st.status=d.ststatus; S.st.off=0; S.st.open=null; render(); await loadSite(); render(); }
   else if(d.stpage){ S.st.off=Math.max(0,S.st.off+50*(+d.stpage)); S.st.open=null; render(); await loadSite(); render(); window.scrollTo(0,0); }
@@ -1973,6 +1977,7 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', async e => {
   const t = e.target, d = t.dataset;
+  if(t.id==='st-part'){ S.st.part=t.value||null; S.st.off=0; S.st.open=null; render(); await loadSite(); render(); return; }
   if(d.erole) updEmp(d.erole, { role:t.value });
   if(d.ephone){ const p = normPhone(t.value); if(t.value.trim() && !p) return toast('Телефон: 10 цифр после +7'); if(p && S.emps.some(x=>x.id!==d.ephone && x.phone===p)) return toast('Этот телефон уже у другого сотрудника'); t.value = p||''; const e2 = S.emps.find(x=>x.id===d.ephone); if(e2) e2.phone = p; updEmp(d.ephone, { phone: p }); }
   if(d.stf){ (S.stockF ||= {})[d.stf]=t.value; await loadStockView(); render(); }
