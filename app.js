@@ -2044,7 +2044,7 @@ function accessHtml(){
   const roles = ['manager','purchaser','viewer','accountant'], A = S.tabAccess || {};
   const has = (r,v) => Array.isArray(A[r]) ? A[r].includes(v) : defaultTabs(r).includes(v);
   const E = S.tabEdit || {}, can = (r,v) => has(r,v) && r!=='viewer' && (Array.isArray(E[r]) ? E[r].includes(v) : true);
-  return `<div class="card stack" style="margin-top:16px"><b>Какие вкладки видит и может менять каждая роль</b>
+  return `<div class="stack" style="margin-top:8px">
     <p class="meta" style="margin:0">Владелец видит и меняет всё. В каждой ячейке две галочки: 👁 — вкладка видна (только смотреть), ✎ — можно и менять (кнопки сохранения, проведения и т.п.). Данные защищены и в базе: например, консультант не увидит выручку и закупочные цены, даже если открыть ему «Аналитику».</p>
     <div class="scroll"><table><thead><tr><th>Вкладка</th>${roles.map(r=>`<th>${ROLE[r]}<br><span class="meta">👁 смотреть · ✎ менять</span></th>`).join('')}</tr></thead><tbody>
     ${ALL_TABS.map(([v,t])=>`<tr><td>${t}</td>${roles.map(r=>`<td style="white-space:nowrap"><label title="Видит"><input type="checkbox" data-acc="${r}:${v}" ${has(r,v)?'checked':''} aria-label="${ROLE[r]}: ${t} — видит"> 👁</label>
@@ -2054,20 +2054,24 @@ function accessHtml(){
 
 async function loadEmps(){ const { data } = await sb.from('employees').select('*').order('created_at'); S.emps = data || []; }
 function renderEmps(){
-  const list = S.emps.filter(e => e.role!=='consultant');
-  $('#main').innerHTML = `<h2>Сотрудники с доступом к Silver</h2>
-    <p class="meta">Консультанты в программу не входят: они отмечают смены и смотрят зарплату в Telegram-боте. Их список, телефоны и магазины — во вкладке «Зарплата».</p>
-    <div class="card stack" style="margin-bottom:12px"><b>Добавить сотрудника по телефону</b>
-      <div class="row" style="flex-wrap:wrap;justify-content:flex-start">
+  const list = S.emps.filter(e => e.role!=='consultant').sort((a,b)=>(b.active-a.active) || String(a.full_name).localeCompare(String(b.full_name),'ru'));
+  if(!document.getElementById('emp-css')){ const st = document.createElement('style'); st.id = 'emp-css'; st.textContent = `.emp-tbl td,.emp-tbl th{padding:5px 8px;vertical-align:middle}.emp-tbl td{white-space:nowrap}.emp-tbl input,.emp-tbl select{padding:4px 6px;font-size:13px}.emp-tbl details.dd summary{padding:4px 8px;font-size:13px}.emp-tbl tr.off td{opacity:.5}.emp-add>summary,.emp-acc>summary{cursor:pointer;font-weight:600;list-style:none}.emp-add>summary::-webkit-details-marker,.emp-acc>summary::-webkit-details-marker{display:none}`; document.head.append(st); }
+  $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap"><h2 style="margin:0">Сотрудники с доступом к Silver <span class="meta">${list.filter(e=>e.active).length}</span></h2></div>
+    <p class="meta" style="margin:4px 0 10px">Консультанты здесь не показываются — они в «Зарплате» и работают через Telegram-бота.</p>
+    <details class="card emp-add" style="margin-bottom:10px"><summary>+ Добавить сотрудника</summary>
+      <div class="stack" style="margin-top:8px;gap:6px"><div class="row" style="flex-wrap:wrap;justify-content:flex-start">
         <input id="ne-phone" placeholder="+7 7__ ___ __ __" inputmode="tel"><input id="ne-name" placeholder="Имя и фамилия" style="flex:1;min-width:160px">
-        <select id="ne-role">${Object.entries(ROLE).filter(([k])=>k!=='consultant'&&(k!=='owner'||S.me.role==='owner')).map(([k,v])=>`<option value="${k}" ${k==='manager'?'selected':''}>${v}</option>`).join('')}</select></div>
-      <div><span class="meta">Магазины:</span> ${storesDD([], id=>`class="ne-store" value="${id}"`)}</div>
-      <div class="row"><span class="meta">Сотрудник входит кнопкой «Войти через Telegram» и делится этим же номером в боте — пароль не нужен.</span><button class="btn primary" id="ne-add">Добавить</button></div></div>
-    <div class="scroll"><table><thead><tr><th>Имя</th><th>Роль</th><th>Доступ к магазинам</th><th>Вход</th></tr></thead><tbody>
-    ${list.map(e=>`<tr><td>${esc(e.full_name)}<br><input class="small" data-ephone="${e.id}" value="${esc(e.phone||'')}" placeholder="телефон не указан" inputmode="tel" style="width:150px;margin-top:4px"><br><span class="meta">${e.telegram_id?'Telegram ✓':''}${!e.auth_user_id?(e.telegram_id?' · ':'')+'ещё не входил':''}</span></td>
+        <select id="ne-role">${Object.entries(ROLE).filter(([k])=>k!=='consultant'&&(k!=='owner'||S.me.role==='owner')).map(([k,v])=>`<option value="${k}" ${k==='manager'?'selected':''}>${v}</option>`).join('')}</select>
+        ${storesDD([], id=>`class="ne-store" value="${id}"`)}<button class="btn primary small" id="ne-add">Добавить</button></div>
+      <span class="meta">Сотрудник входит кнопкой «Войти через Telegram» и делится этим же номером в боте — пароль не нужен.</span></div></details>
+    <div class="scroll"><table class="emp-tbl"><thead><tr><th>Имя</th><th>Телефон</th><th>Роль</th><th>Магазины</th><th title="Может входить">Вкл.</th><th title="Официально трудоустроен">Офиц.</th></tr></thead><tbody>
+    ${list.map(e=>`<tr class="${e.active?'':'off'}"><td><b>${esc(e.full_name)}</b> <span class="meta" title="${e.telegram_id?'Telegram привязан':'Telegram не привязан'}${!e.auth_user_id?' · ещё не входил':''}">${e.telegram_id?'✈':''}${!e.auth_user_id?' · не входил':''}</span></td>
+      <td><input data-ephone="${e.id}" value="${esc(e.phone||'')}" placeholder="нет телефона" inputmode="tel" style="width:135px"></td>
       <td><select data-erole="${e.id}">${Object.entries(ROLE).filter(([k])=>k!=='consultant').map(([k,v])=>`<option value="${k}" ${e.role===k?'selected':''}>${v}</option>`).join('')}</select></td>
-      <td>${['owner','viewer'].includes(e.role)?'<span class="meta">все магазины</span>':(e.role==='manager'?'<div class="meta" style="max-width:240px">Видит все; отмеченные — подтверждает перемещения:</div>':'')+(()=>{ const ids=e.store_ids||(e.home_store_id?[e.home_store_id]:[]); return storesDD(ids, id=>`data-estores="${e.id}:${id}"`); })()}</td>
-      <td><label><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''}> включён</label><br><label title="Официально трудоустроен — для бухгалтера"><input type="checkbox" data-eoff="${e.id}" ${e.official?'checked':''}> официально</label></td></tr>`).join('')}</tbody></table></div>${accessHtml()}`;
+      <td>${['owner','viewer'].includes(e.role)?'<span class="meta">все</span>':(()=>{ const ids=e.store_ids||(e.home_store_id?[e.home_store_id]:[]); return storesDD(ids, id=>`data-estores="${e.id}:${id}"`); })()+(e.role==='manager'?' <span class="meta" title="Менеджер видит все магазины; отмеченные — подтверждает перемещения">ⓘ</span>':'')}</td>
+      <td style="text-align:center"><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''} aria-label="включён"></td>
+      <td style="text-align:center"><input type="checkbox" data-eoff="${e.id}" ${e.official?'checked':''} aria-label="официально"></td></tr>`).join('')}</tbody></table></div>
+    ${S.me.role==='owner'?`<details class="card emp-acc" style="margin-top:12px"><summary>⚙ Какие вкладки видит каждая роль</summary>${accessHtml()}</details>`:''}`;
 }
 async function updEmp(id, patch){ const { error } = await sb.from('employees').update(patch).eq('id', id); if(error) toast(errText(error)); else toast('Сохранено'); }
 
