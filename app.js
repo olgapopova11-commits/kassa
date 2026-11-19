@@ -63,7 +63,7 @@ const thumbUrl = u => /alicdn\.com/.test(u) ? u.replace(/(_\d+x\d+.*)?$/,'_160x1
 (() => {
   let box;
   const show = (img, x, y) => {
-    if(!box){ box = document.createElement('div'); box.id = 'zoom-pop'; box.style.cssText = 'position:fixed;z-index:50;pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:4px;box-shadow:0 10px 30px rgba(0,0,0,.25);display:none'; box.innerHTML = '<img style="display:block;width:300px;height:300px;object-fit:contain;border-radius:8px">'; document.body.appendChild(box); }
+    if(!box){ box = document.createElement('div'); box.id = 'zoom-pop'; box.style.cssText = 'position:fixed;z-index:50;pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:4px;box-shadow:0 10px 30px rgba(0,0,0,.25);display:none'; box.innerHTML = '<img referrerpolicy="no-referrer" style="display:block;width:300px;height:300px;object-fit:contain;border-radius:8px">'; document.body.appendChild(box); }
     const im = box.firstChild, src = img.dataset.full || img.src; if(im.getAttribute('src') !== src) im.src = src;
     const W = 312, H = 312, left = x + 20 + W > innerWidth ? Math.max(8, x - W - 20) : x + 20, top = Math.min(Math.max(8, y - H/2), innerHeight - H - 8);
     box.style.left = left + 'px'; box.style.top = top + 'px'; box.style.display = 'block';
@@ -81,7 +81,7 @@ function storesDD(ids, attr){
   return `<details class="dd"><summary>${esc(ddSummary(ids))}</summary><div class="dd-panel">${S.allStores.map(st=>`<label><input type="checkbox" ${attr(st.id)} ${ids.includes(st.id)?'checked':''}> ${esc(BRAND[st.brand]+' · '+st.address)}</label>`).join('')}</div></details>`;
 }
 document.addEventListener('click', e => { document.querySelectorAll('details.dd[open]').forEach(d => { if(!d.contains(e.target)) d.removeAttribute('open'); }); });
-const thumb = p => p.photo_url ? `<img class="thumb" src="${esc(thumbUrl(p.photo_url))}" data-full="${esc(p.photo_url)}" alt="" loading="lazy" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : '<span class="thumb"></span>';
+const thumb = p => p.photo_url ? `<img class="thumb" referrerpolicy="no-referrer" src="${esc(thumbUrl(p.photo_url))}" data-full="${esc(p.photo_url)}" alt="" loading="lazy" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : '<span class="thumb"></span>';
 function errText(e){ return (e && (e.message || e.error_description)) || String(e); }
 const isNetErr = e => !navigator.onLine || /Failed to fetch|NetworkError|Load failed|network/i.test(errText(e));
 
