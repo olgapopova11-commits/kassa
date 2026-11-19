@@ -1226,7 +1226,7 @@ function renderStockAn(){
 }
 
 /* ---------- номенклатура ---------- */
-const NM_EMPTY = () => ({ id:null, barcode:'', sku:'', name:'', price:'', cost:'', brand:'', category_id:'', material:'', color:'', supplier:'', purchase_url:'', photo_url:'', is_basic:false, archived:false, sites:[] });
+const NM_EMPTY = () => ({ id:null, is_group:false, barcode:'', sku:'', name:'', price:'', cost:'', brand:'', category_id:'', material:'', color:'', supplier:'', purchase_url:'', photo_url:'', is_basic:false, archived:false, sites:[] });
 async function loadNom(){
   const f = S.nm; f.data = null;
   if(!f.cats){ const { data } = await sb.from('categories').select('id,name').order('name'); f.cats = data || []; }
@@ -1245,7 +1245,7 @@ function renderNom(){
       <label class="meta" style="align-self:center"><input type="checkbox" id="nm-arch" ${f.arch?'checked':''}> архив</label></div>
     ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}</p>
     <div class="list">${D.rows.map(p=>`<div style="${e&&e.id===p.id?'background:var(--soft);':''}border-radius:10px"><button class="prod" data-nmopen="${p.id}" style="background:transparent">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta">${esc(nmInfo(p))}</span><br><span class="meta num">${esc(p.barcode)}${p.sku?' · арт. '+esc(p.sku):''} · остаток ${p.stock}${(S.inc||{})[p.id]?' · <b>заказано '+((S.inc[p.id].ordered||0)+(S.inc[p.id].transit||0))+'</b>'+(S.inc[p.id].transit?' (в пути '+S.inc[p.id].transit+')':''):''}</span>
-      </span><span class="price num">${fmt(p.price)}</span></button>${nmSiteLinks(p)}</div>`).join('') || '<div class="empty">Ничего не найдено</div>'}</div>
+      ${p.is_group?'<span class="chip">общий штрихкод</span>':''}</span><span class="price num">${fmt(p.price)}</span></button>${nmSiteLinks(p)}</div>`).join('') || '<div class="empty">Ничего не найдено</div>'}</div>
     ${f.off||D.rows.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-nmpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-nmpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`}
    </div>
    <div>${!e?'<div class="card empty">Выберите товар слева или создайте новый</div>':`<div class="card stack">
@@ -1269,7 +1269,7 @@ function renderNom(){
      <datalist id="nm-mats">${['Серебро 925','Нержавейка','Мед сплав','Пластик','мельхиор','Жемчуг','Кожа','другой'].map(m=>`<option value="${m}">`).join('')}</datalist>
      <datalist id="nm-colors">${['золото','серебро','цветной','черный'].map(m=>`<option value="${m}">`).join('')}</datalist>
      ${inp('purchase_url','Ссылка на закуп')}
-     <div class="row" style="justify-content:flex-start;gap:16px">
+     <div class="row" style="justify-content:flex-start;gap:16px"><label title="Под одним штрихкодом продаются разные изделия одной цены — на сайте это много карточек"><input type="checkbox" data-nf="is_group" ${e.is_group?'checked':''}> Общий штрихкод (много разных изделий)</label>
        <label><input type="checkbox" data-nf="archived" ${e.archived?'checked':''}> В архиве</label></div>
      <div class="row"><span>${e.id&&e.barcode?`<button class="btn small" data-labels='${esc(JSON.stringify([{n:e.name,b:e.barcode,p:+e.price,q:1}]))}'>Этикетка</button>`:''}</span>
        <button class="btn primary" id="nm-save">${e.id?'Сохранить':'Создать товар'}</button></div>
@@ -1326,7 +1326,8 @@ function siteImg(u){ return u ? `<img class="thumb" style="width:64px;height:64p
 function renderSite(){
   const f = S.st, D = f.data, cnt = k => (D && D.counts && D.counts[f.site+':'+k]) || 0;
   $('#main').innerHTML = `<h2>Сайт ↔ база товаров</h2>
-    <p class="meta">Слева карточка с сайта, справа товар из базы, с которым она связана. Через эту связь на сайт пойдут остатки, а в кассу — фото.</p>
+    <p class="meta">Слева карточка с сайта, справа товар из базы, с которым она связана. Через эту связь на сайт пойдут остатки, а в кассу — фото. Несколько карточек сайта можно связать с одним товаром базы — например, все разные серьги за 3 500 ₸ с общим штрихкодом «Серьги 3500».</p>
+    ${isBoss()&&!isViewer()?`<div class="row" style="justify-content:flex-start;margin-bottom:8px"><button class="btn small" id="st-grp">🔗 Связать несвязанные с общими штрихкодами (по типу и цене)</button></div>`:''}
     <div class="filters">${Object.entries(SITE_NAME).map(([k,v])=>`<button class="btn small ${f.site===k?'primary':''}" data-stsite="${k}">${v}</button>`).join('')}</div>
     <div class="filters">${SITE_ST.map(([k,v])=>`<button class="btn small ${f.status===k?'primary':''}" data-ststatus="${k}">${v} · ${cnt(k)}</button>`).join('')}
       <input id="st-q" placeholder="Поиск: название или штрихкод" value="${esc(f.q)}" style="flex:1;min-width:200px"></div>
@@ -1348,7 +1349,7 @@ function renderSite(){
       </div>
       ${open?`<div class="cust stack" style="margin-top:8px">
         <span class="label">Похожие товары в базе</span>
-        ${!f.cands?'<div class="meta">Ищем…</div>':f.cands.map(c=>`<button class="prod" data-stpick="${key}" data-pid="${c.product_id}">${thumb({photo_url:c.photo})}<span><b>${esc(c.name)}</b><br><span class="meta num">${esc(c.barcode)} · сходство ${Math.round(c.sim*100)}%</span></span><span class="price num">${fmt(c.price)}</span></button>`).join('')}
+        ${!f.cands?'<div class="meta">Ищем…</div>':f.cands.map(c=>`<button class="prod" data-stpick="${key}" data-pid="${c.product_id}">${thumb({photo_url:c.photo})}<span><b>${esc(c.name)}</b><br><span class="meta num">${esc(c.barcode)} · ${c.grp?'<span class="chip ok">общий штрихкод · тот же тип и цена</span>':'сходство '+Math.round(c.sim*100)+'%'}</span></span><span class="price num">${fmt(c.price)}</span></button>`).join('')}
         <span class="label">Или найдите вручную</span>
         <input id="st-cq" placeholder="Штрихкод или название из базы" value="${esc(f.cq)}" autocomplete="off">
         ${f.cfound.slice(0,10).map(p=>`<button class="prod" data-stpick="${key}" data-pid="${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}</span></span><span class="price num">${fmt(p.price)}</span></button>`).join('')}
@@ -1945,6 +1946,14 @@ document.addEventListener('click', async e => {
     if(error) toast(errText(error)); else { toast(d.reqok?'Оприходовано':'Отклонено'); S.stock={}; await loadReqs(); render(); } }
   else if(d.bmode){ if(d.bmode==='spend'){ S.pays.bonus = Math.min(maxBonus(), totals().total); } else { delete S.pays.bonus; } syncPays(); render(); }
   else if(d.cfst){ S.cf.st=d.cfst; render(); await loadCerts(); render(); }
+  else if(t.id==='st-grp'){ t.disabled = true; const { data, error } = await sb.rpc('site_group_match', { p_site:S.st.site, p_apply:false }); t.disabled = false; if(error) return toast(errText(error));
+    modal(`<h2>Общие штрихкоды · ${esc(SITE_NAME[S.st.site]||S.st.site)}</h2>
+      <p>Несвязанные карточки сайта, для которых в базе есть ровно один общий штрихкод того же типа и цены (например, «Серьги Веер» за 3 500 ₸ → «Серьги 3500»): <b>${data.n}</b>.</p>
+      ${data.examples.length?`<ul class="meta">${data.examples.map(x=>`<li>${esc(x.title)} · ${fmt(x.price)} → ${esc(x.to)}</li>`).join('')}</ul>`:''}
+      ${data.ambiguous?`<p class="meta">Ещё ${data.ambiguous} карточек подходят сразу к нескольким одинаковым общим штрихкодам — их свяжите вручную: при открытии карточки они будут первыми в списке.</p>`:''}
+      <p class="meta">Связи можно поправить потом по одной — они попадут в статус «авто».</p>
+      <div class="row"><button class="btn" data-close>Отмена</button>${data.n?`<button class="btn primary" id="st-grp-go">Связать ${data.n}</button>`:''}</div>`); }
+  else if(t.id==='st-grp-go'){ t.disabled = true; const { data, error } = await sb.rpc('site_group_match', { p_site:S.st.site, p_apply:true }); closeModal(); if(error) return toast(errText(error)); toast('Связано: '+data.n); S.st.off=0; await loadSite(); render(); }
   else if(t.id==='st-part-save'){ const r = await sb.rpc('site_part_name_set', { p_part:S.st.part, p_name:$('#st-part-name').value }); if(r.error) return toast(errText(r.error)); toast('Название раздела сохранено'); S.st.parts=null; await loadSite(); render(); }
   else if(d.stsite){ S.st.site=d.stsite; S.st.off=0; S.st.open=null; render(); await loadSite(); render(); }
   else if(d.ststatus){ S.st.status=d.ststatus; S.st.off=0; S.st.open=null; render(); await loadSite(); render(); }
