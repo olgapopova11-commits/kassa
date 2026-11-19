@@ -1251,11 +1251,16 @@ function renderNom(){
       <td class="num">${esc(p.barcode)}${p.sku?'<br><span class="meta">арт. '+esc(p.sku)+'</span>':''}</td>
       <td class="num">${p.cost!=null&&p.cost!==''?fmt(p.cost):'<span class="meta">—</span>'}</td>
       <td class="num">${+p.price>0?fmt(p.price):'<span class="chip warn">нет цены</span>'}</td>
-      <td class="num">${p.stock>0?'<span class="chip ok">есть '+p.stock+'</span>':'<span class="chip zero">нет</span>'}${inc&&((inc.ordered||0)+(inc.transit||0))?`<br><span class="meta">заказано ${(inc.ordered||0)+(inc.transit||0)}</span>`:''}</td>
+      <td class="num"><span class="nm-st" tabindex="0">${p.stock>0?'<span class="chip ok">есть '+p.stock+'</span>':'<span class="chip zero">нет</span>'}<span class="nm-st-pop">${S.allStores.map(st=>{ const q = +((p.by_store||{})[st.id]||0); return `<span class="row" style="gap:12px;${q?'':'opacity:.5'}"><span>${esc(BRAND[st.brand]+' · '+st.address)}</span><b class="num">${q}</b></span>`; }).join('')}</span></span>${inc&&((inc.ordered||0)+(inc.transit||0))?`<br><span class="meta">заказано ${(inc.ordered||0)+(inc.transit||0)}</span>`:''}</td>
       <td>${L.length?L.map(x=>`<a href="${esc(x.url)}" target="_blank" rel="noopener">${x.site==='moon'?'MOON':'Sunshine'}</a>${x.status==='review'?' <span class="meta">(не проверено)</span>':''}`).join('<br>'):'<span class="meta">нет на сайте</span>'}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">Ничего не найдено</td></tr>'}</tbody></table></div>
     ${f.off||D.rows.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-nmpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-nmpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`}`;
   nmModalSync(e, f, cats, inp);
 }
+(()=>{ const st = document.createElement('style'); st.textContent = `.nm-st{position:relative;display:inline-block;cursor:default}.nm-st-pop{display:none;position:fixed;z-index:20;min-width:240px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 10px;box-shadow:0 6px 24px rgba(0,0,0,.15);text-align:left;font-size:13px;flex-direction:column;gap:4px;white-space:nowrap}.nm-st:hover .nm-st-pop,.nm-st:focus .nm-st-pop{display:flex}`; document.head.appendChild(st);
+  const place = el => { const pop = el.querySelector('.nm-st-pop'); if(!pop) return; const r = el.getBoundingClientRect(); pop.style.display = 'flex';
+    const w = pop.offsetWidth, h = pop.offsetHeight; pop.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + 'px'; pop.style.top = (r.bottom + h + 8 > innerHeight ? r.top - h - 4 : r.bottom + 4) + 'px'; pop.style.display = ''; };
+  document.addEventListener('mouseover', e => { const el = e.target.closest && e.target.closest('.nm-st'); if(el) place(el); });
+  document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest('.nm-st'); if(el) place(el); }); })();
 document.addEventListener('mousedown', e => { if(e.target && e.target.id==='nm-modal' && S.nm){ S.nm.ed = null; render(); } });
 function nmModalSync(e, f, cats, inp){
   const M = $('#modal'), has = !!M.querySelector('#nm-modal');
