@@ -311,7 +311,7 @@ function renderPos(){
   const c = S.cust;
   $('#main').innerHTML = `${shOpen===false?`<div class="card row" style="margin-bottom:12px;border-color:var(--bad);flex-wrap:wrap"><span><b>Смена не открыта.</b> Чтобы пробивать чеки, откройте смену и пересчитайте наличные в кассе.</span><button class="btn primary" id="go-shift">Открыть смену</button></div>`:''}<div class="grid2">
    <div>
-     <div class="row"><h2>Товары</h2><span class="meta">${S.catalog.length.toLocaleString('ru-RU')} в каталоге</span></div>
+     <div class="row" style="flex-wrap:wrap;gap:8px"><h2>Товары</h2><span class="meta">${S.catalog.length.toLocaleString('ru-RU')} в каталоге</span><button class="btn small" id="c-open" style="margin-left:auto">🎁 Продать сертификат</button></div>
      <div class="row"><input id="q" style="flex:1" placeholder="Штрихкод, артикул или название" value="${esc(S.q)}" autocomplete="off"><button class="btn" id="q-add">Добавить</button></div>
      <div class="list">${S.found.length ? S.found.map(p=>{ const s = S.stock[p.id]||{}; const here = s[S.store] ?? null;
         return `<button class="prod" data-add="${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}${p.sku?' · '+esc(p.sku):''}</span><br>
@@ -830,30 +830,29 @@ function renderCerts(){
       <td>${esc(c.buyer_name||'')} ${esc(c.buyer_phone||'')}<br>→ ${esc(c.recipient_name||'')} ${esc(c.recipient_phone||'')}</td>
       <td>${esc(c.used_in||'—')}${c.last_used_at?`<br><span class="meta">${new Date(c.last_used_at).toLocaleDateString('ru-RU')}</span>`:''}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Сертификатов пока нет</div>'}
   </div>
-  <div class="card stack"><h2 style="margin:0">Продать сертификат</h2>
-    <div class="seg" id="ck-kind"><button data-ck="physical" aria-pressed="true">Физический</button><button data-ck="electronic" aria-pressed="false">Электронный</button></div>
-    <input id="c-code" placeholder="Номер с карточки (пусто — создать автоматически)">
-    <input id="c-amount" type="number" min="1" placeholder="Номинал, ₸" inputmode="numeric">
-    <div class="label">Кто покупает</div>
-    <input id="c-bname" placeholder="Имя покупателя"><input id="c-bphone" placeholder="Телефон покупателя *" inputmode="tel">
-    <div class="label">Кому сертификат</div>
-    <input id="c-rname" placeholder="Имя получателя"><input id="c-rphone" placeholder="Телефон получателя" inputmode="tel">
-    <select id="c-pay">${['cash','card'].map(k=>`<option value="${k}">${PAY[k]}</option>`).join('')}</select>
-    <button class="btn primary" id="c-sell">Продать сертификат</button>
-    <p class="meta">Бонусы за покупку сертификата не начисляются — они начислятся, когда им оплатят товар.</p>
+  <div class="card stack"><h2 style="margin:0">Продать сертификат</h2><p class="meta" style="margin:0">Сертификаты продаются в кассе: вкладка «Продажа» → кнопка «🎁 Продать сертификат». Так продажа попадает в смену и выручку магазина.</p>
   </div></div>`;
 }
-async function sellCert(){
-  const bphone = normPhone($('#c-bphone').value), rphone = $('#c-rphone').value ? normPhone($('#c-rphone').value) : null;
-  const amount = +$('#c-amount').value;
-  if(!bphone) return toast('Укажите телефон покупателя');
-  if($('#c-rphone').value && !rphone) return toast('Телефон получателя: 10 цифр после +7');
-  const kind = document.querySelector('#ck-kind [aria-pressed="true"]').dataset.ck;
-  const { data, error } = await sb.rpc('sell_certificate', { p:{ client_uuid:uuid(), store_id:S.store, code:$('#c-code').value.trim(), kind, amount,
-    customer_phone:bphone, customer_name:$('#c-bname').value, recipient_name:$('#c-rname').value, recipient_phone:rphone,
-    payments:[{ method:$('#c-pay').value, amount }] } });
+function certSellHtml(){
+  return `<div class="row"><h3 style="margin:0">🎁 Продать сертификат</h3><button class="btn small" data-close>✕</button></div>
+  <div class="stack" style="gap:10px;margin-top:10px">
+    <span class="meta">${esc(storeName(S.store))}</span>
+    <div><span class="label">Вид сертификата</span><div class="seg" id="ck-kind" style="margin-top:4px"><button data-ck="physical" aria-pressed="true">Физический</button><button data-ck="electronic" aria-pressed="false">Электронный</button></div></div>
+    <label class="stack" style="gap:2px"><span class="label">Номер сертификата *</span><input id="c-code" placeholder="Номер с карточки" autocomplete="off"></label>
+    <label class="stack" style="gap:2px"><span class="label">Номинал, ₸ *</span><input id="c-amount" type="number" min="1" inputmode="numeric" placeholder="например, 10000"></label>
+    <div><span class="label">Оплата</span><div class="seg" id="c-pay" style="margin-top:4px;flex-wrap:wrap">${['cash','card','kaspi_qr','transfer'].map((k,i)=>`<button data-cpay="${k}" aria-pressed="${i===0}">${PAY[k]}</button>`).join('')}</div></div>
+    <button class="btn primary" id="c-sell">Продать сертификат</button>
+    <span class="meta">Срок действия — 6 месяцев. Бонусы за покупку сертификата не начисляются — они начислятся, когда им оплатят товар.</span></div>`;
+}
+async function sellCert(btn){
+  const code = $('#c-code').value.trim(), amount = +$('#c-amount').value;
+  if(!code) return toast('Укажите номер сертификата'); if(!(amount>0)) return toast('Укажите номинал');
+  const kind = document.querySelector('#ck-kind [aria-pressed="true"]').dataset.ck, method = document.querySelector('#c-pay [aria-pressed="true"]').dataset.cpay;
+  if(btn) btn.disabled = true;
+  const { error } = await sb.rpc('sell_certificate', { p:{ client_uuid:uuid(), store_id:S.store, code, kind, amount, payments:[{ method, amount }] } });
+  if(btn) btn.disabled = false;
   if(error) return toast('Не продан: '+errText(error));
-  toast('Сертификат продан'); await loadCerts(); render();
+  closeModal(); toast(`Сертификат №${code} на ${fmt(amount)} продан`); if(S.view==='certs'){ await loadCerts(); render(); }
 }
 async function checkCert(code){
   const { data, error } = await sb.rpc('certificate_check', { p_code: code });
@@ -2172,7 +2171,9 @@ document.addEventListener('click', async e => {
   else if(d.hist) openHistory(d.hist);
   else if(t.id==='cc-go'){ const v=$('#cc').value.trim(); if(v) checkCert(v); }
   else if(d.ck){ document.querySelectorAll('#ck-kind button').forEach(b=>b.setAttribute('aria-pressed', b===t)); }
-  else if(t.id==='c-sell') sellCert();
+  else if(t.id==='c-sell') sellCert(t);
+  else if(t.id==='c-open'){ const sh = S.posShift && S.posShift[S.store]; if(sh===false) return toast('Сначала откройте смену'); modal(certSellHtml()); setTimeout(()=>$('#c-code')&&$('#c-code').focus(), 50); }
+  else if(d.cpay){ document.querySelectorAll('#c-pay button').forEach(b=>b.setAttribute('aria-pressed', b===t)); }
   else if(d.eact){ updEmp(d.eact, { active:t.checked }); }
   else if(d.eoff){ updEmp(d.eoff, { official:t.checked }); }
   else if(d.estores){ const [eid, sid] = d.estores.split(':'); const e = S.emps.find(x=>x.id===eid); if(e){ const cur = new Set(e.store_ids||(e.home_store_id?[e.home_store_id]:[])); t.checked ? cur.add(+sid) : cur.delete(+sid); e.store_ids=[...cur].sort((a,b)=>a-b); updEmp(eid, { store_ids: e.store_ids }); const sm=t.closest('details.dd'); if(sm) sm.querySelector('summary').textContent=ddSummary(e.store_ids); } }
