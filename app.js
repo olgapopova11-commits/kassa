@@ -1438,15 +1438,20 @@ async function loadPo(){
 }
 function renderPo(){
   const modes = [['orders','Заказы'],['new','Новый заказ'],['suggest','Что дозаказать'],['an','Аналитика закупа']].filter(([k])=>poEdit() || k!=='new');
-  const head = `<div class="row" style="flex-wrap:wrap"><h2>Закуп</h2><span class="row" style="gap:6px">${(PO.list||[]).some(o=>(o.items||[]).some(i=>i.supplier_title&&!i.title_ru))?`<button class="btn small" id="po-tr">🌐 Перевести названия на русский</button>`:''}${poEdit()?`<label class="btn small" style="cursor:pointer">⬆ Загрузить заказы из 1688<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label>`:''}</span></div>
+  const head = `<div class="row" style="flex-wrap:wrap"><h2>Закуп</h2><span class="row" style="gap:6px">${(PO.list||[]).some(o=>(o.supplier&&/[\u4e00-\u9fff]/.test(o.supplier)&&!o.supplier_ru)||(o.items||[]).some(i=>i.supplier_title&&!i.title_ru))?`<button class="btn small" id="po-tr">🌐 Перевести названия на русский</button>`:''}${poEdit()?`<label class="btn small" style="cursor:pointer">⬆ Загрузить заказы из 1688<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label>`:''}</span></div>
   ${PO.imp?`<div class="card meta" style="margin-bottom:8px">${esc(PO.imp)}</div>`:''}
   <div class="seg" style="display:inline-flex;margin-bottom:10px">${modes.map(([k,v])=>`<button data-pomode="${k}" aria-pressed="${PO.mode===k}">${v}</button>`).join('')}</div>`;
   let body = '';
   if(PO.mode==='orders'){
-    const L = PO.list;
-    body = `<div class="filters">${[['open','Заказано и в пути'],['received','Получены'],['cancelled','Отменённые'],['all','Все']].map(([k,v])=>`<button class="btn small ${PO.filter===k?'primary':''}" data-pofilter="${k}">${v}</button>`).join('')}</div>
+    const q = (PO.oq||'').trim().toLowerCase(), all = PO.list;
+    const hay = o => [o.number, o.ext_no, o.track, o.supplier, o.supplier_ru, o.note, storeName(o.store), ...(o.items||[]).flatMap(i=>[i.name, i.title_ru, i.supplier_title, i.barcode, i.spec, i.supplier_art])].filter(Boolean).join(' ').toLowerCase();
+    const F = all && q ? all.filter(o => q.split(/\s+/).every(w => hay(o).includes(w))) : all;
+    const L = F && F.slice(0, PO.lim || 40);
+    body = `<div class="row" style="margin-bottom:8px"><input id="po-oq" placeholder="🔍 Поиск: номер заказа, трек, магазин или поставщик, товар" value="${esc(PO.oq||'')}" style="flex:1" autocomplete="off"></div>
+    ${F&&q?`<div class="meta" style="margin-bottom:6px">Найдено заказов: ${F.length}</div>`:''}
+    <div class="filters">${[['open','Заказано и в пути'],['received','Получены'],['cancelled','Отменённые'],['all','Все']].map(([k,v])=>`<button class="btn small ${PO.filter===k?'primary':''}" data-pofilter="${k}">${v}</button>`).join('')}</div>
     ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Заказов нет</div>':L.map(o=>{ const goods=(o.items||[]).reduce((a,i)=>a+i.qty*(+i.unit_cost||0),0), units=(o.items||[]).reduce((a,i)=>a+i.qty,0);
-      return `<div class="card" style="margin-bottom:10px"><div class="row" style="flex-wrap:wrap"><b>№${o.number} · ${esc(o.supplier||'поставщик не указан')} → ${o.store?esc(storeName(o.store)):'<span class="meta">магазин выберете при приёмке</span>'}</b><span class="chip ${PO_ST[o.status][0]}">${PO_ST[o.status][1]}${o.status==='received'&&!o.receipt_id&&o.source==='1688'?' · история':''}</span></div>
+      return `<div class="card" style="margin-bottom:10px"><div class="row" style="flex-wrap:wrap"><b>№${o.number} · ${esc(o.supplier||'поставщик не указан')}${o.supplier_ru?` <span style="font-weight:400">(${esc(o.supplier_ru)})</span>`:''} → ${o.store?esc(storeName(o.store)):'<span class="meta">магазин выберете при приёмке</span>'}</b><span class="chip ${PO_ST[o.status][0]}">${PO_ST[o.status][1]}${o.status==='received'&&!o.receipt_id&&o.source==='1688'?' · история':''}</span></div>
         ${o.source==='1688'?`<div class="meta">1688 №${esc(o.ext_no)}${o.ext_status?' · '+esc(ST1688[o.ext_status]||o.ext_status):''}${o.track?' · трек '+esc(o.track):''}</div>`:''}
         <div class="meta">заказ от ${dshort(o.created_at)}${o.eta?' · ждём к '+dshort(o.eta):''}${o.shipped_at?' · отправлен '+dshort(o.shipped_at):''}${o.received_at?' · получен '+dshort(o.received_at):''} · ${esc(o.by||'')}${o.note?' · '+esc(o.note):''}</div>
         <div class="scroll"><table><tbody>${(o.items||[]).map(i=>poItemRow(o,i)).join('')}</tbody></table></div>
@@ -1455,7 +1460,8 @@ function renderPo(){
           <span>${poEdit()&&o.status==='ordered'?`<button class="btn small" data-postatus="${o.id}:transit">Отправлен — в пути</button>`:''}
           ${isBoss()&&!isViewer()&&['ordered','transit'].includes(o.status)&&!(PO.rcv&&PO.rcv.id===o.id)?`<button class="btn small primary" data-poreceive="${o.id}">Получить на склад</button>`:''}
           ${isBoss()&&!isViewer()&&['ordered','transit'].includes(o.status)?`<button class="btn small" data-poarch="${o.id}" title="Товар давно на складе и уже учтён — закрыть заказ, не добавляя остатки">Уже на складе</button>`:''}
-          ${poEdit()&&['ordered','transit'].includes(o.status)?`<button class="btn small" data-postatus="${o.id}:cancelled">Отменить</button>`:''}</span></div></div>`; }).join('')}`;
+          ${poEdit()&&['ordered','transit'].includes(o.status)?`<button class="btn small" data-postatus="${o.id}:cancelled">Отменить</button>`:''}</span></div></div>`; }).join('')}
+    ${F&&F.length>L.length?`<button class="btn" id="po-more" style="width:100%">Показать ещё (${F.length-L.length})</button>`:''}`;
   }
   if(PO.mode==='new'){
     const d = PO.d || (PO.d = poNew()), tot = d.items.reduce((a,i)=>a+i.qty*(+i.cost||0),0);
@@ -1745,6 +1751,20 @@ document.addEventListener('click', async e => {
   else if(d.poreceive){ const o = (PO.list||[]).find(x=>x.id===d.poreceive); PO.rcv = { id:d.poreceive, rate: o && o.currency!=='KZT' ? (+o.rate_now||+o.rate||'') : 1, qty:{} }; render(); }
   else if(t.id==='po-rcv-cancel'){ PO.rcv = null; render(); }
   else if(t.id==='po-tr'){ translate1688(); }
+  else if(t.id==='po-more'){ PO.lim = (PO.lim||40) + 40; render(); }
+  else if(d.pocreate){ const o = (PO.list||[]).find(x=>(x.items||[]).some(i=>i.item_id===d.pocreate)), i = o.items.find(x=>x.item_id===d.pocreate);
+    if(!PO.cats){ const { data } = await sb.from('categories').select('id,name').order('name'); PO.cats = data||[]; }
+    const landed = poLanded(i.price_cur!=null?i.price_cur:(i.unit_cost||0)/(+o.rate||1), +o.rate_now||+o.rate||1, o.delivery_pct??10, o.cargo, (o.items||[]).reduce((a,x)=>a+x.qty,0));
+    PO.mk = { item:i.item_id, name:(i.title_ru||i.supplier_title||'').replace(/цвет:.*$/i,'').slice(0,70).trim(), color:(i.spec||''), cat:'', price:'', landed:Math.round(landed) }; PO.lnk = null; render(); }
+  else if(t.id==='po-mk-cancel'){ PO.mk = null; render(); }
+  else if(t.id==='po-mk-save'){ const m = PO.mk, o = (PO.list||[]).find(x=>(x.items||[]).some(i=>i.item_id===m.item)), i = o.items.find(x=>x.item_id===m.item);
+    m.name = $('#po-mk-name').value.trim(); m.price = $('#po-mk-price').value; m.cat = $('#po-mk-cat').value; m.color = $('#po-mk-color').value.trim();
+    if(!m.name) return toast('Укажите название'); if(!(+m.price>0)) return toast('Укажите розничную цену'); t.disabled = true;
+    const { data, error } = await sb.rpc('product_save', { p:{ name:m.name, price:+m.price, category_id:m.cat||null, color:m.color||null, photo_url:i.supplier_photo||null, purchase_url:i.supplier_url||null, supplier:o.supplier||null } });
+    if(error){ t.disabled=false; return toast(errText(error)); }
+    const l = await sb.rpc('po_link_item', { p_item:i.item_id, p_product:data.id }); if(l.error){ t.disabled=false; return toast(errText(l.error)); }
+    S.catalog.push([data.id, data.barcode, '', m.name, +m.price, i.supplier_photo||'', m.cat?+m.cat:null]);
+    toast('Товар создан, штрихкод '+data.barcode); PO.mk = null; await loadPo(); render(); }
   else if(d.poarch){ if(t.dataset.sure!=='1'){ t.dataset.sure='1'; t.textContent='Закрыть без приёмки?'; return; } const { error } = await sb.rpc('po_close_archive', { p_id:d.poarch }); if(error) return toast(errText(error)); toast('Заказ закрыт без оприходования'); await loadPo(); render(); }
   else if(t.id==='po-rcv-ok'){ const r = PO.rcv, o = (PO.list||[]).find(x=>x.id===r.id); t.disabled=true;
     const main = +(r.store||o.store||S.store);
@@ -2188,7 +2208,8 @@ function poItemRow(o, i){
       ${cands.length?`<div class="meta" style="margin-top:4px">По этой же ссылке в базе ${cands.length===1?'есть товар':'есть товары'} — выберите нужный вариант:</div><div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:4px">${cands.map(p=>`<button class="btn small" data-polink="${i.item_id}:${p.id}" style="display:flex;gap:6px;align-items:center">${thumb(p)}<span style="text-align:left">${esc(p.name)}<br><span class="meta num">${esc(p.barcode)}</span></span></button>`).join('')}</div>`:''}
       ${i.spec?`<br><span class="meta">вариант: ${esc(i.spec)}</span>`:''}${i.purchase_url?` · <a href="${esc(i.purchase_url)}" target="_blank" rel="noopener" class="meta">у поставщика</a>`:''}
       ${canLink&&!i.product_id&&i.suggest?`<br><button class="btn small primary" data-polink="${i.item_id}:${i.suggest.id}">Связать с «${esc(i.suggest.name)}»</button>`:''}
-      ${canLink&&!lnk?`<br><button class="btn small" data-polinkopen="${i.item_id}">${i.product_id?'Изменить связь':'Найти в базе'}</button>`:''}
+      ${canLink&&!lnk&&!(PO.mk&&PO.mk.item===i.item_id)?`<br><span class="row" style="gap:6px;justify-content:flex-start"><button class="btn small" data-polinkopen="${i.item_id}">${i.product_id?'Изменить связь':'Найти в базе'}</button>${!i.product_id&&isBoss()&&!isViewer()?`<button class="btn small" data-pocreate="${i.item_id}">+ Создать товар</button>`:''}</span>`:''}
+      ${PO.mk&&PO.mk.item===i.item_id?poCreateHtml(o,i):''}
       ${lnk?`<div class="stack" style="gap:4px;margin-top:6px"><input id="po-lnk-q" placeholder="Штрихкод, артикул или название в нашей базе" value="${esc(PO.lnk.q)}" autocomplete="off">
         ${PO.lnk.found.slice(0,8).map(p=>`<button class="prod" data-polink="${i.item_id}:${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}</span></span><span class="price num">${fmt(p.price)}</span></button>`).join('')}</div>`:''}</td>
     <td class="num">${i.qty} шт.${i.received_qty!=null&&i.received_qty!==i.qty?'<br><span class="meta">получено '+i.received_qty+'</span>':''}</td>
@@ -2254,7 +2275,7 @@ async function import1688(file){
 }
 // перевод китайских названий на русский — встроенным переводчиком Chrome (бесплатно, прямо на компьютере)
 async function translate1688(){
-  const titles = [...new Set((PO.list||[]).flatMap(o=>(o.items||[]).filter(i=>i.supplier_title&&!i.title_ru).map(i=>i.supplier_title)))];
+  const titles = [...new Set([...(PO.list||[]).filter(o=>o.supplier&&/[\u4e00-\u9fff]/.test(o.supplier)&&!o.supplier_ru).map(o=>o.supplier), ...(PO.list||[]).flatMap(o=>(o.items||[]).filter(i=>i.supplier_title&&!i.title_ru).map(i=>i.supplier_title))])];
   if(!titles.length) return toast('Все названия уже переведены');
   if(!('Translator' in self)){ PO.imp = 'Перевод работает в браузере Google Chrome на компьютере. Откройте Silver в Chrome и нажмите кнопку ещё раз.'; return render(); }
   try{
@@ -2288,3 +2309,18 @@ function advanceDate(month){ const [y,m] = month.split('-').map(Number), d = new
 function advanceText(month){ const d = advanceDate(month), today = new Date(); today.setHours(0,0,0,0);
   const s = d.toLocaleDateString('ru-RU',{ day:'numeric', month:'long', weekday:'long' }), diff = Math.round((d - today)/864e5);
   return `Аванс в этом месяце: <b>${s}</b>${diff>0?` — через ${diff} дн.`:diff===0?' — <b>сегодня</b>':' — уже прошёл'} (обычно 15-го, если выпадает на выходные — в пятницу перед ними).`; }
+
+function poCreateHtml(o, i){
+  const m = PO.mk;
+  return `<div class="cust stack" style="gap:6px;margin-top:6px"><b>Новый товар в базу</b>
+    <input id="po-mk-name" value="${esc(m.name)}" placeholder="Название по-русски, как у нас в базе">
+    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
+      <select id="po-mk-cat"><option value="">Категория…</option>${(PO.cats||[]).map(c=>`<option value="${c.id}" ${String(m.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+      <input id="po-mk-color" value="${esc(m.color)}" placeholder="цвет" style="width:120px">
+      <label class="meta">Розничная цена, ₸ <input id="po-mk-price" type="number" min="1" inputmode="numeric" value="${esc(m.price)}" style="width:110px"></label>
+      <span class="meta">себестоимость ≈ ${fmt(m.landed)}</span></div>
+    <span class="meta">Фото и ссылка на поставщика сохранятся в карточке. Штрихкод создастся автоматически.</span>
+    <div class="row" style="justify-content:flex-start"><button class="btn small" id="po-mk-cancel">Отмена</button><button class="btn small primary" id="po-mk-save">Создать и связать</button></div></div>`;
+}
+
+document.addEventListener('input', e => { if(S.view==='po' && e.target.id==='po-oq'){ PO.oq = e.target.value; PO.lim = 40; clearTimeout(PO.oqT); PO.oqT = setTimeout(render, 250); } });
