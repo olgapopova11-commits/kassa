@@ -1337,17 +1337,22 @@ async function nmPhoto(file){
 }
 
 /* ---------- сайт ↔ база ---------- */
-const SITE_ST = [['review','Проверить'],['auto','Связано автоматически'],['confirmed','Подтверждено'],['none','Без пары'],['rejected','Нет на сайте']];
+const SITE_ST = [['review','Проверить'],['auto','Связано автоматически'],['confirmed','Подтверждено'],['siteonly','Только на сайте — нет в базе'],['baseonly','Только в базе — нет на сайте']];
 const SITE_NAME = { moon:'mooncollection.kz', sunshine:'sunshinejewelry.kz' };
 async function loadSite(){
   const f = S.st; f.data = null;
   if(!f.parts || f.partsSite!==f.site){ const r = await sb.rpc('site_parts', { p_site:f.site }); f.parts = r.data || []; f.partsSite = f.site; if(!f.parts.some(x=>x.part===f.part)) f.part = null; }
-  const { data, error } = await sb.rpc('site_list', { p_site:f.site, p_status:f.status, p_q:f.q.trim(), p_offset:f.off, p_limit:50, p_part:f.part||null });
+  const bo = f.status==='baseonly';
+  const [{ data, error }, b] = await Promise.all([
+    sb.rpc('site_list', { p_site:f.site, p_status:bo?'review':f.status, p_q:f.q.trim(), p_offset:f.off, p_limit:bo?0:50, p_part:f.part||null }),
+    sb.rpc('site_base_only', { p_site:f.site, p_q:f.q.trim(), p_offset:f.off, p_limit:bo?50:0 }) ]);
   if(error){ toast(errText(error)); f.data = { rows:[], counts:{} }; } else f.data = data;
+  f.baseTotal = b.data ? b.data.total : 0; f.base = bo && b.data ? b.data.rows : [];
 }
 function siteImg(u){ return u ? `<img class="thumb" style="width:64px;height:64px" src="${esc(thumbUrl(u))}" data-full="${esc(u)}" alt="" loading="lazy" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : '<span class="thumb" style="width:64px;height:64px"></span>'; }
 function renderSite(){
-  const f = S.st, D = f.data, cnt = k => (D && D.counts && D.counts[f.site+':'+k]) || 0;
+  const f = S.st, D = f.data, c0 = k => (D && D.counts && D.counts[f.site+':'+k]) || 0;
+  const cnt = k => k==='siteonly' ? c0('none')+c0('rejected') : k==='baseonly' ? (f.baseTotal||0) : c0(k);
   $('#main').innerHTML = `<h2>Сайт ↔ база товаров</h2>
     <p class="meta">Слева карточка с сайта, справа товар из базы, с которым она связана. Через эту связь на сайт пойдут остатки, а в кассу — фото. Несколько карточек сайта можно связать с одним товаром базы — например, все разные серьги за 3 500 ₸ с общим штрихкодом «Серьги 3500».</p>
     ${isBoss()&&!isViewer()?`<div class="row" style="justify-content:flex-start;margin-bottom:8px"><button class="btn small" id="st-grp">🔗 Связать несвязанные с общими штрихкодами (по типу и цене)</button></div>`:''}
@@ -1356,7 +1361,7 @@ function renderSite(){
       <input id="st-q" placeholder="Поиск: название или штрихкод" value="${esc(f.q)}" style="flex:1;min-width:200px"></div>
     <div class="filters"><select id="st-part" aria-label="Категория на сайте"><option value="">Все категории сайта</option>${(f.parts||[]).map(x=>`<option value="${esc(x.part)}" ${f.part===x.part?'selected':''}>${esc(x.name || 'Без названия: '+(x.sample||[]).slice(0,2).join(', '))} · ${x.n}</option>`).join('')}</select>
       ${f.part?(()=>{ const P = (f.parts||[]).find(x=>x.part===f.part); return P && /^\d+$/.test(P.part) ? `<input id="st-part-name" placeholder="Назовите раздел, например «Авторская работа»" value="${esc(P.name||'')}" style="min-width:240px"><button class="btn small" id="st-part-save">Сохранить название</button>` : ''; })():''}</div>
-    ${!D?'<div class="empty">Загружаем…</div>':!D.rows.length?'<div class="empty">Здесь пусто</div>':D.rows.map(r=>{ const key=r.site+':'+r.uid, open=f.open===key;
+    ${f.status==='baseonly' ? siteBaseOnlyHtml(f) : !D?'<div class="empty">Загружаем…</div>':!D.rows.length?'<div class="empty">Здесь пусто</div>':D.rows.map(r=>{ const key=r.site+':'+r.uid, open=f.open===key;
       return `<div class="card" style="margin-bottom:8px">
       <div class="grid2" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:center">
         <div class="row" style="justify-content:flex-start;align-items:flex-start">${siteImg(r.photo)}<div><b>${esc(r.title)}</b><br><span class="meta">${esc(r.part||'')}</span><br><span class="num">${fmt(r.price)}</span>
@@ -1368,7 +1373,7 @@ function renderSite(){
       <div class="row" style="justify-content:flex-end;flex-wrap:wrap;margin-top:8px">
         ${r.product_id&&r.status!=='confirmed'?`<button class="btn small primary" data-stok="${key}" data-pid="${r.product_id}">Верно</button>`:''}
         <button class="btn small" data-stopen="${key}">${open?'Скрыть':'Выбрать другой товар'}</button>
-        ${r.status!=='rejected'?`<button class="btn small" data-stno="${key}">Нет на сайте</button>`:''}
+        ${r.status!=='rejected'?`<button class="btn small" data-stno="${key}" title="Такого товара в базе нет">Нет в базе</button>`:'<span class="meta">отмечено: нет в базе</span>'}
       </div>
       ${open?`<div class="cust stack" style="margin-top:8px">
         <span class="label">Похожие товары в базе</span>
@@ -1378,13 +1383,33 @@ function renderSite(){
         ${f.cfound.slice(0,10).map(p=>`<button class="prod" data-stpick="${key}" data-pid="${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}</span></span><span class="price num">${fmt(p.price)}</span></button>`).join('')}
       </div>`:''}
     </div>`; }).join('')}
-    ${D&&(f.off||D.rows.length===50)?`<div class="row"><button class="btn" data-stpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-stpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`;
+    ${f.status!=='baseonly'&&D&&(f.off||D.rows.length===50)?`<div class="row"><button class="btn" data-stpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-stpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`;
 }
+function siteBaseOnlyHtml(f){
+  const L = f.base || [];
+  return `<p class="meta">Товары из базы, у которых нет карточки на сайте ${esc(SITE_NAME[f.site]||f.site)}. Сверху — те, что есть в наличии. Если карточка на сайте всё-таки есть — нажмите «Найти на сайте» и свяжите.</p>
+  ${!f.data?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Здесь пусто</div>':`<div class="scroll"><table><thead><tr><th></th><th>Товар</th><th>Категория</th><th>Штрихкод</th><th>Цена</th><th>Остаток</th><th></th></tr></thead><tbody>
+  ${L.map(p=>`<tr><td>${thumb(p)}</td><td><b>${esc(p.name)}</b>${p.is_group?' <span class="chip">общий штрихкод</span>':''}</td><td>${esc(p.category||'—')}</td><td class="num">${esc(p.barcode)}</td><td class="num">${fmt(p.price)}</td>
+    <td class="num">${p.stock>0?'<span class="chip ok">'+p.stock+'</span>':'<span class="meta">0</span>'}</td>
+    <td>${isBoss()&&!isViewer()?`<button class="btn small" data-stbfind="${p.id}">${f.bfind===p.id?'Скрыть':'Найти на сайте'}</button>`:''}</td></tr>
+    ${f.bfind===p.id?`<tr><td></td><td colspan="6"><div class="cust stack" style="gap:4px"><input id="st-bq" placeholder="Название карточки на сайте" value="${esc(f.bq||'')}" autocomplete="off">
+      ${(f.bfound||[]).filter(x=>x.site===f.site).map(x=>`<button class="prod" data-stblink="${x.site}:${x.uid}" data-pid="${p.id}">${thumb({photo_url:x.photo})}<span><b>${esc(x.title)}</b><br><span class="meta">${x.linked_to?'сейчас связан с: '+esc(x.linked_to):'не связан'}</span></span><span class="price num">${fmt(x.price)}</span></button>`).join('')}</div></td></tr>`:''}`).join('')}</tbody></table></div>
+  ${f.off||L.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-stpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+L.length} из ${f.baseTotal}</span><button class="btn" data-stpage="1" ${L.length===50?'':'disabled'}>Дальше</button></div>`:''}`}`;
+}
+document.addEventListener('click', async e => {
+  if(S.view!=='site') return; const t = e.target.closest('button'); if(!t) return; const d = t.dataset, f = S.st;
+  if(d.stbfind){ if(f.bfind===d.stbfind){ f.bfind = null; render(); return; } const p = (f.base||[]).find(x=>x.id===d.stbfind); f.bfind = d.stbfind; f.bq = p ? p.name : ''; f.bfound = []; render();
+    const { data } = await sb.rpc('site_search', { p_q: f.bq.split(' ').slice(0,2).join(' ') }); f.bfound = data || []; render(); const el = $('#st-bq'); if(el) el.focus(); }
+  else if(d.stblink){ const [site, uid] = d.stblink.split(':'); const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product:d.pid, p_status:'confirmed' });
+    if(error) return toast(errText(error)); toast('Связано с карточкой сайта'); f.bfind = null; await loadSite(); render(); }
+});
+document.addEventListener('input', e => { if(S.view!=='site' || e.target.id!=='st-bq') return; const f = S.st; f.bq = e.target.value; clearTimeout(f.bqT);
+  f.bqT = setTimeout(async () => { if(f.bq.trim().length < 2) return; const { data } = await sb.rpc('site_search', { p_q: f.bq.trim() }); f.bfound = data || []; render(); const el = $('#st-bq'); if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 350); });
 async function siteSet(key, pid, status){
   const [site, uid] = key.split(':');
   const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product:pid||null, p_status:status });
   if(error) return toast(errText(error));
-  toast(status==='confirmed'?'Связь подтверждена':'Отмечено: нет на сайте');
+  toast(status==='confirmed'?'Связь подтверждена':'Отмечено: в базе такого товара нет');
   S.st.open=null; S.st.cands=null; await loadSite(); render();
 }
 
