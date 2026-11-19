@@ -1421,9 +1421,15 @@ function renderBonus(){
 /* ---------- закуп ---------- */
 const PO = { mode:'orders', filter:'open', list:null, sug:null, an:null, anPer:'month', q:'', found:[], d:null };
 const PO_ST = { ordered:['warn','заказано'], transit:['warn','в пути'], received:['ok','получено'], cancelled:['zero','отменён'] };
-const poNew = () => ({ supplier:'', store:S.store, eta:'', cargo:'', note:'', items:[] });
+const poNew = () => ({ supplier:'', store:S.store, eta:'', cargo:'', note:'', items:[], cur:'CNY', rate:'', pct:10 });
+const CUR = { KZT:'₸', CNY:'¥', USD:'$', RUB:'₽' };
+const fxNow = c => c==='KZT' ? 1 : +(((PO.fx||{})[c]||{}).rate)||0;
+const poRate = d => +d.rate || fxNow(d.cur) || 1;
+// себестоимость единицы: цена × курс × (1 + % доставки до Казахстана) + доставка по Китаю (в валюте заказа) поровну на каждую единицу
+const poLanded = (price, rate, pct, cargo, units) => (+price||0)*rate*(1+(+pct||0)/100) + (units ? (+cargo||0)*rate/units : 0);
 const poEdit = () => S.me && ['owner','manager','purchaser'].includes(S.me.role);
 async function loadPo(){
+  if(!PO.fx){ const r = await sb.rpc('fx_current'); PO.fx = r.data || {}; }
   if(PO.mode==='orders'){ const { data, error } = await sb.rpc('po_list', { p_status: PO.filter==='all'?null:PO.filter }); if(error) toast(errText(error)); PO.list = data||[]; }
   if(PO.mode==='suggest'){ const { data, error } = await sb.rpc('po_suggest', { p_days:30 }); if(error) toast(errText(error)); PO.sug = data||[]; }
   if(PO.mode==='an'){ const now = new Date(), iso = x => x.toLocaleDateString('sv-SE'); const from = PO.anPer==='month' ? new Date(now.getFullYear(), now.getMonth(), 1) : PO.anPer==='q' ? new Date(now.getFullYear(), now.getMonth()-2, 1) : new Date(now.getFullYear(), 0, 1);
@@ -1439,10 +1445,11 @@ function renderPo(){
     ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Заказов нет</div>':L.map(o=>{ const goods=(o.items||[]).reduce((a,i)=>a+i.qty*(+i.unit_cost||0),0), units=(o.items||[]).reduce((a,i)=>a+i.qty,0);
       return `<div class="card" style="margin-bottom:10px"><div class="row" style="flex-wrap:wrap"><b>№${o.number} · ${esc(o.supplier||'поставщик не указан')} → ${esc(storeName(o.store))}</b><span class="chip ${PO_ST[o.status][0]}">${PO_ST[o.status][1]}</span></div>
         <div class="meta">заказ от ${dshort(o.created_at)}${o.eta?' · ждём к '+dshort(o.eta):''}${o.shipped_at?' · отправлен '+dshort(o.shipped_at):''}${o.received_at?' · получен '+dshort(o.received_at):''} · ${esc(o.by||'')}${o.note?' · '+esc(o.note):''}</div>
-        <div class="scroll"><table><tbody>${(o.items||[]).map(i=>`<tr><td>${thumb(i)}</td><td>${esc(i.name)}<br><span class="meta num">${esc(i.barcode)}</span>${i.purchase_url?` · <a href="${esc(i.purchase_url)}" target="_blank" rel="noopener" class="meta">ссылка на закуп</a>`:''}</td><td class="num">${i.qty} шт.${i.received_qty!=null&&i.received_qty!==i.qty?'<br><span class="meta">получено '+i.received_qty+'</span>':''}</td><td class="num">${i.unit_cost!=null?fmt(i.unit_cost):'—'}</td><td class="num">${i.unit_cost!=null?fmt(i.qty*i.unit_cost):''}</td></tr>`).join('')}</tbody></table></div>
-        <div class="row" style="flex-wrap:wrap"><span class="meta">${units} шт. · товар ${fmt(goods)}${+o.cargo?' · карго '+fmt(o.cargo):''} · итого ${fmt(goods + (+o.cargo||0))}</span>
+        <div class="scroll"><table><tbody>${(o.items||[]).map(i=>poItemRow(o,i)).join('')}</tbody></table></div>
+        ${PO.rcv&&PO.rcv.id===o.id?poRcvHtml(o):''}
+        <div class="row" style="flex-wrap:wrap"><span class="meta">${units} шт. · товар ${fmt(goods)}${o.currency&&o.currency!=='KZT'?' (курс заказа '+o.currency+' '+(+o.rate).toFixed(2)+')':''}${+o.cargo?' · доставка по Китаю '+(+o.cargo).toLocaleString('ru-RU')+' '+(CUR[o.currency]||'₸'):''} · +${o.delivery_pct??10}% доставка до Казахстана</span>
           <span>${poEdit()&&o.status==='ordered'?`<button class="btn small" data-postatus="${o.id}:transit">Отправлен — в пути</button>`:''}
-          ${isBoss()&&!isViewer()&&['ordered','transit'].includes(o.status)?`<button class="btn small primary" data-poreceive="${o.id}">Получить на склад</button>`:''}
+          ${isBoss()&&!isViewer()&&['ordered','transit'].includes(o.status)&&!(PO.rcv&&PO.rcv.id===o.id)?`<button class="btn small primary" data-poreceive="${o.id}">Получить на склад</button>`:''}
           ${poEdit()&&['ordered','transit'].includes(o.status)?`<button class="btn small" data-postatus="${o.id}:cancelled">Отменить</button>`:''}</span></div></div>`; }).join('')}`;
   }
   if(PO.mode==='new'){
@@ -1452,14 +1459,19 @@ function renderPo(){
         <input id="po-supplier" placeholder="Поставщик (1688, Иу, рынок…)" value="${esc(d.supplier)}" style="flex:1;min-width:180px">
         <label class="meta">Куда <select id="po-store">${S.allStores.map(st=>`<option value="${st.id}" ${+d.store===st.id?'selected':''}>${esc(storeName(st.id))}</option>`).join('')}</select></label>
         <label class="meta">Ждём к <input type="date" id="po-eta" value="${d.eta}"></label>
-        <label class="meta">Карго, ₸ <input id="po-cargo" type="number" min="0" inputmode="numeric" value="${esc(d.cargo)}" style="width:110px"></label></div>
+        <label class="meta">Валюта <select id="po-cur">${Object.keys(CUR).map(c=>`<option ${d.cur===c?'selected':''}>${c}</option>`).join('')}</select></label>
+        ${d.cur!=='KZT'?`<label class="meta">Курс <input id="po-rate" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(d.rate)}" placeholder="${fxNow(d.cur)||''}" style="width:90px"></label>`:''}
+        <label class="meta">Доставка по Китаю, ${CUR[d.cur]} <input id="po-cargo" type="number" min="0" inputmode="numeric" value="${esc(d.cargo)}" style="width:110px"></label>
+        <label class="meta">+ % доставка до Казахстана <input id="po-pct" type="number" min="0" step="1" inputmode="numeric" value="${esc(d.pct)}" style="width:60px"></label></div>
+      <span class="meta">Курс Нацбанка сегодня: ${['CNY','USD','RUB'].map(c=>c+' '+(fxNow(c)?fxNow(c).toFixed(2):'—')).join(' · ')}. Себестоимость пересчитается по курсу на день приёмки.</span>
       <input id="po-note" placeholder="Комментарий (номер заказа на 1688, трек-номер…)" value="${esc(d.note)}">
       <div class="row"><input id="po-q" placeholder="Добавить товар: штрихкод или название" value="${esc(PO.q)}" style="flex:1" autocomplete="off"></div>
       ${PO.found.length?`<div class="list">${PO.found.slice(0,10).map(p=>`<button class="prod" data-poadd="${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}</span></span><span class="price num">${fmt(p.price)}</span></button>`).join('')}</div>`:''}
-      ${d.items.length?`<div class="scroll"><table><thead><tr><th>Товар</th><th>Кол-во</th><th>Закуп за шт., ₸</th><th>Сумма</th><th></th></tr></thead><tbody>
+      ${d.items.length?(()=>{ const rt = poRate(d), un = d.items.reduce((a,i)=>a+(+i.qty||0),0); return `<div class="scroll"><table><thead><tr><th>Товар</th><th>Кол-во</th><th>Цена за шт., ${CUR[d.cur]}</th><th>Сумма, ${CUR[d.cur]}</th><th>Себестоимость шт. ≈</th><th></th></tr></thead><tbody>
         ${d.items.map((i,n)=>`<tr><td>${esc(i.name)}<br><span class="meta num">${esc(i.barcode)}</span></td><td><input class="small" type="number" min="1" data-poqty="${n}" value="${i.qty}" inputmode="numeric" style="width:70px"></td>
-          <td><input class="small" type="number" min="0" data-pocost="${n}" value="${i.cost??''}" inputmode="numeric" style="width:90px"></td><td class="num">${fmt(i.qty*(+i.cost||0))}</td><td><button class="btn small" data-podel="${n}">✕</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Добавьте товары поиском или из вкладки «Что дозаказать»</div>'}
-      <div class="row"><span class="meta">Позиций ${d.items.length} · ${d.items.reduce((a,i)=>a+i.qty,0)} шт. · товар ${fmt(tot)}${+d.cargo?' + карго '+fmt(d.cargo):''}</span>
+          <td><input class="small" type="number" min="0" step="0.01" data-pocost="${n}" value="${i.cost??''}" inputmode="decimal" style="width:90px"></td><td class="num">${((+i.qty||0)*(+i.cost||0)).toLocaleString('ru-RU')}</td>
+          <td class="num">${i.cost!==''&&i.cost!=null?fmt(poLanded(i.cost, rt, d.pct, d.cargo, un)):'—'}</td><td><button class="btn small" data-podel="${n}">✕</button></td></tr>`).join('')}</tbody></table></div>`; })():'<div class="empty">Добавьте товары поиском или из вкладки «Что дозаказать»</div>'}
+      <div class="row"><span class="meta">Позиций ${d.items.length} · ${d.items.reduce((a,i)=>a+i.qty,0)} шт. · товар ${tot.toLocaleString('ru-RU')} ${CUR[d.cur]}${d.cur!=='KZT'?' ≈ '+fmt(tot*poRate(d)):''}${+d.cargo?' + доставка по Китаю '+d.cargo+' '+CUR[d.cur]:''} + ${d.pct||0}% до Казахстана</span>
         <button class="btn primary" id="po-save" ${d.items.length?'':'disabled'}>Оформить заказ</button></div></div>`;
   }
   if(PO.mode==='suggest'){
@@ -1721,10 +1733,17 @@ document.addEventListener('click', async e => {
   else if(d.podel!=null){ PO.d.items.splice(+d.podel,1); render(); }
   else if(d.posug){ const p = (PO.sug||[]).find(x=>x.id===d.posug); const dd = PO.d || (PO.d=poNew()); if(p && !dd.items.some(i=>i.pid===p.id)) dd.items.push({ pid:p.id, name:p.name, barcode:p.barcode, qty:Math.max(1,+d.need||1), cost:p.cost??'' }); toast('Добавлено в новый заказ ('+dd.items.length+' поз.)'); t.disabled=true; }
   else if(t.id==='po-save'){ const dd = PO.d; t.disabled=true;
-    const { data, error } = await sb.rpc('po_save', { p:{ supplier:dd.supplier, store_id:+dd.store, eta:dd.eta, cargo_cost:dd.cargo, note:dd.note, items:dd.items.map(i=>({ product_id:i.pid, qty:+i.qty, unit_cost:i.cost===''?null:+i.cost })) } });
+    const { data, error } = await sb.rpc('po_save', { p:{ supplier:dd.supplier, store_id:+dd.store, eta:dd.eta, cargo_cost:dd.cargo, note:dd.note, currency:dd.cur, rate:dd.cur==='KZT'?1:poRate(dd), delivery_pct:dd.pct, items:dd.items.map(i=>({ product_id:i.pid, qty:+i.qty, price_cur:i.cost===''?null:+i.cost })) } });
     if(error){ toast(errText(error)); t.disabled=false; return; } toast('Заказ оформлен'); PO.d=null; PO.mode='orders'; PO.filter='open'; await loadPo(); render(); }
   else if(d.postatus){ const [id, st] = d.postatus.split(':'); const { error } = await sb.rpc('po_set_status', { p_id:id, p_status:st }); if(error) return toast(errText(error)); toast(st==='transit'?'Отмечено: в пути':'Заказ отменён'); await loadPo(); render(); }
-  else if(d.poreceive){ t.disabled=true; const { error } = await sb.rpc('po_receive', { p_id:d.poreceive, p_items:null }); if(error){ toast(errText(error)); t.disabled=false; return; } toast('Товар принят на склад'); await loadPo(); render(); }
+  else if(d.poreceive){ const o = (PO.list||[]).find(x=>x.id===d.poreceive); PO.rcv = { id:d.poreceive, rate: o && o.currency!=='KZT' ? (+o.rate_now||+o.rate||'') : 1, qty:{} }; render(); }
+  else if(t.id==='po-rcv-cancel'){ PO.rcv = null; render(); }
+  else if(t.id==='po-rcv-ok'){ const r = PO.rcv, o = (PO.list||[]).find(x=>x.id===r.id); t.disabled=true;
+    const items = (o.items||[]).map(i=>({ item_id:i.item_id, qty: r.qty[i.item_id]!=null ? +r.qty[i.item_id] : i.qty }));
+    const { error } = await sb.rpc('po_receive', { p_id:r.id, p_items:items, p_rate: o.currency==='KZT' ? 1 : +r.rate });
+    if(error){ toast(errText(error)); t.disabled=false; return; } PO.rcv = null; toast('Товар принят, себестоимость пересчитана'); await loadPo(); render(); }
+  else if(d.polink){ const [item, pid] = d.polink.split(':'); const { error } = await sb.rpc('po_link_item', { p_item:item, p_product:pid||null }); if(error) return toast(errText(error)); PO.lnk = null; toast(pid?'Связано с товаром базы':'Связь снята'); await loadPo(); render(); }
+  else if(d.polinkopen){ PO.lnk = { item:d.polinkopen, q:'', found:[] }; render(); const el = document.getElementById('po-lnk-q'); if(el) el.focus(); }
   else if(d.pfper){ PF.per=d.pfper; await loadProfit(); render(); }
   else if(t.id==='pf-add'){ const a = PF.add; a.store = a.store || (S.allStores[0]||{}).id; if(!(+a.amount>0)) return toast('Укажите сумму');
     const { error } = await sb.rpc('store_cost_add', { p_store:+a.store, p_month:a.month+'-01', p_category:a.cat, p_amount:+a.amount, p_note:a.note });
@@ -1820,6 +1839,9 @@ document.addEventListener('change', async e => {
   if(t.id==='po-store' && PO.d){ PO.d.store=+t.value; } if(t.id==='po-eta' && PO.d){ PO.d.eta=t.value; }
   if(t.dataset && t.dataset.poqty!=null && PO.d){ PO.d.items[+t.dataset.poqty].qty = Math.max(1, +t.value||1); render(); }
   if(t.dataset && t.dataset.pocost!=null && PO.d){ PO.d.items[+t.dataset.pocost].cost = t.value; render(); }
+  if(t.id==='po-cur' && PO.d){ PO.d.cur = t.value; PO.d.rate = ''; render(); } if(t.id==='po-rate' && PO.d){ PO.d.rate = t.value; render(); } if(t.id==='po-pct' && PO.d){ PO.d.pct = t.value; render(); }
+  if(t.id==='po-rcv-rate' && PO.rcv){ PO.rcv.rate = t.value; render(); }
+  if(t.dataset && t.dataset.porcvqty && PO.rcv){ PO.rcv.qty[t.dataset.porcvqty] = Math.max(0, +t.value||0); render(); }
   if(t.id==='py-official'){ PYF.official = t.checked; render(); }
   if(t.id==='py-month'){ PY.month = t.value || PY.month; PY.open=null; await loadPay(); render(); }
   if(t.id==='py-store'){ PY.store = +t.value; await loadPay(); render(); }
@@ -2130,4 +2152,37 @@ document.addEventListener('click', async e => {
   if(t.dataset.fldays){ FL.days = +t.dataset.fldays; render(); await loadFlow(); render(); }
   else if(t.dataset.flgo){ const b = document.querySelector(`nav button[data-view="${t.dataset.flgo}"]`); S.view = t.dataset.flgo; const g = groupOf(S.view); (S.lastView ||= {})[g[0]] = S.view; render(); scrollTo(0,0);
     if(S.view==='po'){ await loadPo(); render(); } else if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); } else if(S.view==='site'){ await loadSite(); render(); } else if(S.view==='nom'){ await loadNom(); render(); } else if(S.view==='analytics'){ S.an=null; await loadAnalytics(); render(); } }
+});
+
+
+/* ---------- закуп: позиции, привязка к базе, приёмка с пересчётом себестоимости ---------- */
+function poItemRow(o, i){
+  const cur = CUR[o.currency||'KZT'] || '₸', open = ['ordered','transit'].includes(o.status), canLink = open && (poEdit() || (isBoss() && !isViewer()));
+  const lnk = PO.lnk && PO.lnk.item===i.item_id;
+  return `<tr><td>${thumb(i)}</td><td>${i.product_id?`<b>${esc(i.name)}</b><br><span class="meta num">${esc(i.barcode||'')}</span>`:`<span class="chip zero">не связан с базой</span> ${esc(i.supplier_title||'')}`}
+      ${i.spec?`<br><span class="meta">вариант: ${esc(i.spec)}</span>`:''}${i.purchase_url?` · <a href="${esc(i.purchase_url)}" target="_blank" rel="noopener" class="meta">у поставщика</a>`:''}
+      ${canLink&&!i.product_id&&i.suggest?`<br><button class="btn small primary" data-polink="${i.item_id}:${i.suggest.id}">Связать с «${esc(i.suggest.name)}»</button>`:''}
+      ${canLink&&!lnk?`<br><button class="btn small" data-polinkopen="${i.item_id}">${i.product_id?'Изменить связь':'Найти в базе'}</button>`:''}
+      ${lnk?`<div class="stack" style="gap:4px;margin-top:6px"><input id="po-lnk-q" placeholder="Штрихкод, артикул или название в нашей базе" value="${esc(PO.lnk.q)}" autocomplete="off">
+        ${PO.lnk.found.slice(0,8).map(p=>`<button class="prod" data-polink="${i.item_id}:${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}</span></span><span class="price num">${fmt(p.price)}</span></button>`).join('')}</div>`:''}</td>
+    <td class="num">${i.qty} шт.${i.received_qty!=null&&i.received_qty!==i.qty?'<br><span class="meta">получено '+i.received_qty+'</span>':''}</td>
+    <td class="num">${i.price_cur!=null?(+i.price_cur).toLocaleString('ru-RU')+' '+cur:'—'}${i.unit_cost!=null&&o.currency!=='KZT'?'<br><span class="meta">≈ '+fmt(i.unit_cost)+'</span>':''}</td>
+    <td class="num">${i.landed_cost!=null?'<b>'+fmt(i.landed_cost)+'</b><br><span class="meta">себестоимость</span>':''}</td></tr>`;
+}
+function poRcvHtml(o){
+  const r = PO.rcv, isK = (o.currency||'KZT')==='KZT', rt = isK ? 1 : (+r.rate||0);
+  const q = i => r.qty[i.item_id]!=null ? r.qty[i.item_id] : i.qty, units = (o.items||[]).reduce((a,i)=>a+q(i),0), unlinked = (o.items||[]).filter(i=>!i.product_id && q(i)>0).length;
+  return `<div class="cust stack" style="margin-top:8px"><b>Приёмка заказа №${o.number}</b>
+    ${isK?'':`<label class="meta">Курс ${o.currency} на сегодня <input id="po-rcv-rate" type="number" step="0.01" min="0" inputmode="decimal" value="${esc(r.rate)}" style="width:100px"></label>
+      <span class="meta">курс Нацбанка ${(+o.rate_now||0).toFixed(2)} · при заказе был ${(+o.rate).toFixed(2)}</span>`}
+    <div class="scroll"><table><thead><tr><th>Товар</th><th>Пришло, шт.</th><th>Себестоимость шт.</th></tr></thead><tbody>
+      ${(o.items||[]).map(i=>`<tr><td>${esc(i.name)}${i.product_id?'':' <span class="chip zero">свяжите с базой</span>'}</td><td><input class="small" type="number" min="0" data-porcvqty="${i.item_id}" value="${q(i)}" inputmode="numeric" style="width:70px"></td>
+        <td class="num">${fmt(poLanded(i.price_cur!=null?i.price_cur:(i.unit_cost||0)/(+o.rate||1), rt, o.delivery_pct??10, o.cargo, units))}</td></tr>`).join('')}</tbody></table></div>
+    <span class="meta">Себестоимость = цена × курс + ${o.delivery_pct??10}% доставка до Казахстана${+o.cargo?` + доставка по Китаю ${fmt(o.cargo*rt)} ÷ ${units} шт. = ${fmt(units?o.cargo*rt/units:0)} на каждую единицу`:''}.</span>
+    ${unlinked?`<div class="warn">Свяжите с базой товаров ещё ${unlinked} поз. — без этого приёмку не провести.</div>`:''}
+    <div class="row" style="justify-content:flex-start"><button class="btn" id="po-rcv-cancel">Отмена</button><button class="btn primary" id="po-rcv-ok" ${unlinked||(!isK&&!(rt>0))?'disabled':''}>Принять на склад</button></div></div>`;
+}
+document.addEventListener('input', e => {
+  if(S.view!=='po' || e.target.id!=='po-lnk-q' || !PO.lnk) return;
+  PO.lnk.q = e.target.value; clearTimeout(PO.lnkT); PO.lnkT = setTimeout(()=>{ PO.lnk.found = searchCatalog(PO.lnk.q); render(); }, 250);
 });
