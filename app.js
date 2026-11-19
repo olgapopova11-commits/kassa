@@ -579,8 +579,15 @@ async function loadWhSide(){
   else { const { data } = await sb.rpc('writeoffs_list', { p_store: isBoss()?null:S.store }); S.whList = (data||[]).filter(x => x.kind === S.wmode);
     if(S.wmode==='writeoff'){ const r = await sb.rpc('writeoff_requests_list', { p_status:null }); S.woReqs = r.data||[]; } }
 }
+setInterval(async () => {
+  if(document.hidden || S.view!=='wh' || S.wmode!=='audit' || !S.audit) return;
+  const ae = document.activeElement; if(ae && ae.tagName==='INPUT' && ae.id!=='dq') return;
+  if(ae && ae.id==='dq' && ae.value) return;
+  const had = ae && ae.id==='dq'; await loadAudit(); if(S.view==='wh' && S.wmode==='audit'){ render(); if(had && $('#dq')) $('#dq').focus(); }
+}, 10000);
 async function loadAudit(){
-  const { data: open } = await sb.from('audits').select('id,store_id,status,started_at').eq('store_id', S.store).eq('status','counting').limit(1);
+  if(!S.auStore || !S.stores.some(x=>x.id===S.auStore)) S.auStore = S.store;
+  const { data: open } = await sb.from('audits').select('id,store_id,status,started_at').eq('store_id', S.auStore).eq('status','counting').limit(1);
   S.audit = open && open[0] || null; S.auditRows = [];
   if(S.audit){ const { data } = await sb.rpc('audit_diff', { p_audit:S.audit.id, p_include_uncounted:false }); S.auditRows = (data&&data.rows)||[]; }
 }
@@ -647,8 +654,9 @@ function renderTransfers(){
 function renderAudit(head){
   const a = S.audit;
   $('#main').innerHTML = `<h2>Склад</h2>${head}
-    <div class="card stack"><div class="row"><b>Ревизия · ${esc(storeName(S.store))}</b>${a?`<span class="meta">начата ${new Date(a.started_at).toLocaleString('ru-RU')}</span>`:''}</div>
+    <div class="card stack"><div class="row" style="flex-wrap:wrap"><b>Ревизия</b><select id="au-store" aria-label="Магазин ревизии">${S.stores.map(st=>`<option value="${st.id}" ${st.id===S.auStore?'selected':''}>${esc(BRAND[st.brand]+' · '+st.city+', '+st.address)}</option>`).join('')}</select>${a?`<span class="meta">начата ${new Date(a.started_at).toLocaleString('ru-RU')}</span>`:''}</div>
     ${!a?`<button class="btn primary" id="au-start">Начать ревизию в этом магазине</button>`:`
+      <p class="meta" style="margin:0">Сканировать можно одновременно с нескольких телефонов и компьютеров — каждый скан прибавляет +1 к общему счёту, ничего не затирается. Таблица обновляется сама каждые 10 секунд. Ручная правка числа в колонке «Посчитано» заменяет общий итог по товару — используйте её только для исправления.</p>
       ${docSearchHtml('Сканируйте товар — каждое сканирование +1')}
       <div class="scroll"><table><thead><tr><th>Товар</th><th>Посчитано</th><th>По базе</th><th>Разница</th></tr></thead><tbody>
       ${S.auditRows.map(r=>`<tr><td>${esc(r.name)}<br><span class="meta num">${esc(r.barcode)}</span></td>
@@ -1902,7 +1910,7 @@ document.addEventListener('click', async e => {
   else if(d.trok || d.trno){ const note = d.trno ? (prompt('Причина отказа (необязательно)')||'') : null; const { error } = await sb.rpc('transfer_decide', { p_transfer:d.trok||d.trno, p_approve:!!d.trok, p_note:note }); if(error) toast(errText(error)); else { toast(d.trok?'Перемещение подтверждено, товар списан с отправителя':'Перемещение отклонено'); await loadWhSide(); render(); } }
   else if(d.trrecv){ const { error } = await sb.rpc('receive_transfer', { p_transfer:d.trrecv }); if(error) toast(errText(error)); else { toast('Перемещение принято'); await loadWhSide(); render(); } }
   else if(d.labels){ printLabels(JSON.parse(d.labels)); }
-  else if(t.id==='au-start'){ const { error } = await sb.rpc('audit_start', { p_store:S.store }); if(error) toast(errText(error)); await loadAudit(); render(); }
+  else if(t.id==='au-start'){ const { error } = await sb.rpc('audit_start', { p_store:S.auStore||S.store }); if(error) toast(errText(error)); await loadAudit(); render(); }
   else if(t.id==='au-uncounted'){ const { data } = await sb.rpc('audit_diff', { p_audit:S.audit.id, p_include_uncounted:true }); S.auditRows=(data&&data.rows)||[]; render(); }
   else if(t.id==='au-close'||t.id==='au-close-full'){ const full=t.id==='au-close-full';
     modal(`<h2>Закрыть ревизию?</h2><p>${full?'Все товары, которые не посчитали, будут обнулены в этом магазине.':'Остатки поправятся только по посчитанным товарам.'}</p>
@@ -1959,6 +1967,7 @@ document.addEventListener('change', async e => {
   if(d.nf && (t.type==='checkbox' || t.tagName==='SELECT')){ S.nm.ed[d.nf] = t.type==='checkbox' ? t.checked : t.value; }
   if(t.id==='d-store'){ S.doc.store=+t.value; }
   if(t.id==='d-to'){ S.doc.to=+t.value; }
+  if(t.id==='au-store'){ S.auStore = +t.value; S.audit = null; S.auditRows = []; render(); await loadAudit(); render(); }
   if(d.acset){ sb.rpc('audit_count', { p_audit:S.audit.id, p_product:d.acset, p_delta:0, p_set:Math.max(0,+t.value||0) }).then(async r=>{ if(r.error) toast(errText(r.error)); await loadAudit(); render(); }); }
   if(t.id==='stsort'){ S.stockSort = t.value; S.stockDir='desc'; loadStockView().then(render); }
 });
