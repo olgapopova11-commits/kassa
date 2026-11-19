@@ -222,12 +222,8 @@ function renderShell(){
   // настройка владельца: какие вкладки видит каждая роль
   const acc = (S.tabAccess||{})[S.me.role];
   if(S.me.role !== 'owner' && Array.isArray(acc)){ const keep = tabs.filter(([v]) => acc.includes(v)); tabs.splice(0, tabs.length, ...keep); }
-  tabs.push(['pay', isBoss() ? 'Зарплата' : 'Моя зарплата']);
-  if(['owner','viewer'].includes(S.me.role)) tabs.push(['profit','Рентабельность']);
-  if(['owner','manager','purchaser','viewer','accountant'].includes(S.me.role)) tabs.push(['po','Закуп']);
-  tabs.push(['promo','Акции']);
-  if(['owner','manager','purchaser','viewer'].includes(S.me.role)) tabs.push(['content','Контент']);
-  if(isBoss()) tabs.push(['flow','Путь товара']);
+  // остальные вкладки: владельцу все, остальным — по настройке «Какие вкладки видит каждая роль» (или по умолчанию)
+  for(const [v,t] of EXTRA_TABS){ if(S.me.role==='owner' || (Array.isArray(acc) ? acc.includes(v) : (EXTRA_DEF[v]||[]).includes(S.me.role))) tabs.push([v, v==='pay' && !isBoss() ? 'Моя зарплата' : t]); }
   if(S.me.role==='owner') tabs.push(['adm','Административный штат']);
   if(isViewer()){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pos' && (v!=='emps' || S.me.role==='accountant'))); if(!S.view || S.view==='pos' || (S.view==='emps' && S.me.role!=='accountant')) S.view = 'analytics'; }
   if(tabs.length && !tabs.some(([v]) => v===S.view)) S.view = tabs[0][0];
@@ -239,7 +235,7 @@ function renderShell(){
 }
 // вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
 const GROUPS = [['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['flow','stock','wh','po','nom','site']],
-  ['clients','💳','Клиенты',['promo','content','bonus','certs']],['analytics','📈','Аналитика',['analytics','profit']],['team','👥','Сотрудники',['me','emps','pay','adm']]];
+  ['clients','💳','Клиенты',['promo','content','bonus','certs']],['analytics','📈','Аналитика',['analytics','profit']],['team','👥','Сотрудники',['me','emps','cons','pay','adm']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 function renderNav(){
   const tabs = S.tabs || [], has = v => tabs.some(t => t[0]===v), title = v => (tabs.find(t=>t[0]===v)||[])[1];
@@ -271,7 +267,7 @@ function render(){
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -1729,6 +1725,41 @@ document.addEventListener('change', async e => {
   if(k==='format' || k==='publish_at') render(); else toast('Сохранено');
 });
 
+/* ---------- консультанты: список, телефоны, магазины — для доступа к Telegram-боту ---------- */
+const CN = { q:'', store:'', show:'active' };
+function renderCons(){
+  if(!S.emps){ $('#main').innerHTML = '<div class="empty">Загружаем…</div>'; return; }
+  if(!document.getElementById('emp-css')){ const st = document.createElement('style'); st.id = 'emp-css'; st.textContent = `.emp-tbl td,.emp-tbl th{padding:5px 8px;vertical-align:middle}.emp-tbl td{white-space:nowrap}.emp-tbl input,.emp-tbl select{padding:4px 6px;font-size:13px}.emp-tbl details.dd summary{padding:4px 8px;font-size:13px}.emp-tbl tr.off td{opacity:.5}.emp-add>summary,.emp-acc>summary{cursor:pointer;font-weight:600;list-style:none}.emp-add>summary::-webkit-details-marker,.emp-acc>summary::-webkit-details-marker{display:none}`; document.head.append(st); }
+  const all = (S.emps||[]).filter(e=>e.role==='consultant'), ids = e => e.store_ids||(e.home_store_id?[e.home_store_id]:[]);
+  const q = CN.q.trim().toLowerCase();
+  const C = all.filter(e => (CN.show==='all' || (CN.show==='active' ? e.active : CN.show==='nophone' ? e.active && !e.phone : CN.show==='notg' ? e.active && !e.telegram_id : !e.active))
+    && (!CN.store || ids(e).includes(+CN.store)) && (!q || (e.full_name||'').toLowerCase().includes(q) || (e.phone||'').includes(q.replace(/\D/g,''))))
+    .sort((a,b)=>(b.active-a.active)||a.full_name.localeCompare(b.full_name,'ru'));
+  const act = all.filter(e=>e.active), noPh = act.filter(e=>!e.phone).length, noTg = act.filter(e=>!e.telegram_id).length;
+  $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap"><h2 style="margin:0">Консультанты <span class="meta">${act.length}</span></h2></div>
+  <p class="meta" style="margin:4px 0 10px">Консультант пользуется ботом так: вы вписываете его телефон и магазины → он открывает Telegram-бота и жмёт «Поделиться номером». Бот узнаёт его по номеру. В саму программу консультанты не входят.</p>
+  <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:8px">
+    <div class="seg">${[['active','Работают'],['nophone',`Без телефона${noPh?' ('+noPh+')':''}`],['notg',`Без Telegram${noTg?' ('+noTg+')':''}`],['off','Уволены'],['all','Все']].map(([k,v])=>`<button data-cnshow="${k}" aria-pressed="${CN.show===k}">${v}</button>`).join('')}</div>
+    <select id="cn-store"><option value="">Все магазины</option>${S.allStores.map(x=>`<option value="${x.id}" ${String(CN.store)===String(x.id)?'selected':''}>${esc(BRAND[x.brand]+' · '+x.address)}</option>`).join('')}</select>
+    <input id="cn-q" type="search" placeholder="Поиск по имени или телефону" value="${esc(CN.q)}" style="min-width:200px"></div>
+  <details class="card emp-add" style="margin-bottom:10px"><summary>+ Добавить консультанта</summary>
+    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-top:8px"><input id="nc-name" placeholder="Имя и фамилия" style="min-width:180px"><input id="nc-phone" placeholder="+7 7__ ___ __ __" inputmode="tel" style="width:150px">
+      ${storesDD([], id=>`class="nc-store" value="${id}"`)}<button class="btn primary small" id="nc-add">Добавить</button></div></details>
+  <div class="scroll"><table class="emp-tbl"><thead><tr><th>Имя</th><th>Телефон</th><th>Магазины</th><th>Telegram</th><th title="Официально трудоустроен">Офиц.</th><th title="Снимите галочку, если уволен">Работает</th></tr></thead><tbody>
+  ${C.map(e=>`<tr class="${e.active?'':'off'}"><td><input data-ename="${e.id}" value="${esc(e.full_name)}" style="min-width:170px;font-weight:600;border-color:transparent;background:transparent"></td>
+    <td><input data-ephone="${e.id}" value="${esc(e.phone||'')}" placeholder="нет телефона" inputmode="tel" style="width:140px;${e.active&&!e.phone?'border-color:var(--warn,#d90)':''}"></td>
+    <td>${storesDD(ids(e), id=>`data-estores="${e.id}:${id}"`)}</td>
+    <td>${e.telegram_id?'<span class="chip ok">✓ подключён</span>':e.phone?'<span class="meta">ждём «Поделиться номером»</span>':'<span class="meta">—</span>'}</td>
+    <td style="text-align:center"><input type="checkbox" data-eoff="${e.id}" ${e.official?'checked':''} aria-label="официально"></td>
+    <td style="text-align:center"><input type="checkbox" data-eact="${e.id}" ${e.active?'checked':''} aria-label="работает"></td></tr>`).join('') || '<tr><td colspan="6" class="meta">Никого не найдено</td></tr>'}</tbody></table></div>`;
+}
+document.addEventListener('click', e => { if(S.view!=='cons') return; const t = e.target.closest('button[data-cnshow]'); if(t){ CN.show = t.dataset.cnshow; render(); } });
+document.addEventListener('input', e => { if(S.view!=='cons' || e.target.id!=='cn-q') return; CN.q = e.target.value; clearTimeout(CN.t); CN.t = setTimeout(()=>{ render(); const i = $('#cn-q'); if(i){ i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 300); });
+document.addEventListener('change', async e => { const t = e.target;
+  if(S.view==='cons' && t.id==='cn-store'){ CN.store = t.value; render(); return; }
+  if(t.dataset && t.dataset.ename){ const v = t.value.trim(); const em = (S.emps||[]).find(x=>x.id===t.dataset.ename); if(!v || !em){ if(em) t.value = em.full_name; return; } em.full_name = v; await updEmp(em.id, { full_name:v }); }
+});
+
 function loadScriptOnce(src){ return new Promise((ok,no)=>{ if(document.querySelector(`script[src="${src}"]`)) return ok(); const el=document.createElement('script'); el.src=src; el.onload=ok; el.onerror=no; document.head.appendChild(el); }); }
 async function sagiImport(file){
   const brand = BK.brand; BK.imp = 'Читаем файл…'; render();
@@ -1992,57 +2023,70 @@ function consHtml(){
       ${storesDD([], id=>`class="nc-store" value="${id}"`)}<button class="btn primary" id="nc-add">Добавить консультанта</button></div></details>`;
 }
 function renderPay(){
-  const D0 = PY.data, D = D0 && PYF.official ? D0.filter(e=>e.official) : D0, tabel = S.me && ['owner','manager'].includes(S.me.role) && !isViewer();
-  const total = (D||[]).reduce((a,e)=>a+e.total,0);
+  const D0 = PY.data, D = D0 && PYF.official ? D0.filter(e=>e.official) : D0, tabel = tabelOk() && !isViewer();
+  const mode = tabel ? (PY.mode||'calc') : 'calc';
   const stEmps = (S.emps||[]).filter(e => e.active && (!e.store_ids || !e.store_ids.length || e.store_ids.includes(+PY.store)));
-  $('#main').innerHTML = `<div class="row"><h2>${isBoss()?'Зарплата':'Моя зарплата'}</h2><label class="meta">Месяц <input type="month" id="py-month" value="${PY.month}"></label></div>
-  ${isBoss()?storeFilterHtml():''}
-  ${isBoss()?`<div class="filters"><label class="chip ${PYF.official?'ok':''}" style="cursor:pointer;padding:4px 10px"><input type="checkbox" id="py-official" ${PYF.official?'checked':''} style="margin-right:4px">только официально трудоустроенные</label>
-    ${D?`<span class="meta" style="align-self:center">На карту ${PYF.official?'официальным':'всем'} за месяц: <b>${fmt(D.reduce((a,e)=>a+paySum(e).by('card'),0))}</b></span>`:''}</div>`:''}
-  <div class="card meta" style="margin-bottom:8px">💰 ${advanceText(PY.month)}</div>
-  <p class="meta">Предварительный расчёт по продажам в кассе и табелю часов. Правила: ${['Курмангазы, Толе би, Гагарина — 12/10% по часам','MOON Курмангазы — 5%','Астана — 6% Sunshine, 3% MOON'].join(' · ')}.</p>
-  <div class="grid2"><div>
-   ${!D?'<div class="empty">Считаем…</div>':!D.length?'<div class="empty">За этот месяц нет часов в табеле</div>':`<div class="scroll"><table><thead><tr><th>Сотрудник</th><th>Часы</th><th>Начислено</th><th>Бонусы / удержания</th><th>К выплате</th><th>Выплачено наличными</th><th>На карту</th><th>Остаток</th></tr></thead><tbody>
-     ${D.map(e=>{ const P = paySum(e), open = PY.open===e.employee || D.length===1; return `<tr><td><button class="btn small" data-pyopen="${e.employee}" style="border:0;background:none;padding:0;font-weight:600">${open?'▾':'▸'} ${esc(e.name)}</button>${e.official?' <span class="chip ok" title="Официально трудоустроен">офиц.</span>':''}</td><td class="num">${e.hours}</td><td class="num">${fmt(e.total)}</td>
-       <td class="num">${P.plus?'+'+fmt(P.plus):''}${P.plus&&P.minus?'<br>':''}${P.minus?'<span style="color:var(--bad)">−'+fmt(P.minus)+'</span>':''}</td><td class="num"><b>${fmt(P.due)}</b></td><td class="num">${P.paid-P.by('card')?fmt(P.paid-P.by('card')):''}</td><td class="num">${P.by('card')?fmt(P.by('card')):''}</td>
-       <td class="num" style="color:${P.rest<0?'var(--bad)':P.rest>0?'inherit':'var(--ok)'}"><b>${P.rest<0?'переплата '+fmt(-P.rest):fmt(P.rest)}</b></td></tr>
-       ${open?`<tr><td colspan="8" style="padding:0 0 10px">
-         ${e.days.length?`<table style="margin:0 0 6px"><tbody>${e.days.map(payLine).join('')}</tbody></table>`:''}
-         <div class="cust stack" style="gap:6px"><b>Расчёт</b>
-           <div class="row"><span>Начислено по продажам</span><span class="num">${fmt(e.total)}</span></div>
-           ${P.A.map(a=>`<div class="row"><span>${PADJ[a.kind][0]}${a.note?' <span class="meta">— '+esc(a.note)+'</span>':''} <span class="meta">${dshort(a.at)}</span></span><span class="num">${PADJ[a.kind][1]>0?'+':'−'}${fmt(a.amount)}${tabelOk()?` <button class="btn small" data-padel="${a.id}" title="Удалить">✕</button>`:''}</span></div>`).join('')}
-           <div class="row" style="border-top:1px solid var(--line);padding-top:6px"><b>${P.rest<0?'Переплата (учесть в следующем месяце)':'Остаток к выплате'}</b><b class="num">${fmt(Math.abs(P.rest))}</b></div>
-           ${P.by('card')?`<div class="meta">из них переведено на карту: ${fmt(P.by('card'))}</div>`:''}
-           ${tabelOk()?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
-             <select id="pa-kind-${e.employee}">${Object.entries(PADJ).filter(([k])=>k!=='fine').map(([k,[t]])=>`<option value="${k}">${t}</option>`).join('')}</select>
-             <input id="pa-amt-${e.employee}" class="small" type="number" min="1" inputmode="numeric" placeholder="сумма" style="width:110px">
-             <input id="pa-note-${e.employee}" placeholder="комментарий" style="flex:1;min-width:120px">
-             <button class="btn small primary" data-paadd="${e.employee}">Добавить</button>
-             ${P.rest>0?`<button class="btn small" data-papayall="${e.employee}" data-rest="${Math.round(P.rest)}" data-kind="paid">Остаток ${fmt(P.rest)} наличными</button><button class="btn small" data-papayall="${e.employee}" data-rest="${Math.round(P.rest)}" data-kind="card">Остаток ${fmt(P.rest)} на карту</button>`:''}</div>`:''}
-         </div></td></tr>`:''}`; }).join('')}
-     ${D.length>1?(()=>{ const T = D.map(paySum).reduce((a,p)=>({due:a.due+p.due, cash:a.cash+p.paid-p.by('card'), card:a.card+p.by('card'), rest:a.rest+p.rest}),{due:0,cash:0,card:0,rest:0}); return `<tr><td><b>Итого</b></td><td></td><td class="num"><b>${fmt(total)}</b></td><td></td><td class="num"><b>${fmt(T.due)}</b></td><td class="num">${fmt(T.cash)}</td><td class="num">${fmt(T.card)}</td><td class="num"><b>${fmt(T.rest)}</b></td></tr>`; })():''}</tbody></table></div>`}
-  </div><div>
-   ${tabel?`<div class="card stack"><b>Табель часов</b>
-     <div class="row" style="flex-wrap:wrap;justify-content:flex-start"><select id="py-store">${S.stores.map(s=>`<option value="${s.id}" ${+PY.store===s.id?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select><input type="date" id="py-day" value="${PY.day}"></div>
-     <span class="meta">Правило: ${esc(payRuleText((PY.rules||{})[String(PY.store)]))}</span>
-     ${(PY.sheet||[]).length?`<table><tbody>${PY.sheet.map(w=>`<tr><td>${esc(w.name)}${w.kind==='dress'?' <span class="chip">переодевание</span>':''}${w.status==='open'?` <span class="chip warn">на смене с ${esc(w.from||'')}</span>`:w.status==='pending'?` <span class="chip warn" title="Отмечено в Telegram, ждёт подтверждения менеджера">ждёт подтверждения</span>`:''}${w.from&&w.status!=='open'?`<br><span class="meta">${esc(w.from)}–${esc(w.to||'')} · из Telegram</span>`:''}</td>
-       <td><input class="small" type="number" min="0" max="24" step="0.5" value="${w.hours}" data-pyh="${w.employee}:${w.kind}" inputmode="decimal"> ч</td>
-       <td><button class="btn small" data-pydel="${w.employee}:${w.kind}">✕</button></td></tr>`).join('')}</tbody></table>`:'<span class="meta">На этот день в табеле никого нет. Тот, кто открывает смену, попадает в табель автоматически.</span>'}
-     <div class="row" style="flex-wrap:wrap;justify-content:flex-start">
-       <select id="py-emp"><option value="">Сотрудник…</option>${stEmps.map(e=>`<option value="${e.id}" ${PY.add.emp===e.id?'selected':''}>${esc(e.full_name)}</option>`).join('')}</select>
-       <input id="py-hours" class="small" type="number" min="0.5" max="24" step="0.5" placeholder="часы" value="${esc(PY.add.hours)}" inputmode="decimal">
-       <select id="py-kind"><option value="sale" ${PY.add.kind==='sale'?'selected':''}>продажи</option><option value="dress" ${PY.add.kind==='dress'?'selected':''}>переодевание (1 200/ч)</option></select>
-       <button class="btn primary" id="py-add">Добавить</button></div>
-     <span class="meta">Консультанты отмечают приход и уход в Telegram-боте, вечером менеджеру приходит сводка «Подтвердить / Скорректировать». Изменение часов здесь сразу считается подтверждённым.</span>
-   </div>${consHtml()}`:`<div class="card meta">Часы в табель ставит менеджер. Если вы видите ошибку в часах — напишите менеджеру.</div>`}
-  </div></div>`;
+  if(!document.getElementById('pay-css')){ const st = document.createElement('style'); st.id = 'pay-css'; st.textContent = `.pay-tbl td,.pay-tbl th{padding:6px 8px;vertical-align:middle}.pay-tbl th{font-size:12px;white-space:nowrap}.pay-tbl td.num{white-space:nowrap}.pay-tbl tfoot td{border-top:2px solid var(--line);font-weight:600}.pay-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin:8px 0 10px}.pay-kpi>div{border:1px solid var(--line);border-radius:12px;padding:8px 12px}.pay-kpi b{display:block;font-size:18px}.pay-det{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(260px,1fr);gap:12px;padding:6px 0 12px}@media(max-width:800px){.pay-det{grid-template-columns:1fr}}.pay-det table td{padding:4px 6px;font-size:13px}`; document.head.append(st); }
+  const T = (D||[]).map(paySum).reduce((a,p)=>({due:a.due+p.due, cash:a.cash+p.paid-p.by('card'), card:a.card+p.by('card'), rest:a.rest+p.rest}),{due:0,cash:0,card:0,rest:0}), total = (D||[]).reduce((a,e)=>a+e.total,0);
+  const head = `<div class="row" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">${isBoss()?'Зарплата':'Моя зарплата'}</h2>
+    ${tabel?`<div class="seg"><button data-pymode="calc" aria-pressed="${mode==='calc'}">Расчёт за месяц</button><button data-pymode="tabel" aria-pressed="${mode==='tabel'}">Табель часов</button></div>`:''}
+    ${mode==='calc'?`<label class="meta">Месяц <input type="month" id="py-month" value="${PY.month}"></label>`:''}</div>`;
+  if(mode==='tabel'){
+    const shift = n => { const d = new Date(PY.day+'T12:00'); d.setDate(d.getDate()+n); return d.toLocaleDateString('sv-SE'); };
+    $('#main').innerHTML = `${head}
+    <div class="card stack" style="margin-top:10px;gap:10px">
+      <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px"><select id="py-store">${S.stores.map(s=>`<option value="${s.id}" ${+PY.store===s.id?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select>
+        <button class="btn small" data-pyday="${shift(-1)}" title="Предыдущий день">‹</button><input type="date" id="py-day" value="${PY.day}"><button class="btn small" data-pyday="${shift(1)}" title="Следующий день">›</button></div>
+      <span class="meta">Правило магазина: ${esc(payRuleText((PY.rules||{})[String(PY.store)]))}</span>
+      ${(PY.sheet||[]).length?`<table class="pay-tbl"><thead><tr><th>Консультант</th><th>Часы</th><th></th></tr></thead><tbody>${PY.sheet.map(w=>`<tr><td><b>${esc(w.name)}</b>${w.kind==='dress'?' <span class="chip">переодевание</span>':''}${w.status==='open'?` <span class="chip warn">на смене с ${esc(w.from||'')}</span>`:w.status==='pending'?` <span class="chip warn" title="Отмечено в Telegram, ждёт подтверждения">ждёт подтверждения</span>`:''}${w.from&&w.status!=='open'?` <span class="meta">${esc(w.from)}–${esc(w.to||'')} · Telegram</span>`:''}</td>
+        <td style="white-space:nowrap"><input type="number" min="0" max="24" step="0.5" value="${w.hours}" data-pyh="${w.employee}:${w.kind}" inputmode="decimal" style="width:70px"> ч</td>
+        <td><button class="btn small" data-pydel="${w.employee}:${w.kind}" title="Убрать из табеля">✕</button></td></tr>`).join('')}</tbody></table>`:'<div class="empty" style="padding:10px">В этот день в табеле никого нет. Кто открывает смену в боте — попадает сюда сам.</div>'}
+      <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;border-top:1px solid var(--line);padding-top:10px"><b style="margin-right:4px">Добавить:</b>
+        <select id="py-emp"><option value="">Консультант…</option>${stEmps.map(e=>`<option value="${e.id}" ${PY.add.emp===e.id?'selected':''}>${esc(e.full_name)}</option>`).join('')}</select>
+        <input id="py-hours" type="number" min="0.5" max="24" step="0.5" placeholder="часы" value="${esc(PY.add.hours)}" inputmode="decimal" style="width:80px">
+        <select id="py-kind"><option value="sale" ${PY.add.kind==='sale'?'selected':''}>продажи</option><option value="dress" ${PY.add.kind==='dress'?'selected':''}>переодевание (1 200/ч)</option></select>
+        <button class="btn primary small" id="py-add">Добавить</button></div>
+      <span class="meta">Консультанты отмечают приход и уход в Telegram-боте, в 22:30 менеджеру приходит сводка «Подтвердить / Скорректировать». Часы, изменённые здесь, сразу считаются подтверждёнными. Список консультантов и телефоны — во вкладке «Консультанты».</span>
+    </div>`;
+    return;
+  }
+  $('#main').innerHTML = `${head}
+  ${isBoss()?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;margin-top:8px">${storeFilterHtml()}<label class="chip ${PYF.official?'ok':''}" style="cursor:pointer;padding:4px 10px"><input type="checkbox" id="py-official" ${PYF.official?'checked':''} style="margin-right:4px">только официальные</label></div>`:''}
+  ${D&&D.length?`<div class="pay-kpi"><div><span class="meta">Начислено</span><b>${fmt(total)}</b></div><div><span class="meta">К выплате</span><b>${fmt(T.due)}</b></div><div><span class="meta">Выдано наличными</span><b>${fmt(T.cash)}</b></div><div><span class="meta">Переведено на карту</span><b>${fmt(T.card)}</b></div><div><span class="meta">Осталось выплатить</span><b style="color:${T.rest>0?'inherit':'var(--ok)'}">${fmt(T.rest)}</b></div></div>`:''}
+  <p class="meta" style="margin:0 0 8px">💰 ${advanceText(PY.month)} · <details style="display:inline"><summary style="display:inline;cursor:pointer;text-decoration:underline dotted">как считается</summary> ${['Курмангазы, Толе би, Гагарина — 12/10% от продаж дня по часам','MOON Курмангазы — 5%','Астана — 6% Sunshine, 3% MOON'].join(' · ')}. Без штрафов и удержаний.</details></p>
+  ${!D?'<div class="empty">Считаем…</div>':!D.length?'<div class="empty">За этот месяц нет часов в табеле</div>':`<div class="scroll"><table class="pay-tbl"><thead><tr><th>Сотрудник</th><th>Часы</th><th>Начислено</th><th>Бонусы</th><th>К выплате</th><th>Наличными</th><th>На карту</th><th>Остаток</th></tr></thead><tbody>
+   ${D.map(e=>{ const P = paySum(e), open = PY.open===e.employee || D.length===1; return `<tr style="${open?'background:var(--soft)':''}"><td><button class="btn small" data-pyopen="${e.employee}" style="border:0;background:none;padding:0;font-weight:600;text-align:left">${open?'▾':'▸'} ${esc(e.name)}</button>${e.official?' <span class="chip ok" title="Официально трудоустроен">офиц.</span>':''}</td><td class="num">${e.hours}</td><td class="num">${fmt(e.total)}</td>
+     <td class="num">${P.plus?'+'+fmt(P.plus):''}${P.minus?' <span style="color:var(--bad)">−'+fmt(P.minus)+'</span>':''}</td><td class="num"><b>${fmt(P.due)}</b></td><td class="num">${P.paid-P.by('card')?fmt(P.paid-P.by('card')):'—'}</td><td class="num">${P.by('card')?fmt(P.by('card')):'—'}</td>
+     <td class="num" style="color:${P.rest<0?'var(--bad)':P.rest>0?'inherit':'var(--ok)'}"><b>${P.rest<0?'переплата '+fmt(-P.rest):P.rest===0?'✓':fmt(P.rest)}</b></td></tr>
+     ${open?`<tr><td colspan="8" style="background:var(--soft)"><div class="pay-det">
+       <div>${e.days.length?`<b>По дням</b><div class="scroll"><table><tbody>${e.days.map(payLine).join('')}</tbody></table></div>`:'<span class="meta">Смен в этом месяце нет</span>'}</div>
+       <div class="cust stack" style="gap:6px;align-self:start"><b>Расчёт</b>
+         <div class="row"><span>Начислено по продажам</span><span class="num">${fmt(e.total)}</span></div>
+         ${P.A.map(a=>`<div class="row"><span>${PADJ[a.kind][0]}${a.note?' <span class="meta">— '+esc(a.note)+'</span>':''} <span class="meta">${dshort(a.at)}</span></span><span class="num">${PADJ[a.kind][1]>0?'+':PADJ[a.kind][1]<0?'−':''}${fmt(a.amount)}${tabelOk()?` <button class="btn small" data-padel="${a.id}" title="Удалить">✕</button>`:''}</span></div>`).join('')}
+         <div class="row" style="border-top:1px solid var(--line);padding-top:6px"><b>${P.rest<0?'Переплата (учесть в следующем месяце)':'Остаток к выплате'}</b><b class="num">${fmt(Math.abs(P.rest))}</b></div>
+         ${tabelOk()?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
+           <select id="pa-kind-${e.employee}">${Object.entries(PADJ).filter(([k])=>k!=='fine').map(([k,[t]])=>`<option value="${k}">${t}</option>`).join('')}</select>
+           <input id="pa-amt-${e.employee}" type="number" min="1" inputmode="numeric" placeholder="сумма" style="width:100px">
+           <input id="pa-note-${e.employee}" placeholder="комментарий" style="flex:1;min-width:110px">
+           <button class="btn small primary" data-paadd="${e.employee}">Добавить</button></div>
+           ${P.rest>0?`<div class="row" style="justify-content:flex-start;gap:6px;flex-wrap:wrap"><button class="btn small" data-papayall="${e.employee}" data-rest="${Math.round(P.rest)}" data-kind="paid">Выдать ${fmt(P.rest)} наличными</button><button class="btn small" data-papayall="${e.employee}" data-rest="${Math.round(P.rest)}" data-kind="card">Перевести ${fmt(P.rest)} на карту</button></div>`:''}`:''}
+       </div></div></td></tr>`:''}`; }).join('')}</tbody>
+   ${D.length>1?`<tfoot><tr><td>Итого</td><td></td><td class="num">${fmt(total)}</td><td></td><td class="num">${fmt(T.due)}</td><td class="num">${fmt(T.cash)}</td><td class="num">${fmt(T.card)}</td><td class="num">${fmt(T.rest)}</td></tr></tfoot>`:''}</table></div>`}
+  ${!tabel && !isBoss()?`<div class="card meta" style="margin-top:10px">Часы в табель ставит менеджер. Если видите ошибку в часах — напишите менеджеру.</div>`:''}`;
 }
+document.addEventListener('click', async e => { if(S.view!=='pay') return; const t = e.target.closest('button'); if(!t) return;
+  if(t.dataset.pymode){ PY.mode = t.dataset.pymode; render(); }
+  else if(t.dataset.pyday){ PY.day = t.dataset.pyday; await loadPay(); render(); }
+});
 
 /* ---------- доступ к вкладкам по ролям ---------- */
 const ALL_TABS = [['pos','Продажа'],['analytics','Аналитика'],['shifts','Смены'],['cash','Расходы'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты'],['bonus','Бонусные карты'],['nom','Номенклатура'],['site','Сайт'],['emps','Сотрудники']];
+const EXTRA_TABS = [['pay','Зарплата'],['cons','Консультанты'],['po','Закуп'],['promo','Акции'],['content','Контент'],['flow','Путь товара'],['profit','Рентабельность']];
+const EXTRA_DEF = { pay:['manager','purchaser','viewer','accountant'], cons:['manager'], po:['manager','purchaser','viewer','accountant'], promo:['manager','purchaser','viewer','accountant'], content:['manager','purchaser','viewer'], flow:['manager','viewer','accountant'], profit:['viewer'] };
+ALL_TABS.push(...EXTRA_TABS);
 const BOSS_ONLY = ['analytics','bonus','nom','site','emps'];
 function defaultTabs(role){ const boss = ['manager','viewer','accountant'].includes(role);
-  return ALL_TABS.map(([v])=>v).filter(v => (boss || !BOSS_ONLY.includes(v)) && !(['viewer','accountant'].includes(role) && v==='pos') && !(role==='viewer' && v==='emps')); }
+  return ALL_TABS.map(([v])=>v).filter(v => EXTRA_DEF[v] ? EXTRA_DEF[v].includes(role) : (boss || !BOSS_ONLY.includes(v)) && !(['viewer','accountant'].includes(role) && v==='pos') && !(role==='viewer' && v==='emps')); }
 function canEditTab(v){ if(!S.me || S.me.role==='owner') return true; const E=(S.tabEdit||{})[S.me.role]; return Array.isArray(E) ? E.includes(v) : true; }
 function accessHtml(){
   if(S.me.role!=='owner') return '';
@@ -2054,6 +2098,7 @@ function accessHtml(){
     <div class="scroll"><table><thead><tr><th>Вкладка</th>${roles.map(r=>`<th>${ROLE[r]}<br><span class="meta">👁 смотреть · ✎ менять</span></th>`).join('')}</tr></thead><tbody>
     ${ALL_TABS.map(([v,t])=>`<tr><td>${t}</td>${roles.map(r=>`<td style="white-space:nowrap"><label title="Видит"><input type="checkbox" data-acc="${r}:${v}" ${has(r,v)?'checked':''} aria-label="${ROLE[r]}: ${t} — видит"> 👁</label>
       <label title="Может менять" style="margin-left:8px"><input type="checkbox" data-accedit="${r}:${v}" ${can(r,v)?'checked':''} ${has(r,v)&&r!=='viewer'?'':'disabled'} aria-label="${ROLE[r]}: ${t} — может менять"> ✎</label></td>`).join('')}</tr>`).join('')}</tbody></table></div>
+    <p class="meta" style="margin:0">«Административный штат» всегда видите только вы. Консультанты в программу не входят — им доступен только Telegram-бот.</p>
     <div class="row"><button class="btn small" id="acc-reset">Вернуть по умолчанию</button><span class="meta">Изменения сохраняются сразу; сотрудник увидит их после обновления страницы.</span></div></div>`;
 }
 
@@ -2375,6 +2420,7 @@ async function loadView(){
   if(S.view==='sales'){ await loadSales(); render(); }
   if(S.view==='certs'){ await loadCerts(); render(); }
   if(S.view==='emps'){ await loadEmps(); render(); }
+  if(S.view==='cons'){ render(); await loadEmps(); render(); }
   if(S.view==='pay'){ render(); await loadPay(); render(); }
   if(S.view==='profit'){ render(); await loadProfit(); render(); }
   if(S.view==='po'){ render(); await loadPo(); render(); }
