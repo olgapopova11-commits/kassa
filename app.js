@@ -1916,6 +1916,8 @@ document.addEventListener('click', async e => { const t = e.target.closest('butt
     t.disabled = false; if(msg) return toast(msg); closeModal(); toast(`Готово: логин «${data.login}» — передайте сотруднику логин и пароль`); await loadEmps(); render(); }
 });
 
+document.addEventListener('click', e => { if(S.view!=='po') return; const t = e.target.closest('button[data-poopen]'); if(!t) return; PO.openO = PO.openO || {}; PO.openO[t.dataset.poopen] = !PO.openO[t.dataset.poopen]; render(); });
+
 function loadScriptOnce(src){ return new Promise((ok,no)=>{ if(document.querySelector(`script[src="${src}"]`)) return ok(); const el=document.createElement('script'); el.src=src; el.onload=ok; el.onerror=no; document.head.appendChild(el); }); }
 async function sagiImport(file){
   const brand = BK.brand; BK.imp = 'Читаем файл…'; render();
@@ -2022,12 +2024,14 @@ function renderPo(){
       <span class="meta">Остатки не меняются — заказы просто уходят из «в пути».</span></div>`; })():''}
     <div class="filters">${[['open','Заказано и в пути'],['received','Получены'],['cancelled','Отменённые'],['all','Все']].map(([k,v])=>`<button class="btn small ${PO.filter===k?'primary':''}" data-pofilter="${k}">${v}</button>`).join('')}</div>
     ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Заказов нет</div>':L.map(o=>{ const goods=(o.items||[]).reduce((a,i)=>a+i.qty*(+i.unit_cost||0),0), units=(o.items||[]).reduce((a,i)=>a+i.qty,0);
-      return `<div class="card" style="margin-bottom:10px"><div class="row" style="flex-wrap:wrap"><b>${poBulkOk()&&['ordered','transit'].includes(o.status)?`<input type="checkbox" data-posel="${o.id}" ${(PO.sel||{})[o.id]?'checked':''} style="margin-right:6px" aria-label="Выбрать заказ">`:''}№${o.number} · ${esc(o.supplier||'поставщик не указан')}${o.supplier_ru?` <span style="font-weight:400">(${esc(o.supplier_ru)})</span>`:''} → ${o.store?esc(storeName(o.store)):'<span class="meta">магазин выберете при приёмке</span>'}</b><span class="chip ${PO_ST[o.status][0]}">${PO_ST[o.status][1]}${o.status==='received'&&!o.receipt_id&&o.source==='1688'?' · история':''}</span></div>
-        ${o.source==='1688'?`<div class="meta">Китай, заказ №${esc(o.ext_no)}${o.track?' · трек '+esc(o.track):''}</div>`:''}
-        <div class="meta">заказ от ${dshort(o.created_at)}${o.eta?' · ждём к '+dshort(o.eta):''}${o.shipped_at?' · отправлен '+dshort(o.shipped_at):''}${o.received_at?' · получен '+dshort(o.received_at):''} · ${esc(o.by||'')}${o.note?' · '+esc(o.note):''}</div>
-        <div class="scroll"><table><tbody>${(o.items||[]).map(i=>poItemRow(o,i)).join('')}</tbody></table></div>
+      const nl = (o.items||[]).filter(i=>!i.product_id).length, open = (PO.openO||{})[o.id] || (PO.rcv&&PO.rcv.id===o.id);
+      return `<div class="card" style="margin-bottom:8px;padding:10px 12px"><div class="row" style="flex-wrap:wrap;gap:6px"><b>${poBulkOk()&&['ordered','transit'].includes(o.status)?`<input type="checkbox" data-posel="${o.id}" ${(PO.sel||{})[o.id]?'checked':''} style="margin-right:6px" aria-label="Выбрать заказ">`:''}№${o.number} · ${esc(poSupplier(o))} → ${o.store?esc(storeName(o.store)):'<span class="meta">магазин при приёмке</span>'}</b><span class="chip ${PO_ST[o.status][0]}">${PO_ST[o.status][1]}${o.status==='received'&&!o.receipt_id&&o.source==='1688'?' · история':''}</span></div>
+        <div class="meta">${dshort(o.created_at)}${o.source==='1688'?' · Китай №'+esc(o.ext_no):''}${o.track?' · трек '+esc(o.track):''}${o.eta?' · ждём к '+dshort(o.eta):''}${o.received_at?' · получен '+dshort(o.received_at):''}${noZh(o.note)&&!/Китай №/.test(o.note)?' · '+esc(o.note):''}</div>
+        <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px;justify-content:flex-start"><button class="btn small" data-poopen="${o.id}" style="border:0;background:none;padding:0;font-weight:600">${open?'▾':'▸'} ${(o.items||[]).length} поз. · ${units} шт. · ${fmt(goods)}</button>
+          ${nl?`<span class="chip zero">не связано: ${nl}</span>`:''}${!open?`<span style="display:flex;gap:3px">${(o.items||[]).slice(0,10).map(i=>thumb(i)).join('')}${(o.items||[]).length>10?`<span class="meta">+${(o.items||[]).length-10}</span>`:''}</span>`:''}</div>
+        ${open?`<div class="scroll" style="margin-top:6px"><table><tbody>${(o.items||[]).map(i=>poItemRow(o,i)).join('')}</tbody></table></div>`:''}
         ${PO.rcv&&PO.rcv.id===o.id?poRcvHtml(o):''}
-        <div class="row" style="flex-wrap:wrap"><span class="meta">${units} шт. · товар ${fmt(goods)}${o.currency&&o.currency!=='KZT'?' (курс заказа '+o.currency+' '+(+o.rate).toFixed(2)+')':''}${+o.cargo?' · доставка по Китаю '+(+o.cargo).toLocaleString('ru-RU')+' '+(CUR[o.currency]||'₸'):''} · +${o.delivery_pct??10}% доставка до Казахстана</span>
+        <div class="row" style="flex-wrap:wrap;margin-top:6px"><span class="meta">${open?`${o.currency&&o.currency!=='KZT'?'курс '+o.currency+' '+(+o.rate).toFixed(2)+' · ':''}${+o.cargo?'доставка по Китаю '+(+o.cargo).toLocaleString('ru-RU')+' '+(CUR[o.currency]||'₸')+' · ':''}+${o.delivery_pct??10}% до Казахстана`:''}</span>
           <span>${poEdit()&&o.status==='ordered'?`<button class="btn small" data-postatus="${o.id}:transit">Отправлен — в пути</button>`:''}
           ${isBoss()&&!isViewer()&&['ordered','transit'].includes(o.status)&&!(PO.rcv&&PO.rcv.id===o.id)?`<button class="btn small primary" data-poreceive="${o.id}">Получить на склад</button>`:''}
           ${isBoss()&&!isViewer()&&['ordered','transit'].includes(o.status)?`<button class="btn small" data-poarch="${o.id}" title="Заказ уже принят и оприходован раньше — убрать из ожидаемых, остатки не меняются">Отметить как уже принятый</button>`:''}
@@ -2852,13 +2856,16 @@ document.addEventListener('click', async e => {
 
 
 /* ---------- закуп: позиции, привязка к базе, приёмка с пересчётом себестоимости ---------- */
+const noZh = t => t && !/[\u4e00-\u9fff]/.test(t) ? t : '';
+const poSpec = i => { const sp = i.spec||''; if(!sp) return ''; if(!/[\u4e00-\u9fff]/.test(sp)) return sp; const c = colorRu(sp), n = (sp.match(/\d+(\.\d+)?\s*(号|cm|mm|码)?/)||[])[0]; return [c, n&&n.replace('号',' размер').replace('码',' размер')].filter(Boolean).join(', '); };
+const poSupplier = o => noZh(o.supplier_ru) || noZh(o.supplier) || (o.source==='1688' ? 'Китай' : 'поставщик не указан');
 function poItemRow(o, i){
   const cur = CUR[o.currency||'KZT'] || '₸', open = ['ordered','transit'].includes(o.status), canLink = open && (poEdit() || (isBoss() && !isViewer()));
   const lnk = PO.lnk && PO.lnk.item===i.item_id;
   const cands = !i.product_id && canLink ? (i.candidates||[]) : [];
-  return `<tr><td>${thumb(i)}</td><td>${i.product_id?`<b>${esc(i.name)}</b><br><span class="meta num">${esc(i.barcode||'')}</span>${i.title_ru?`<br><span class="meta">у поставщика: ${esc(i.title_ru)}</span>`:''}`:`<span class="chip zero">не связан с базой</span> <b>${esc(i.title_ru||i.supplier_title||'')}</b>${i.title_ru?`<br><span class="meta" lang="zh">${esc(i.supplier_title)}</span>`:''}`}
+  return `<tr><td>${thumb(i)}</td><td>${i.product_id?`<b>${esc(i.name)}</b><br><span class="meta num">${esc(i.barcode||'')}</span>`:`<span class="chip zero">не связан</span> <b>${esc(noZh(i.title_ru)||'товар из Китая')}</b>`}
       ${cands.length?`<div class="meta" style="margin-top:4px">По этой же ссылке в базе ${cands.length===1?'есть товар':'есть товары'} — выберите нужный вариант:</div><div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:4px">${cands.map(p=>`<button class="btn small" data-polink="${i.item_id}:${p.id}" style="display:flex;gap:6px;align-items:center">${thumb(p)}<span style="text-align:left">${esc(p.name)}<br><span class="meta num">${esc(p.barcode)}</span></span></button>`).join('')}</div>`:''}
-      ${i.spec?`<br><span class="meta">вариант: ${esc(i.spec)}</span>`:''}${i.purchase_url?` · <a href="${esc(i.purchase_url)}" target="_blank" rel="noopener" class="meta">у поставщика</a>`:''}
+      ${poSpec(i)?`<br><span class="meta">${esc(poSpec(i))}</span>`:''}${i.purchase_url?` · <a href="${esc(i.purchase_url)}" target="_blank" rel="noopener" class="meta">у поставщика</a>`:''}
       ${canLink&&!i.product_id&&i.suggest?`<br><button class="btn small primary" data-polink="${i.item_id}:${i.suggest.id}">Связать с «${esc(i.suggest.name)}»</button>`:''}
       ${canLink&&!lnk&&!(PO.mk&&PO.mk.item===i.item_id)?`<br><span class="row" style="gap:6px;justify-content:flex-start">${i.product_id?`<button class="btn small" data-polink="${i.item_id}:" title="Связь ошибочная — снять">✕ Отменить связь</button>`:`<button class="btn small" data-polinkopen="${i.item_id}">Найти в базе</button>${isBoss()&&!isViewer()?`<button class="btn small" data-pocreate="${i.item_id}">+ Создать товар</button>`:''}`}</span>`:''}
       ${PO.mk&&PO.mk.item===i.item_id?poCreateHtml(o,i):''}
@@ -2979,7 +2986,7 @@ function poCreateHtml(o, i){
       <input id="po-mk-color" value="${esc(m.color)}" placeholder="цвет по-русски" list="po-colors" style="width:130px"><datalist id="po-colors">${COLORS_RU.map(c=>`<option value="${c}">`).join('')}</datalist>
       <label class="meta">Розничная цена, ₸ <input id="po-mk-price" type="number" min="0" inputmode="numeric" value="${esc(m.price)}" placeholder="можно позже" style="width:110px"></label>
       <span class="meta">себестоимость ≈ ${fmt(m.landed)}</span></div>
-    ${i.spec?`<span class="meta">Вариант у поставщика: ${esc(i.spec)}${m.specRu?' → '+esc(m.specRu):''}</span>`:''}
+    ${(m.specRu||poSpec(i))?`<span class="meta">Вариант: ${esc(noZh(m.specRu)||poSpec(i))}</span>`:''}
     <span class="meta">Розничную цену можно оставить пустой — её поставит Анна. Фото и ссылка на поставщика сохранятся в карточке, штрихкод создастся автоматически.</span>
     <div class="row" style="justify-content:flex-start"><button class="btn small" id="po-mk-cancel">Отмена</button><button class="btn small primary" id="po-mk-save">Создать и связать</button></div></div>`;
 }
