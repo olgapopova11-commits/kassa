@@ -1373,7 +1373,7 @@ function renderSite(){
       <div class="row" style="justify-content:flex-end;flex-wrap:wrap;margin-top:8px">
         ${r.product_id&&r.status!=='confirmed'?`<button class="btn small primary" data-stok="${key}" data-pid="${r.product_id}">Верно</button>`:''}
         <button class="btn small" data-stopen="${key}">${open?'Скрыть':'Выбрать другой товар'}</button>
-        ${r.status!=='rejected'?`<button class="btn small" data-stno="${key}" title="Такого товара в базе нет">Нет в базе</button>`:'<span class="meta">отмечено: нет в базе</span>'}
+        ${!r.product_id&&isBoss()&&!isViewer()?`<button class="btn small" data-stgrp="${key}" title="Связать с общим штрихкодом того же типа и цены, например «Серьги 3500»">Общий штрихкод</button>`:''}
       </div>
       ${open?`<div class="cust stack" style="margin-top:8px">
         <span class="label">Похожие товары в базе</span>
@@ -1400,6 +1400,10 @@ document.addEventListener('click', async e => {
   if(S.view!=='site') return; const t = e.target.closest('button'); if(!t) return; const d = t.dataset, f = S.st;
   if(d.stbfind){ if(f.bfind===d.stbfind){ f.bfind = null; render(); return; } const p = (f.base||[]).find(x=>x.id===d.stbfind); f.bfind = d.stbfind; f.bq = p ? p.name : ''; f.bfound = []; render();
     const { data } = await sb.rpc('site_search', { p_q: f.bq.split(' ').slice(0,2).join(' ') }); f.bfound = data || []; render(); const el = $('#st-bq'); if(el) el.focus(); }
+  else if(d.stgrp){ const [site, uid] = d.stgrp.split(':'); t.disabled = true;
+    const { data } = await sb.rpc('site_candidates', { p_site:site, p_uid:+uid }); const G = (data||[]).filter(c=>c.grp); t.disabled = false;
+    if(G.length===1){ const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product:G[0].product_id, p_status:'confirmed' }); if(error) return toast(errText(error)); toast('Связано с «'+G[0].name+'»'); await loadSite(); render(); }
+    else { f.open = d.stgrp; f.cands = data||[]; f.cq = ''; f.cfound = []; render(); toast(G.length ? 'Подходит несколько общих штрихкодов — выберите нужный' : 'Общего штрихкода с такой ценой нет — выберите товар вручную'); } }
   else if(d.stblink){ const [site, uid] = d.stblink.split(':'); const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product:d.pid, p_status:'confirmed' });
     if(error) return toast(errText(error)); toast('Связано с карточкой сайта'); f.bfind = null; await loadSite(); render(); }
 });
