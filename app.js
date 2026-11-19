@@ -1238,17 +1238,25 @@ function renderNom(){
   const f = S.nm, D = f.data, e = f.ed, cats = f.cats || [];
   const inp = (k, label, extra='') => `<label class="stack" style="gap:4px"><span class="label">${label}</span><input data-nf="${k}" value="${esc(e[k]??'')}" ${extra}></label>`;
   $('#main').innerHTML = `<div class="row"><h2>Номенклатура</h2><button class="btn primary" id="nm-new">+ Новый товар</button></div>
-  <div class="grid2">
-   <div>
-    <div class="filters"><input id="nm-q" placeholder="Штрихкод, артикул или название" value="${esc(f.q)}" style="flex:1;min-width:180px">
+  ${e?nmEditorHtml(e, f, cats, inp):''}
+    <div class="filters" style="margin-top:${e?'14px':'0'}"><input id="nm-q" placeholder="Штрихкод, артикул или название" value="${esc(f.q)}" style="flex:1;min-width:180px">
       <select id="nm-cat"><option value="">Все категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
       <label class="meta" style="align-self:center"><input type="checkbox" id="nm-arch" ${f.arch?'checked':''}> архив</label></div>
-    ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}</p>
-    <div class="list">${D.rows.map(p=>`<div style="${e&&e.id===p.id?'background:var(--soft);':''}border-radius:10px"><button class="prod" data-nmopen="${p.id}" style="background:transparent">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta">${esc(nmInfo(p))}</span><br><span class="meta num">${esc(p.barcode)}${p.sku?' · арт. '+esc(p.sku):''} · остаток ${p.stock}${(S.inc||{})[p.id]?' · <b>заказано '+((S.inc[p.id].ordered||0)+(S.inc[p.id].transit||0))+'</b>'+(S.inc[p.id].transit?' (в пути '+S.inc[p.id].transit+')':''):''}</span>
-      ${p.is_group?'<span class="chip">общий штрихкод</span>':''}</span><span class="price num">${fmt(p.price)}</span></button>${nmSiteLinks(p)}</div>`).join('') || '<div class="empty">Ничего не найдено</div>'}</div>
-    ${f.off||D.rows.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-nmpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-nmpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`}
-   </div>
-   <div>${!e?'<div class="card empty">Выберите товар слева или создайте новый</div>':`<div class="card stack">
+    ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}. Нажмите на название, чтобы открыть карточку.</p>
+    <div class="scroll"><table class="nm-table"><thead><tr><th></th><th>Название</th><th>Категория</th><th>Штрихкод</th><th>Закуп</th><th>Цена</th><th>Остаток</th><th>Сайт</th></tr></thead><tbody>
+    ${D.rows.map(p=>{ const inc = (S.inc||{})[p.id], L = (p.sites||[]).filter(x=>x.url);
+      return `<tr style="${e&&e.id===p.id?'background:var(--soft)':''}"><td>${thumb(p)}</td>
+      <td style="min-width:200px"><button class="linkbtn" data-nmopen="${p.id}" style="border:0;background:none;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit"><b>${esc(p.name)}</b></button>${p.is_group?' <span class="chip">общий штрихкод</span>':''}<br><span class="meta">${esc([{moon:'MOON',sunshine:'Sunshine',both:'MOON и Sunshine'}[p.brand]||'', p.color, p.material].filter(Boolean).join(' · '))}</span></td>
+      <td>${esc(p.category||'—')}</td>
+      <td class="num">${esc(p.barcode)}${p.sku?'<br><span class="meta">арт. '+esc(p.sku)+'</span>':''}</td>
+      <td class="num">${p.cost!=null&&p.cost!==''?fmt(p.cost):'<span class="meta">—</span>'}</td>
+      <td class="num">${+p.price>0?fmt(p.price):'<span class="chip warn">нет цены</span>'}</td>
+      <td class="num">${p.stock>0?'<span class="chip ok">есть '+p.stock+'</span>':'<span class="chip zero">нет</span>'}${inc&&((inc.ordered||0)+(inc.transit||0))?`<br><span class="meta">заказано ${(inc.ordered||0)+(inc.transit||0)}</span>`:''}</td>
+      <td>${L.length?L.map(x=>`<a href="${esc(x.url)}" target="_blank" rel="noopener">${x.site==='moon'?'MOON':'Sunshine'}</a>${x.status==='review'?' <span class="meta">(не проверено)</span>':''}`).join('<br>'):'<span class="meta">нет на сайте</span>'}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">Ничего не найдено</td></tr>'}</tbody></table></div>
+    ${f.off||D.rows.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-nmpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-nmpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`}`;
+}
+function nmEditorHtml(e, f, cats, inp){
+  return `<div class="card stack">
      <div class="row"><h2 style="margin:0">${e.id?'Карточка товара':'Новый товар'}</h2><button class="btn small" id="nm-close">Закрыть</button></div>
      <div class="row" style="justify-content:flex-start;align-items:flex-start">
        ${e.photo_url?`<img src="${esc(e.photo_url)}" alt="" style="width:120px;height:120px;object-fit:cover;border-radius:12px">`:'<span class="thumb" style="width:120px;height:120px"></span>'}
@@ -1279,12 +1287,11 @@ function renderNom(){
        <input id="nm-sq" placeholder="Найти карточку на сайте по названию" value="${esc(f.sq)}" autocomplete="off">
        ${f.sfound.map(x=>`<button class="prod" data-nmlink="${x.site}:${x.uid}">${thumb({photo_url:x.photo})}<span><b>${esc(x.title)}</b><br><span class="meta">${x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'}${x.linked_to?' · сейчас связан с: '+esc(x.linked_to):''}</span></span><span class="price num">${fmt(x.price)}</span></button>`).join('')}`}
      </div>
-   </div>`}</div>
-  </div>`;
+   </div>`;
 }
 function nmInfo(p){ return [p.category, p.color, p.material, p.stone, {moon:'MOON',sunshine:'Sunshine',both:'MOON и Sunshine'}[p.brand]||p.brand, +p.price===0?'⚠ нет розничной цены':'', p.supplier?'поставщик '+p.supplier:''].filter(Boolean).join(' · '); }
 function nmSiteLinks(p){ const L=(p.sites||[]).filter(x=>x.url); return L.length?`<div class="meta" style="padding:0 10px 8px">${L.map(x=>`🔗 <a href="${esc(x.url)}" target="_blank" rel="noopener">${x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'}${x.status==='review'?' (связь не проверена)':''}</a>`).join(' &nbsp; ')}</div>`:''; }
-function nmOpen(p){ S.nm.ed = { ...NM_EMPTY(), ...p, category_id: p.category_id??'', cost: p.cost??'', supplier: p.supplier||'', sites: p.sites||[] }; S.nm.sq=''; S.nm.sfound=[]; render(); }
+function nmOpen(p){ S.nm.ed = { ...NM_EMPTY(), ...p, category_id: p.category_id??'', cost: p.cost??'', supplier: p.supplier||'', sites: p.sites||[] }; S.nm.sq=''; S.nm.sfound=[]; render(); window.scrollTo({ top:0, behavior:'smooth' }); }
 async function nmSave(){
   const e = S.nm.ed; if(!e) return;
   const { data, error } = await sb.rpc('product_save', { p: { ...e, sites: undefined } });
