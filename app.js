@@ -1806,9 +1806,7 @@ document.addEventListener('change', e => { const t = e.target; if(S.view!=='wh' 
 
 /* ---------- «Требует внимания»: всё, что ждёт действия, на одном экране ---------- */
 async function loadAttn(){ const { data, error } = await sb.rpc('attention'); if(error) toast(errText(error)); S.attn = data || {};
-  if(S.me.role==='owner'){ try{ const { data:dirs } = await sb.storage.from('backups').list('', { limit:100, sortBy:{ column:'name', order:'desc' } });
-    const days = (dirs||[]).map(d=>d.name).filter(n=>/^\d{4}-\d{2}-\d{2}$/.test(n)).sort().reverse(); S.attn.backups = days;
-    if(days[0]){ const r = await sb.storage.from('backups').download(days[0]+'/_done.json'); if(r.data) S.attn.backupDone = JSON.parse(await r.data.text()); } }catch(_){} } }
+  if(S.me.role==='owner'){ const b = await sb.rpc('backup_status'); S.attn.backups = b.data || []; } }
 function renderAttn(){
   const A = S.attn; if(!A){ $('#main').innerHTML = '<h2>Требует внимания</h2><div class="empty">Проверяем…</div>'; return; }
   const today = new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'}), dayOf = t => t ? new Date(t).toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'}) : null;
@@ -1840,14 +1838,13 @@ function renderAttn(){
   ${(A.site||[]).length?`<div class="card" style="margin-top:14px"><b>Сайты</b><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Сайт</th><th>Каталог обновлён</th><th>Проверить связи</th><th>Без привязки</th><th>Нет на сайте</th></tr></thead><tbody>
     ${A.site.map(x=>`<tr><td>${x.site==='moon'?'MOON':'Sunshine'}</td><td>${ago(x.loaded)}</td><td class="num">${x.review}</td><td class="num">${x.siteonly}</td><td class="num">${(+x.baseonly).toLocaleString('ru-RU')}</td></tr>`).join('')}</tbody></table></div></div>`:''}
   ${S.me.role==='owner'?`<div class="card" style="margin-top:14px"><b>🛟 Резервные копии базы</b><p class="meta" style="margin:4px 0">Каждую ночь в 03:00 Silver сохраняет копию всех данных и хранит 7 дней. Видите только вы.</p>
-    ${(A.backups||[]).length?`${A.backupDone?`<div>Последняя полная копия: <b>${new Date(A.backupDone.at).toLocaleString('ru-RU',{timeZone:'Asia/Almaty',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</b> · таблиц ${Object.keys(A.backupDone.tables||{}).length} · строк ${Object.values(A.backupDone.tables||{}).reduce((a,b)=>a+b,0).toLocaleString('ru-RU')}</div>`:'<div class="meta">Копия за сегодня ещё создаётся…</div>'}
-      <div class="row" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px">${A.backups.map(d=>`<button class="btn small" data-bkday="${d}">⬇ ${d.split('-').reverse().join('.')}</button>`).join('')}</div>`:'<div class="meta">Первая копия появится сегодня ночью.</div>'}</div>`:''}
+    ${(A.backups||[]).length?`<div class="scroll"><table style="margin-top:4px"><tbody>${A.backups.map(b=>`<tr><td>${b.day.split('-').reverse().join('.')}</td><td>${b.ok===b.parts?`<span class="chip ok">✓ полная</span>`:`<span class="chip warn">${b.ok} из ${b.parts} частей</span>`}</td><td class="meta">${(+b.rows||0).toLocaleString('ru-RU')} строк${b.at?' · '+new Date(b.at).toLocaleTimeString('ru-RU',{timeZone:'Asia/Almaty',hour:'2-digit',minute:'2-digit'}):''}</td><td><button class="btn small" data-bkday="${b.day}">⬇ Скачать</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="meta">Первая копия появится сегодня ночью.</div>'}</div>`:''}
   <div class="card" style="margin-top:14px"><b>Загрузки из Wipon</b><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Магазин</th><th>Продажи</th><th>Остатки</th></tr></thead><tbody>
     ${(A.wipon||[]).map(w=>`<tr><td>${esc(storeName(w.store_id))}</td><td style="color:${dayOf(w.sales)===today?'var(--ok)':'inherit'}">${ago(w.sales)}</td><td>${ago(w.stock)}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
 document.addEventListener('click', async e => { if(S.view!=='attn') return; const t = e.target.closest('button'); if(!t) return;
   if(t.id==='attn-ref'){ S.attn = null; render(); await loadAttn(); render(); }
-  else if(t.dataset.bkday){ const day = t.dataset.bkday; const { data:files } = await sb.storage.from('backups').list(day, { limit:200 }); const paths = (files||[]).map(f=>day+'/'+f.name);
+  else if(t.dataset.bkday){ const day = t.dataset.bkday; const { data:files } = await sb.storage.from('backups').list(day, { limit:500 }); const paths = (files||[]).filter(f=>/\.\d{3}\.ndjson\.gz$/.test(f.name)).map(f=>day+'/'+f.name);
     const { data:urls, error } = await sb.storage.from('backups').createSignedUrls(paths, 3600); if(error) return toast(errText(error));
     modal(`<div class="row"><h3 style="margin:0">Копия за ${day.split('-').reverse().join('.')}</h3><button class="btn small" data-close>✕</button></div><p class="meta">Каждая таблица — отдельный файл (сжатый JSON). Ссылки действуют 1 час.</p><div class="stack" style="gap:4px;max-height:60vh;overflow:auto">${(urls||[]).map(u=>`<a href="${esc(u.signedUrl)}" target="_blank" rel="noopener">${esc(u.path.split('/')[1])}</a>`).join('')}</div>`); }
   else if(t.dataset.attngo){ const v = t.dataset.attngo; if(!(S.tabs||[]).some(x=>x[0]===v)) return toast('У вас нет доступа к этой вкладке'); S.view = v; render(); scrollTo(0,0); await loadView(); }
