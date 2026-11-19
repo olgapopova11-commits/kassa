@@ -1437,13 +1437,16 @@ async function loadPo(){
 }
 function renderPo(){
   const modes = [['orders','Заказы'],['new','Новый заказ'],['suggest','Что дозаказать'],['an','Аналитика закупа']].filter(([k])=>poEdit() || k!=='new');
-  const head = `<h2>Закуп</h2><div class="seg" style="display:inline-flex;margin-bottom:10px">${modes.map(([k,v])=>`<button data-pomode="${k}" aria-pressed="${PO.mode===k}">${v}</button>`).join('')}</div>`;
+  const head = `<div class="row" style="flex-wrap:wrap"><h2>Закуп</h2>${poEdit()?`<label class="btn small" style="cursor:pointer">⬆ Загрузить заказы из 1688<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label>`:''}</div>
+  ${PO.imp?`<div class="card meta" style="margin-bottom:8px">${esc(PO.imp)}</div>`:''}
+  <div class="seg" style="display:inline-flex;margin-bottom:10px">${modes.map(([k,v])=>`<button data-pomode="${k}" aria-pressed="${PO.mode===k}">${v}</button>`).join('')}</div>`;
   let body = '';
   if(PO.mode==='orders'){
     const L = PO.list;
     body = `<div class="filters">${[['open','Заказано и в пути'],['received','Получены'],['cancelled','Отменённые'],['all','Все']].map(([k,v])=>`<button class="btn small ${PO.filter===k?'primary':''}" data-pofilter="${k}">${v}</button>`).join('')}</div>
     ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Заказов нет</div>':L.map(o=>{ const goods=(o.items||[]).reduce((a,i)=>a+i.qty*(+i.unit_cost||0),0), units=(o.items||[]).reduce((a,i)=>a+i.qty,0);
-      return `<div class="card" style="margin-bottom:10px"><div class="row" style="flex-wrap:wrap"><b>№${o.number} · ${esc(o.supplier||'поставщик не указан')} → ${esc(storeName(o.store))}</b><span class="chip ${PO_ST[o.status][0]}">${PO_ST[o.status][1]}</span></div>
+      return `<div class="card" style="margin-bottom:10px"><div class="row" style="flex-wrap:wrap"><b>№${o.number} · ${esc(o.supplier||'поставщик не указан')} → ${o.store?esc(storeName(o.store)):'<span class="meta">магазин выберете при приёмке</span>'}</b><span class="chip ${PO_ST[o.status][0]}">${PO_ST[o.status][1]}${o.status==='received'&&!o.receipt_id&&o.source==='1688'?' · история':''}</span></div>
+        ${o.source==='1688'?`<div class="meta">1688 №${esc(o.ext_no)}${o.ext_status?' · '+esc(ST1688[o.ext_status]||o.ext_status):''}${o.track?' · трек '+esc(o.track):''}</div>`:''}
         <div class="meta">заказ от ${dshort(o.created_at)}${o.eta?' · ждём к '+dshort(o.eta):''}${o.shipped_at?' · отправлен '+dshort(o.shipped_at):''}${o.received_at?' · получен '+dshort(o.received_at):''} · ${esc(o.by||'')}${o.note?' · '+esc(o.note):''}</div>
         <div class="scroll"><table><tbody>${(o.items||[]).map(i=>poItemRow(o,i)).join('')}</tbody></table></div>
         ${PO.rcv&&PO.rcv.id===o.id?poRcvHtml(o):''}
@@ -1740,7 +1743,7 @@ document.addEventListener('click', async e => {
   else if(t.id==='po-rcv-cancel'){ PO.rcv = null; render(); }
   else if(t.id==='po-rcv-ok'){ const r = PO.rcv, o = (PO.list||[]).find(x=>x.id===r.id); t.disabled=true;
     const items = (o.items||[]).map(i=>({ item_id:i.item_id, qty: r.qty[i.item_id]!=null ? +r.qty[i.item_id] : i.qty }));
-    const { error } = await sb.rpc('po_receive', { p_id:r.id, p_items:items, p_rate: o.currency==='KZT' ? 1 : +r.rate });
+    const { error } = await sb.rpc('po_receive', { p_id:r.id, p_items:items, p_rate: o.currency==='KZT' ? 1 : +r.rate, p_store: +(r.store||o.store||S.store) });
     if(error){ toast(errText(error)); t.disabled=false; return; } PO.rcv = null; toast('Товар принят, себестоимость пересчитана'); await loadPo(); render(); }
   else if(d.polink){ const [item, pid] = d.polink.split(':'); const { error } = await sb.rpc('po_link_item', { p_item:item, p_product:pid||null }); if(error) return toast(errText(error)); PO.lnk = null; toast(pid?'Связано с товаром базы':'Связь снята'); await loadPo(); render(); }
   else if(d.polinkopen){ PO.lnk = { item:d.polinkopen, q:'', found:[] }; render(); const el = document.getElementById('po-lnk-q'); if(el) el.focus(); }
@@ -1841,6 +1844,8 @@ document.addEventListener('change', async e => {
   if(t.dataset && t.dataset.pocost!=null && PO.d){ PO.d.items[+t.dataset.pocost].cost = t.value; render(); }
   if(t.id==='po-cur' && PO.d){ PO.d.cur = t.value; PO.d.rate = ''; render(); } if(t.id==='po-rate' && PO.d){ PO.d.rate = t.value; render(); } if(t.id==='po-pct' && PO.d){ PO.d.pct = t.value; render(); }
   if(t.id==='po-rcv-rate' && PO.rcv){ PO.rcv.rate = t.value; render(); }
+  if(t.id==='po-rcv-store' && PO.rcv){ PO.rcv.store = +t.value; }
+  if(t.id==='po-1688' && t.files[0]){ import1688(t.files[0]); t.value=''; }
   if(t.dataset && t.dataset.porcvqty && PO.rcv){ PO.rcv.qty[t.dataset.porcvqty] = Math.max(0, +t.value||0); render(); }
   if(t.id==='py-official'){ PYF.official = t.checked; render(); }
   if(t.id==='py-month'){ PY.month = t.value || PY.month; PY.open=null; await loadPay(); render(); }
@@ -2173,6 +2178,7 @@ function poRcvHtml(o){
   const r = PO.rcv, isK = (o.currency||'KZT')==='KZT', rt = isK ? 1 : (+r.rate||0);
   const q = i => r.qty[i.item_id]!=null ? r.qty[i.item_id] : i.qty, units = (o.items||[]).reduce((a,i)=>a+q(i),0), unlinked = (o.items||[]).filter(i=>!i.product_id && q(i)>0).length;
   return `<div class="cust stack" style="margin-top:8px"><b>Приёмка заказа №${o.number}</b>
+    <label class="meta">Принимаем в магазин <select id="po-rcv-store">${S.stores.map(st=>`<option value="${st.id}" ${+(r.store||o.store||S.store)===st.id?'selected':''}>${esc(storeName(st.id))}</option>`).join('')}</select></label>
     ${isK?'':`<label class="meta">Курс ${o.currency} на сегодня <input id="po-rcv-rate" type="number" step="0.01" min="0" inputmode="decimal" value="${esc(r.rate)}" style="width:100px"></label>
       <span class="meta">курс Нацбанка ${(+o.rate_now||0).toFixed(2)} · при заказе был ${(+o.rate).toFixed(2)}</span>`}
     <div class="scroll"><table><thead><tr><th>Товар</th><th>Пришло, шт.</th><th>Себестоимость шт.</th></tr></thead><tbody>
@@ -2186,3 +2192,34 @@ document.addEventListener('input', e => {
   if(S.view!=='po' || e.target.id!=='po-lnk-q' || !PO.lnk) return;
   PO.lnk.q = e.target.value; clearTimeout(PO.lnkT); PO.lnkT = setTimeout(()=>{ PO.lnk.found = searchCatalog(PO.lnk.q); render(); }, 250);
 });
+
+
+/* ---------- загрузка заказов из выгрузки 1688 (已买到的货品 → 导出) ---------- */
+const ST1688 = { '等待卖家发货':'ждёт отправки продавцом', '等待买家确认收货':'отправлен, ждёт подтверждения получения', '已收货':'получен', '交易成功':'сделка завершена', '交易关闭':'закрыт' };
+async function import1688(file){
+  PO.imp = 'Читаем файл 1688…'; render();
+  try{
+    await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+    const wb = XLSX.read(await file.arrayBuffer(), { type:'array' });
+    const A = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, raw:false, defval:null });
+    const h = (A[0]||[]).map(x=>String(x||'').trim()), c = name => h.indexOf(name);
+    const K = { no:c('订单编号'), seller:c('卖家公司名'), login:c('卖家会员名'), ship:c('运费(元)'), adj:c('涨价或折扣(元)'), status:c('订单状态'), created:c('订单创建时间'), track:c('运单号'),
+      title:c('货品标题'), price:c('单价(元)'), qty:c('数量'), unit:c('单位'), art:c('货号'), offer:c('Offer ID'), sku:c('SKU ID'), skuArt:c('单品货号') };
+    if(K.no<0 || K.title<0 || K.price<0) throw new Error('Это не выгрузка заказов 1688: нет колонок 订单编号 / 货品标题 / 单价');
+    const num = v => +String(v??'').replace(/[^\d.\-]/g,'') || 0, str = v => v==null ? null : String(v).trim() || null;
+    const orders = []; let cur = null;
+    for(const r of A.slice(1)){
+      if(str(r[K.no])){ cur = { no:str(r[K.no]), seller:str(r[K.seller]), seller_login:str(r[K.login]), ship:num(r[K.ship]), adj:num(r[K.adj]), status:str(r[K.status]), created:str(r[K.created]), track:str(r[K.track]), items:[] }; orders.push(cur); }
+      if(!cur || !str(r[K.title])) continue;
+      cur.items.push({ title:str(r[K.title]), price:num(r[K.price]), qty:num(r[K.qty]), unit:str(r[K.unit]), art:str(r[K.art]), offer:str(r[K.offer]), sku:str(r[K.sku]), sku_art:str(r[K.skuArt]) });
+    }
+    const tot = { new:0, updated:0, items:0, linked:0 };
+    for(let i=0; i<orders.length; i+=80){
+      PO.imp = `Загружаем заказы: ${i} из ${orders.length}…`; render();
+      const { data, error } = await sb.rpc('po_import_1688', { p: orders.slice(i, i+80) });
+      if(error) throw error; for(const k in tot) tot[k] += +(data||{})[k]||0;
+    }
+    PO.imp = `Готово: новых заказов ${tot.new}, обновлено ${tot.updated}. Позиций ${tot.items}, из них сразу связано с базой ${tot.linked}. Остальные свяжите при приёмке — Silver запомнит связь для следующих заказов.`;
+    PO.mode = 'orders'; PO.filter = 'open'; PO.list = null; await loadPo(); render();
+  }catch(e){ PO.imp = 'Не загрузилось: '+errText(e); render(); }
+}
