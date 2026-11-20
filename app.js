@@ -105,20 +105,20 @@ setInterval(flushQueue, 60000);
 
 /* ---------- каталог (кэш на устройстве для быстрого поиска и офлайна) ---------- */
 async function loadCatalog(force){
-  const cached = ls.get('kassa_catalog4', null);
+  const cached = ls.get('kassa_catalog5', null);
   if(cached && !force){ S.catalog = cached.items; S.catalogAt = cached.at; }
   if(!navigator.onLine) return;
   if(cached && !force && Date.now() - cached.at < 6*3600e3) return;
   const items = []; let from = 0;
   while(true){
-    const { data, error } = await sb.from('products').select('id,barcode,sku,name,price,archived,photo_url,category_id').eq('archived', false).order('name').range(from, from+999);
+    const { data, error } = await sb.from('products').select('id,barcode,sku,name,price,archived,photo_url,category_id,is_service').eq('archived', false).order('name').range(from, from+999);
     if(error) { toast('Каталог не загрузился: '+errText(error)); return; }
-    data.forEach(p => items.push([p.id, p.barcode, p.sku||'', p.name, Number(p.price), p.photo_url||'', p.category_id||null]));
+    data.forEach(p => items.push([p.id, p.barcode, p.sku||'', p.name, Number(p.price), p.photo_url||'', p.category_id||null, p.is_service?1:0]));
     if(data.length < 1000) break; from += 1000;
   }
-  S.catalog = items; S.catalogAt = Date.now(); ls.set('kassa_catalog4', {at:S.catalogAt, items});
+  S.catalog = items; S.catalogAt = Date.now(); ls.set('kassa_catalog5', {at:S.catalogAt, items});
 }
-const prodObj = a => ({ id:a[0], barcode:a[1], sku:a[2], name:a[3], price:a[4], photo_url:a[5]||null, category_id:a[6]||null });
+const prodObj = a => ({ id:a[0], barcode:a[1], sku:a[2], name:a[3], price:a[4], photo_url:a[5]||null, category_id:a[6]||null, svc:!!a[7] });
 function searchCatalog(q){
   q = q.trim().toLowerCase(); if(!q) return [];
   const exact = S.catalog.filter(p => p[1] === q || p[2].toLowerCase() === q);
@@ -314,7 +314,7 @@ function renderPos(){
   const c = S.cust;
   $('#main').innerHTML = `${shOpen===false?`<div class="card row" style="margin-bottom:12px;border-color:var(--bad);flex-wrap:wrap"><span><b>Смена не открыта.</b> Чтобы пробивать чеки, откройте смену и пересчитайте наличные в кассе.</span><button class="btn primary" id="go-shift">Открыть смену</button></div>`:''}<div class="grid2">
    <div>
-     <div class="row" style="flex-wrap:wrap;gap:8px"><h2>Товары</h2><span class="meta">${S.catalog.length.toLocaleString('ru-RU')} в каталоге</span><button class="btn small" id="c-open" style="margin-left:auto">🎁 Продать сертификат</button></div>
+     <div class="row" style="flex-wrap:wrap;gap:8px"><h2>Товары</h2><span class="meta">${S.catalog.length.toLocaleString('ru-RU')} в каталоге</span><span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">${S.catalog.filter(a=>a[7]).map(a=>`<button class="btn small" data-svc="${a[0]}">${/доставк/i.test(a[3])?'🚚':'🛎'} ${esc(a[3])}</button>`).join('')}<button class="btn small" id="c-open">🎁 Продать сертификат</button></span></div>
      <div class="row"><input id="q" style="flex:1" placeholder="Штрихкод, артикул или название" value="${esc(S.q)}" autocomplete="off"><button class="btn" id="q-add">Добавить</button></div>
      <div class="list">${S.found.length ? S.found.map(p=>{ const s = S.stock[p.id]||{}; const here = s[S.store] ?? null;
         return `<button class="prod" data-add="${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}${p.sku?' · '+esc(p.sku):''}</span><br>
@@ -331,7 +331,7 @@ function renderPos(){
         <span class="meta">скидка</span><div class="seg"><button data-ldt="${i}:pct" aria-pressed="${l.dt==='pct'}">%</button><button data-ldt="${i}:kzt" aria-pressed="${l.dt!=='pct'}">₸</button></div>
         <input class="small" type="number" min="0" id="ld-${i}" data-ldisc="${i}" value="${l.dv||''}" inputmode="numeric" aria-label="Скидка на товар">${l.disc?`<span class="meta num">−${fmt(l.disc)}</span>`:''}
         <button class="btn small" data-del="${i}">Убрать</button></div>
-        ${(()=>{ const here=(S.stock[l.pid]||{})[S.store]; if(here==null || here>=l.qty) return ''; const need=l.qty-Math.max(0,here);
+        ${(()=>{ if(l.svc) return ''; const here=(S.stock[l.pid]||{})[S.store]; if(here==null || here>=l.qty) return ''; const need=l.qty-Math.max(0,here);
           return `<div class="ctrl"><span class="chip zero">по системе ${here>0?'есть только '+here:'нет в наличии'}</span>${(S.reqSent||{})[l.pid+':'+S.store]?'<span class="chip ok">запрос отправлен менеджеру</span>':`<button class="btn small" data-reqcap="${i}" data-need="${need}">Запросить оприходование ${need} шт.</button>`}</div>`; })()}</div>`).join('') : '<div class="empty">Чек пуст</div>'}
      <div class="row" style="justify-content:flex-start;flex-wrap:wrap"><span class="label">Скидка на чек</span>
        <div class="seg"><button data-dt="pct" aria-pressed="${S.discType==='pct'}">%</button><button data-dt="kzt" aria-pressed="${S.discType==='kzt'}">₸</button></div>
@@ -386,12 +386,25 @@ function certPickerHtml(){
       :`<div class="meta">${S.certList.length?'Не найдено':'Активных сертификатов пока нет'}</div>`}</div>`;
 }
 function addToCart(p){
+  if(p.svc) return svcModal(p.id);
   if(!(+p.price>0)) return toast('У товара «'+p.name+'» ещё нет розничной цены — попросите менеджера поставить её в «Номенклатуре»');
   const l = S.cart.find(x=>x.pid===p.id);
   if(l) l.qty++; else S.cart.push({ pid:p.id, name:p.name, barcode:p.barcode, price:p.price, cat:p.category_id||null, qty:1, disc:0, dt:'pct', dv:0 });
   syncPays(); render();
   if(!S.stock[p.id] || S.stock[p.id][S.store]==null) loadStock([p.id]).then(()=>{ (S.stock[p.id] ||= {}); if(S.stock[p.id][S.store]==null) S.stock[p.id][S.store]=0; if(S.view==='pos') render(); });
 }
+/* услуги (доставка и т.п.): сумму вводят при продаже, остатки не двигаются */
+function svcModal(id){ const a = S.catalog.find(x=>x[0]===id); if(!a) return;
+  modal(`<div class="row"><h3 style="margin:0">${/доставк/i.test(a[3])?'🚚':'🛎'} ${esc(a[3])}</h3><button class="btn small" data-close>✕</button></div>
+    <div class="stack" style="gap:8px;margin-top:10px"><span class="meta">${/доставк/i.test(a[3])?'Клиент оплачивает доставку — на эту сумму вы вызываете курьера, с получателя ничего не берут. ':''}Это услуга: остатки не меняются.</span>
+    <label class="stack" style="gap:2px"><span class="label">Сумма, ₸</span><input id="svc-amt" type="number" min="1" inputmode="numeric" value="${+a[4]>0?+a[4]:''}"></label>
+    <div class="row"><span></span><button class="btn primary" id="svc-add" data-id="${a[0]}">Добавить в чек</button></div></div>`);
+  setTimeout(()=>{ const i = $('#svc-amt'); if(i) i.focus(); }, 50); }
+document.addEventListener('click', e => { const t = e.target.closest('button'); if(!t) return;
+  if(t.dataset.svc){ svcModal(t.dataset.svc); }
+  else if(t.id==='svc-add'){ const a = S.catalog.find(x=>x[0]===t.dataset.id), amt = Math.round(+$('#svc-amt').value); if(!a) return; if(!(amt>0)) return toast('Введите сумму');
+    S.cart.push({ pid:a[0], name:a[3], barcode:a[1], price:amt, cat:a[6]||null, qty:1, disc:0, dt:'pct', dv:0, svc:true }); closeModal(); syncPays(); render(); }
+});
 async function doSearch(){
   S.found = searchCatalog(S.q); render();
   await loadStock(S.found.map(p=>p.id)); if(S.view==='pos') render();
@@ -1276,11 +1289,11 @@ function renderNom(){
     <div class="scroll"><table class="nm-table"><thead><tr>${nmCanEdit()?`<th style="width:28px;padding-right:0"><input type="checkbox" id="nm-selall" title="Выбрать все на странице" ${D.rows.length&&D.rows.every(p=>(f.sel||{})[p.id])?'checked':''}></th>`:''}<th></th>${[['name','Название'],['category','Категория'],['barcode','Штрихкод'],['cost','Закуп'],['price','Цена'],['stock','Остаток'],['site','Сайт']].map(([k,v])=>`<th><button data-nmsort="${k}" style="border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;white-space:nowrap" title="Сортировать">${v} ${f.sort===k?(f.desc?'▼':'▲'):'<span class="meta">↕</span>'}</button></th>`).join('')}</tr></thead><tbody>
     ${D.rows.map(p=>{ const inc = (S.inc||{})[p.id], L = (p.sites||[]).filter(x=>x.url);
       return `<tr style="${e&&e.id===p.id?'background:var(--soft)':p.archived?'background:rgba(128,128,128,.18);color:var(--muted,#888)':''}">${nmCanEdit()?`<td style="width:28px;padding-right:0;vertical-align:middle"><input type="checkbox" data-nmsel="${p.id}" ${(f.sel||{})[p.id]?'checked':''}></td>`:''}<td>${thumb(p)}</td>
-      <td style="min-width:200px"><button class="linkbtn" data-nmopen="${p.id}" style="border:0;background:none;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit"><b>${esc(p.name)}</b></button>${p.archived?' <span class="chip zero">архив</span>':''}${p.is_group?' <span class="chip">общий штрихкод</span>':''}<br><span class="meta">${esc([{moon:'MOON',sunshine:'Sunshine',both:'MOON и Sunshine'}[p.brand]||'', p.color, p.material].filter(Boolean).join(' · '))}</span></td>
+      <td style="min-width:200px"><button class="linkbtn" data-nmopen="${p.id}" style="border:0;background:none;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit"><b>${esc(p.name)}</b></button>${p.archived?' <span class="chip zero">архив</span>':''}${p.is_group?' <span class="chip">общий штрихкод</span>':''}${p.is_service?' <span class="chip">услуга</span>':''}<br><span class="meta">${esc([{moon:'MOON',sunshine:'Sunshine',both:'MOON и Sunshine'}[p.brand]||'', p.color, p.material].filter(Boolean).join(' · '))}</span></td>
       <td>${nmCanEdit()?`<select data-nmcat="${p.id}" style="max-width:170px;${p.category_id?'':'border-color:var(--warn,#d90)'}"><option value="">— без категории —</option>${cats.map(c=>`<option value="${c.id}" ${p.category_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`:esc(p.category||'—')}</td>
       <td class="num">${esc(p.barcode)}${p.sku?'<br><span class="meta">арт. '+esc(p.sku)+'</span>':''}</td>
       <td class="num">${p.cost!=null&&p.cost!==''?fmt(p.cost):'<span class="meta">—</span>'}</td>
-      <td class="num">${+p.price>0?fmt(p.price):'<span class="chip warn">нет цены</span>'}</td>
+      <td class="num">${+p.price>0?fmt(p.price):p.is_service?'<span class="meta">сумма при продаже</span>':'<span class="chip warn">нет цены</span>'}</td>
       <td class="num"><span class="nm-st" tabindex="0">${p.stock>0?'<span class="chip ok">есть '+p.stock+'</span>':'<span class="chip zero">нет</span>'}<span class="nm-st-pop">${S.allStores.map(st=>{ const q = +((p.by_store||{})[st.id]||0); return `<span class="row" style="gap:12px;${q?'':'opacity:.5'}"><span>${esc(BRAND[st.brand]+' · '+st.address)}</span><b class="num">${q}</b></span>`; }).join('')}</span></span>${inc&&((inc.ordered||0)+(inc.transit||0))?`<br><span class="meta">заказано ${(inc.ordered||0)+(inc.transit||0)}</span>`:''}</td>
       <td style="white-space:nowrap">${p.is_group?'<span class="meta">не для сайта</span>':L.length?['moon','sunshine'].map(sk=>{ const X = L.filter(x=>x.site===sk); return X.length ? `<a href="${esc(X[0].url)}" target="_blank" rel="noopener">${sk==='moon'?'MOON':'Sunshine'}</a>${X.length>1?` <span class="meta">· ${X.length} карточек</span>`:''}${X.some(x=>x.status==='review')?' <span class="meta">(не проверено)</span>':''}` : ''; }).filter(Boolean).join('<br>'):'<span class="meta">нет на сайте</span>'}</td></tr>`; }).join('') || `<tr><td colspan="${nmCanEdit()?9:8}" class="empty">Ничего не найдено</td></tr>`}</tbody></table></div>
     ${f.off||D.rows.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-nmpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-nmpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`}`;
