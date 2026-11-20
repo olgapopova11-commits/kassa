@@ -2057,7 +2057,8 @@ document.addEventListener('change', async e => { const id = e.target.id||'';
   if(id==='wu-store-sales') WU.storeSales = e.target.value ? +e.target.value : null; else if(id==='wu-store-stock') WU.store = e.target.value ? +e.target.value : null; });
 document.addEventListener('toggle', e => { const d = e.target; if(d.dataset && d.dataset.wuopen){ WU.open = d.open ? d.dataset.wuopen : (WU.open===d.dataset.wuopen ? null : WU.open); } }, true);
 /* ---------- контент-план: идеи → пост → дата выкладки ---------- */
-const CT = { brand:'moon', list:null, ai:null, busy:'', add:false };
+const CT = { brand:'moon', list:null, ai:null, busy:'', add:false, ig:null, sure:'' };
+const IG_NAME = { moon:'moon.collection.kz', sunshine:'sunshine_jewelry_kz' };
 const CT_FMT = { reels:'Рилс', carousel:'Карусель', stories:'Сторис', photo:'Фото' };
 const ctEdit = () => S.me && ['owner','manager','purchaser'].includes(S.me.role);
 const ctLocal = v => v ? new Date(v).toLocaleString('sv-SE',{ timeZone:'Asia/Almaty' }).slice(0,16).replace(' ','T') : '';
@@ -2067,7 +2068,48 @@ async function loadContent(){
   if(l.error) toast(errText(l.error)); CT.list = l.data || [];
   if(st) CT.ai = !!(st.data && st.data.ai);
   if(CT.banned==null){ const b = await sb.rpc('content_banned_get'); CT.banned = b.data || ''; }
+  if(CT.ig===null){ const r = await sb.functions.invoke('ig', { body:{ action:'status' } }); CT.ig = (r.data && r.data.brands) ? r.data : { brands:{} }; }
 }
+async function igCall(body){
+  const { data, error } = await sb.functions.invoke('ig', { body });
+  if(error){ let m = error.message; try{ m = (await error.context.json()).error || m; }catch(_){} throw new Error(m); }
+  return data;
+}
+/* фото для Instagram: приводим к JPEG 1080×1350 (4:5) и кладём в публичное хранилище ig-media */
+async function igPrep(src){
+  const img = await new Promise((ok, bad) => { const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = () => ok(i); i.onerror = bad; i.src = src; });
+  const W = 1080, H = 1350, c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+  const k = Math.max(W / img.naturalWidth, H / img.naturalHeight), w = img.naturalWidth * k, h = img.naturalHeight * k;
+  x.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9)); if(!blob) throw new Error('canvas');
+  const path = CT.brand + '/' + crypto.randomUUID() + '.jpg';
+  const { error } = await sb.storage.from('ig-media').upload(path, blob, { contentType:'image/jpeg' }); if(error) throw error;
+  return sb.storage.from('ig-media').getPublicUrl(path).data.publicUrl;
+}
+async function ctMediaAdd(c, srcs){
+  const add = [];
+  for(const s of srcs){ try{ add.push({ url: await igPrep(s) }); }catch(_){ if(typeof s==='string') add.push({ url:s, raw:true }); else toast('Не удалось обработать фото'); } }
+  const media = [...(c.media||[]), ...add].slice(0, 10);
+  const { error } = await sb.rpc('content_save', { p:{ id:c.id, media } }); if(error) throw error; c.media = media;
+  if(add.some(m=>m.raw)) toast('Фото добавлено как есть — Instagram примет его, только если пропорции от 4:5 до 1.91:1');
+}
+function ctMedia(c, ed){
+  const M = c.media || [];
+  return `<div class="stack" style="gap:4px"><span class="label">Фото к посту ${M.length?`(${M.length}${c.format==='carousel'?' из 10':''})`:''}</span>
+    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">${M.map((m,i)=>`<span style="position:relative;display:inline-block"><img src="${esc(m.url)}" alt="" style="width:72px;height:90px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">${ed?`<span class="row" style="position:absolute;left:2px;right:2px;bottom:2px;gap:2px">${i?`<button class="btn small" data-ctmv="${c.id}:${i}:-1" style="min-height:24px;padding:0 6px">←</button>`:''}<button class="btn small" data-ctrm="${c.id}:${i}" style="min-height:24px;padding:0 6px">✕</button></span>`:''}</span>`).join('') || '<span class="meta">Пока нет фото — без них пост не выложить</span>'}</div>
+    ${ed?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">${(c.products||[]).filter(p=>p.photo_url).map(p=>`<button class="btn small" data-ctpp="${c.id}:${p.id}" title="${esc(p.name)}">+ фото «${esc(p.name.slice(0,18))}»</button>`).join('')}
+      <label class="btn small" style="cursor:pointer">+ Загрузить<input type="file" accept="image/*" multiple data-ctup="${c.id}" hidden></label>${CT.busy==='m'+c.id?'<span class="meta">Готовим фото…</span>':''}</div>`:''}</div>`;
+}
+function ctIgBar(){
+  const b = (CT.ig && CT.ig.brands || {})[CT.brand] || {}, own = S.me.role==='owner', need = IG_NAME[CT.brand];
+  if(b.connected) return `<div class="card row" style="flex-wrap:wrap;gap:8px;margin-bottom:10px;padding:8px 12px"><span style="flex:1;min-width:200px">📷 Instagram <b>@${esc(b.username||need)}</b> подключён${b.expires?` <span class="meta">· доступ до ${new Date(b.expires).toLocaleDateString('ru-RU')}, продлевается сам</span>`:''}</span>
+    <button class="btn small" id="ct-ins">${CT.busy==='ins'?'Собираем…':'📊 Обновить статистику постов'}</button></div>`;
+  return `<div class="card" style="margin-bottom:10px"><b>📷 Instagram @${need} не подключён</b> <span class="meta">— пока посты выкладываются вручную (кнопка «Текст» копирует подпись).</span>
+    ${own?`<p class="meta" style="margin:6px 0">developers.facebook.com → ваше приложение → Instagram → «API setup with Instagram login» → Generate token у @${need}. Вставьте токен сюда — он хранится на сервере и в браузер не возвращается.</p>
+    <div class="row" style="gap:6px;flex-wrap:wrap"><input id="ct-igtok" type="password" placeholder="Токен Instagram (IGAA…)" autocomplete="off" style="flex:1;min-width:200px"><button class="btn small primary" id="ct-igtok-save">Подключить</button></div>`:'<span class="meta"> Подключает владелец.</span>'}</div>`;
+}
+const ctIgChip = c => c.ig_status==='posted'?'<span class="chip ok">выложено</span>':c.ig_status==='publishing'?'<span class="chip warn">выкладывается…</span>':c.ig_status==='error'?'<span class="chip zero">ошибка</span>':c.status==='posted'?'<span class="chip ok">выложено</span>':c.auto_publish?'<span class="chip">выложится само</span>':'<span class="chip warn">ждёт</span>';
 async function ctAI(body){
   const { data, error } = await sb.functions.invoke('content', { body });
   if(error){ let m = error.message; try{ const j = await error.context.json(); m = j.error || m; }catch(_){} throw new Error(m==='no_key' ? 'ИИ ещё не подключён — владелец вписывает ключ Anthropic в «Контенте» или «Моём дне»' : m); }
@@ -2086,9 +2128,11 @@ function ctCard(c){
     <label class="stack" style="gap:2px"><span class="label">Текст поста</span><textarea data-ctf="${c.id}:caption" rows="7" placeholder="Подпись к посту">${esc(c.caption||'')}</textarea></label>
     <label class="stack" style="gap:2px"><span class="label">Что снять</span><textarea data-ctf="${c.id}:shot_list" rows="4">${esc(c.shot_list||'')}</textarea></label>
     <label class="stack" style="gap:2px"><span class="label">Хэштеги</span><input data-ctf="${c.id}:hashtags" value="${esc(c.hashtags||'')}"></label>
+    ${ctMedia(c, true)}
     <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
       <label class="meta">Формат <select data-ctf="${c.id}:format">${Object.entries(CT_FMT).map(([k,v])=>`<option value="${k}" ${c.format===k?'selected':''}>${v}</option>`).join('')}</select></label>
-      <label class="meta">Дата и время выкладки <input type="datetime-local" data-ctf="${c.id}:publish_at" value="${ctLocal(c.publish_at)}"></label></div>
+      <label class="meta">Дата и время выкладки <input type="datetime-local" data-ctf="${c.id}:publish_at" value="${ctLocal(c.publish_at)}"></label>
+      <label class="meta" style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" data-ctauto="${c.id}" ${c.auto_publish?'checked':''}>выложить в Instagram автоматически в эту дату</label></div>
     <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
       <button class="btn small primary" data-ctok="${c.id}">✅ Утвердить и поставить в план</button>
       <button class="btn small" data-ctgen="${c.id}" ${CT.ai?'':'disabled title="Нужен ключ ИИ"'}>${CT.busy===c.id?'Пишем…':(c.caption?'✨ Переписать ИИ':'✨ Написать ИИ')}</button>
@@ -2105,6 +2149,7 @@ function renderContent(){
   <details class="card" style="margin-bottom:10px"><summary style="cursor:pointer"><b>🚫 Нельзя в Instagram</b> <span class="meta">— товары с этими словами в названии не попадают в идеи и посты</span></summary>
     <textarea id="ct-banned" rows="3" style="width:100%;margin-top:6px">${esc(CT.banned||'')}</textarea>
     <div class="row"><span class="meta">Слова через запятую: бренды и узнаваемые модели (клевер, гвоздь…).</span><button class="btn small primary" id="ct-banned-save">Сохранить</button></div></details>`:''}
+  ${CT.ig?ctIgBar():''}
   ${CT.ai===false?`<div class="card" style="margin-bottom:10px"><span class="meta">✨ ИИ (Claude) пока не подключён. «Идеи из данных Silver» и ручные посты уже работают.${S.me.role==='owner'?' Впишите ключ Anthropic (console.anthropic.com → API Keys → Create Key) — он хранится на сервере и в браузер не возвращается.':' Ключ Anthropic вписывает владелец.'}</span>
     ${S.me.role==='owner'?`<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap"><input id="ct-key" type="password" placeholder="sk-ant-…" autocomplete="off" style="flex:1;min-width:200px"><button class="btn small primary" id="ct-key-save">Сохранить ключ</button></div>`:''}</div>`:''}
   ${CT.add?`<div class="card stack" style="margin-bottom:10px;gap:6px"><b>Своя идея</b><input id="ct-n-title" placeholder="Коротко: о чём пост"><textarea id="ct-n-idea" rows="2" placeholder="Что снять, зачем"></textarea>
@@ -2115,8 +2160,10 @@ function renderContent(){
   </div><div>
     <h3>📅 План выкладки</h3>
     ${plan.length?`<div class="scroll"><table><tbody>${plan.map(c=>`<tr><td class="num" style="white-space:nowrap">${ctNice(c.publish_at)}</td><td><b>${esc(c.title)}</b> <span class="chip">${CT_FMT[c.format]||c.format}</span><br>
-      <span class="meta">${esc((c.caption||'').slice(0,120))}${(c.caption||'').length>120?'…':''}</span>${c.posted_url?`<br><a href="${esc(c.posted_url)}" target="_blank" rel="noopener">пост в Instagram</a>`:''}</td>
-      <td>${c.status==='posted'?'<span class="chip ok">выложено</span>':`<span class="chip warn">ждёт</span>`}<br>${ctEdit()?`<button class="btn small" data-ctcopy="${c.id}">Текст</button>${c.status!=='posted'?` <button class="btn small" data-ctdone="${c.id}">✓ Выложено</button> <button class="btn small" data-ctst="${c.id}:draft">Править</button>`:''}`:''}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Утверждённых постов пока нет</div>'}
+      <span class="meta">${esc((c.caption||'').slice(0,120))}${(c.caption||'').length>120?'…':''}</span>${(c.media||[]).length?`<br>${(c.media||[]).slice(0,5).map(m=>`<img src="${esc(m.url)}" alt="" style="width:36px;height:45px;object-fit:cover;border-radius:4px;margin:4px 2px 0 0">`).join('')}`:''}${c.posted_url?`<br><a href="${esc(c.posted_url)}" target="_blank" rel="noopener">пост в Instagram ↗</a>`:''}${c.ig_status==='error'&&c.ig_error?`<br><span class="meta" style="color:var(--bad)">${esc(c.ig_error)}</span>`:''}</td>
+      <td>${ctIgChip(c)}<br>${ctEdit()?`<button class="btn small" data-ctcopy="${c.id}">Текст</button>${c.status!=='posted'&&c.ig_status!=='posted'?`${((CT.ig||{}).brands||{})[CT.brand]&&CT.ig.brands[CT.brand].connected&&c.ig_status!=='publishing'?` <button class="btn small primary" data-ctpub="${c.id}">${CT.busy==='p'+c.id?'Выкладываем…':CT.sure===c.id?'Точно выложить?':'📤 Выложить сейчас'}</button>`:''}
+        <label class="meta" style="display:inline-flex;gap:4px;align-items:center;margin-top:4px"><input type="checkbox" data-ctauto="${c.id}" ${c.auto_publish?'checked':''}>авто в дату</label>
+        <br><button class="btn small" data-ctdone="${c.id}">✓ Выложено вручную</button> <button class="btn small" data-ctst="${c.id}:draft">Править</button>`:''}`:''}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Утверждённых постов пока нет</div>'}
   </div></div>`}`;
 }
 document.addEventListener('click', async e => {
@@ -2124,6 +2171,14 @@ document.addEventListener('click', async e => {
   const find = id => (CT.list||[]).find(x=>x.id===id);
   try{
     if(d.ctbrand){ CT.brand = d.ctbrand; CT.list = null; render(); await loadContent(); render(); }
+    else if(t.id==='ct-igtok-save'){ const k = ($('#ct-igtok').value||'').trim(); if(!k) return; t.disabled = true;
+      const r = await igCall({ action:'set_token', brand:CT.brand, token:k }).catch(err => { t.disabled = false; throw err; }); CT.ig = null; toast('Instagram @'+(r.username||'')+' подключён'); await loadContent(); render(); }
+    else if(t.id==='ct-ins'){ CT.busy = 'ins'; render(); await igCall({ action:'insights', brand:CT.brand }).finally(()=>{ CT.busy=''; }); toast('Статистика постов обновлена — ИИ учтёт её в новых идеях'); render(); }
+    else if(d.ctpub){ if(CT.sure!==d.ctpub){ CT.sure = d.ctpub; render(); setTimeout(()=>{ if(CT.sure===d.ctpub){ CT.sure=''; render(); } }, 5000); return; }
+      CT.sure = ''; CT.busy = 'p'+d.ctpub; render(); const r = await igCall({ action:'publish', id:d.ctpub }).finally(()=>{ CT.busy=''; }); toast('Выложено в Instagram'); await loadContent(); render(); if(r && r.url) window.open(r.url, '_blank', 'noopener'); }
+    else if(d.ctpp){ const [id, pid] = d.ctpp.split(':'), c = find(id), p = (c.products||[]).find(x=>x.id===pid); if(!p) return; CT.busy = 'm'+id; render(); await ctMediaAdd(c, [p.photo_url]).finally(()=>{ CT.busy=''; }); render(); }
+    else if(d.ctrm){ const [id, i] = d.ctrm.split(':'), c = find(id); const media = (c.media||[]).filter((_,k)=>k!==+i); const { error } = await sb.rpc('content_save', { p:{ id, media } }); if(error) throw error; c.media = media; render(); }
+    else if(d.ctmv){ const [id, i] = d.ctmv.split(':'), c = find(id), M = [...(c.media||[])], k = +i; [M[k-1], M[k]] = [M[k], M[k-1]]; const { error } = await sb.rpc('content_save', { p:{ id, media:M } }); if(error) throw error; c.media = M; render(); }
     else if(t.id==='ct-key-save'){ const k = ($('#ct-key').value||'').trim(); if(!k) return; t.disabled = true; await ctAI({ action:'set_key', key:k }).catch(err => { t.disabled = false; throw err; }); CT.ai = null; AN.st = null; toast('Ключ Claude сохранён'); await loadContent(); render(); }
     else if(t.id==='ct-add'){ CT.add = true; render(); }
     else if(t.id==='ct-banned-save'){ const v = $('#ct-banned').value; const { error } = await sb.rpc('content_banned_set', { p:v }); if(error) throw error; CT.banned = v; toast('Список сохранён'); }
@@ -2141,7 +2196,13 @@ document.addEventListener('click', async e => {
   }catch(err){ CT.busy=''; toast(errText(err)); render(); }
 });
 document.addEventListener('change', async e => {
-  if(S.view!=='content') return; const t = e.target, f = t.dataset.ctf; if(!f) return; const [id, k] = f.split(':');
+  if(S.view!=='content') return; const t = e.target;
+  if(t.dataset.ctauto){ const id = t.dataset.ctauto, c = (CT.list||[]).find(x=>x.id===id), v = t.checked;
+    if(v && !(((CT.ig||{}).brands||{})[CT.brand]||{}).connected) toast('Instagram ещё не подключён — пост выложится, когда подключите');
+    const { error } = await sb.rpc('content_save', { p:{ id, auto_publish:v } }); if(error){ t.checked = !v; return toast(errText(error)); } if(c) c.auto_publish = v; render(); return; }
+  if(t.dataset.ctup){ const c = (CT.list||[]).find(x=>x.id===t.dataset.ctup), files = [...(t.files||[])]; if(!c || !files.length) return;
+    CT.busy = 'm'+c.id; render(); try{ await ctMediaAdd(c, files.map(f => URL.createObjectURL(f))); }catch(err){ toast(errText(err)); } CT.busy = ''; render(); return; }
+  const f = t.dataset.ctf; if(!f) return; const [id, k] = f.split(':');
   let v = t.value; if(k==='publish_at') v = v ? v + ':00+05:00' : '';
   const { error } = await sb.rpc('content_save', { p:{ id, [k]: v } }); if(error) return toast(errText(error));
   const c = (CT.list||[]).find(x=>x.id===id); if(c) c[k] = k==='publish_at' ? (v||null) : v;
@@ -2749,6 +2810,7 @@ function anHtml(){
   return `<div class="card" style="margin-top:12px"><div class="row" style="flex-wrap:wrap;gap:8px"><b style="flex:1">✨ Разбор от ИИ (Claude)</b>
     <button class="btn small primary" id="an-go" ${AN.busy||!st?'disabled':''}>${AN.busy?'Думает… (~30 сек)':AN.text?'Обновить разбор':'Разобрать день'}</button></div>
     <div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap"><input id="an-q" placeholder="Или спросите: почему просел Толе би? где взять 2 млн до конца месяца?" value="${esc(AN.q)}" style="flex:1;min-width:200px"><button class="btn small" id="an-ask" ${AN.busy||!st?'disabled':''}>Спросить</button></div>
+    <details style="margin-top:6px"><summary class="meta" style="cursor:pointer">Сменить ключ Claude</summary><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><input id="an-key" type="password" placeholder="sk-ant-…" autocomplete="off" style="flex:1;min-width:200px"><button class="btn small" id="an-key-save">Сохранить ключ</button></div></details>
     ${AN.text?`<div style="white-space:pre-wrap;margin-top:10px;line-height:1.5">${esc(AN.text).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^#+ ?(.*)$/gm,'<b>$1</b>')}</div>`:''}</div>`;
 }
 async function anStatus(){ if(AN.st) return; const { data } = await sb.functions.invoke('content', { body:{ action:'status' } }); AN.st = data || { ai:false }; if(S.view==='day') render(); }
