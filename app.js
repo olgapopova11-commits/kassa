@@ -1617,10 +1617,22 @@ async function openBonusClient(id){ BK.cur = id; BK.card = null; render(); const
 const dshort = d => d ? new Date(d).toLocaleDateString('ru-RU') : '—';
 /* ---------- загрузка выгрузок Wipon: продажи и остатки ---------- */
 const WU = { store:null, msg:'', last:null };
-async function wuLoadLast(){ const { data } = await sb.rpc('wipon_last'); WU.last = data || {}; if(['sales','stock'].includes(S.view)) render(); }
+async function wuLoadLast(){ const { data } = await sb.rpc('wipon_last'); WU.last = data || {}; if(['sales','stock','day'].includes(S.view)) render(); }
+/* блок «Обновление данных из Wipon» для «Моего дня» владельца: когда последний раз пришли чеки и остатки + закладка */
+function wiponSyncHtml(){
+  if(!S.me || S.me.role!=='owner') return '';
+  const L = WU.last || {}, ago = t => { if(!t) return '<span class="chip zero">нет</span>'; const h = (Date.now() - new Date(t)) / 36e5; return `<span class="chip ${h>3?'warn':'ok'}">${wuDt(t)}</span>`; };
+  return `<details class="card" style="margin-top:14px" ${WU.dopen?'open':''} id="wu-day"><summary style="cursor:pointer"><b>🔄 Обновление данных из Wipon</b> <span class="meta">— чеки каждые 15 мин, остатки раз в час, пока открыт кабинет Wipon с закладкой</span></summary>
+    <div class="scroll" style="margin-top:8px"><table><thead><tr><th>Магазин</th><th>Чеки обновлены</th><th>Остатки обновлены</th></tr></thead><tbody>
+    ${S.allStores.map(x=>`<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td>${ago((L['sales:'+x.id]||{}).at)}</td><td>${ago((L['stock:'+x.id]||{}).at)}</td></tr>`).join('')}</tbody></table></div>
+    <div class="cust stack" style="gap:6px;margin-top:8px"><span class="meta">Как включить: 1) «Получить закладку» и перетащите кнопку на панель закладок Chrome. 2) Откройте console.wipon.kz и нажмите закладку. 3) Переключитесь внизу кабинета на второе ИП хотя бы раз — дальше обновляются оба. Если закладку обновили — перезагрузите страницу Wipon и нажмите её снова.</span>
+      <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">${WU.bm?`<a class="btn small primary" href="${esc(WU.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Wipon</a><span class="meta">← перетащите на панель закладок</span>`:`<button class="btn small" id="wu-bm">Получить закладку</button>`}</div></div></details>`;
+}
+document.addEventListener('toggle', e => { if(e.target && e.target.id==='wu-day') WU.dopen = e.target.open; }, true);
 const wuDt = v => v ? new Date(v).toLocaleString('ru-RU',{ day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Asia/Almaty' }) : '—';
 const wiponOk = () => S.me && (['owner','manager','purchaser'].includes(S.me.role));
 function wiponUpHtml(kind){
+  return ''; // загрузка Excel из Wipon больше не нужна — данные приходят закладкой (см. «Мой день»)
   if(!wiponOk()) return '';
   const st = WU.store || S.store, L = WU.last || {}, last = id => L[kind+':'+id];
   if(!WU.last && !WU.loading){ WU.loading = true; wuLoadLast().finally(()=>{ WU.loading = false; }); }
@@ -1951,7 +1963,7 @@ function renderAttn(){
   if(A.requests) add('warn', `Запросы на оприходование: ${A.requests}`, 'Продавцы просят поставить товар на остаток.', 'wh', 'К запросам');
   if(A.noprice) add('bad', `Товары в наличии без розничной цены: ${A.noprice}`, 'Касса не продаст товар с ценой 0. Найдите их в «Номенклатуре» и поставьте цену: '+(A.noprice_names||[]).map(esc).join(', '), 'nom', 'Номенклатура');
   const W = (A.wipon||[]).filter(w => dayOf(w.sales)!==today);
-  if(W.length) add('warn', `Продажи из Wipon сегодня не загружены: ${W.length} маг.`, W.map(w=>esc(storeName(w.store_id))+' — '+ago(w.sales)).join(' · '), 'sales', 'Загрузить продажи');
+  if(W.length) add('warn', `Продажи из Wipon сегодня не загружены: ${W.length} маг.`, W.map(w=>esc(storeName(w.store_id))+' — '+ago(w.sales)).join(' · ')+'. Откройте кабинет Wipon и нажмите закладку «Silver ← Wipon».', 'day', 'Мой день');
   if(A.cons_nophone) add('warn', `Консультанты без телефона: ${A.cons_nophone}`, 'Без телефона консультант не сможет пользоваться ботом смен и зарплаты.', 'cons', 'Вписать телефоны');
   if(A.cons_notg) add('', `Телефон есть, но бот не подключён: ${A.cons_notg}`, 'Попросите открыть бота и нажать «Поделиться номером».', 'cons', 'Список');
   if(A.nophoto) add('', `Товары в наличии без фото: ${A.nophoto.toLocaleString('ru-RU')}`, 'Без фото товар не выложить на сайт и в Instagram. Начните с ходовых — «Путь товара» покажет их первыми.', 'flow', 'Путь товара');
@@ -2427,6 +2439,7 @@ async function loadDay(){
   const { data, error } = await sb.rpc('my_day', { p_store: DAY.store || S.store || null });
   if(error){ toast(errText(error)); DAY.data = { mgr:[], buy:[], sell:[] }; } else DAY.data = data;
   if(DAY.role==='buy') loadDaySug();
+  if(S.me.role==='owner') wuLoadLast();
 }
 async function loadDaySug(){ if(DAY.sug) return; DAY.sug = 'wait';
   const { data, error } = await sb.rpc('po_suggest', { p_days:30 }); if(error){ DAY.sug = null; return toast(errText(error)); }
@@ -2448,7 +2461,8 @@ function renderDay(){
     <p class="meta" style="margin:4px 0 12px">${r==='sell'?'Дела по магазину '+esc(storeName(st)):r==='buy'?'Дела по закупу, по всем магазинам':'Дела по вашим магазинам'}. Нажмите «Открыть» — попадёте сразу туда, где это делается. Сделанное уходит вниз само.</p>
     ${!D?'<div class="empty">Собираем дела…</div>':`${todo.length?`<div class="stack" style="gap:8px">${todo.map(i=>`<div class="card row" style="flex-wrap:wrap;gap:10px;border-left:4px solid ${col[i.lvl]||col['']}"><div style="flex:1;min-width:220px"><b>${esc(i.t)}</b>${i.wait||i.k==='open'||i.k==='close'?'':` <span class="chip ${i.lvl==='bad'?'zero':'warn'}">${(+i.n).toLocaleString('ru-RU')}</span>`}${i.h?`<br><span class="meta">${esc(i.h)}</span>`:''}</div><button class="btn small primary" data-daygo="${esc(i.k)}" ${i.wait?'disabled':''}>Открыть →</button></div>`).join('')}</div>`
       :'<div class="card" style="text-align:center;padding:24px">✅ На сегодня всё сделано</div>'}
-    ${done.length?`<details style="margin-top:14px"><summary class="meta" style="cursor:pointer">Сделано: ${done.length}</summary><div class="stack" style="gap:4px;margin-top:6px">${done.map(i=>`<div class="meta">✓ ${esc(i.t)}</div>`).join('')}</div></details>`:''}`}`;
+    ${done.length?`<details style="margin-top:14px"><summary class="meta" style="cursor:pointer">Сделано: ${done.length}</summary><div class="stack" style="gap:4px;margin-top:6px">${done.map(i=>`<div class="meta">✓ ${esc(i.t)}</div>`).join('')}</div></details>`:''}`}
+    ${wiponSyncHtml()}`;
 }
 document.addEventListener('click', async e => { if(S.view!=='day') return; const t = e.target.closest('button'); if(!t) return;
   if(t.id==='day-ref'){ DAY.data = null; DAY.sug = null; render(); await loadDay(); render(); }
