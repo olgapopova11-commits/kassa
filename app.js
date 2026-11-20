@@ -1880,6 +1880,7 @@ function renderPhoto(){
     <div class="row" style="justify-content:flex-start;gap:14px;flex-wrap:wrap"><span class="num" style="font-size:18px">${esc(p.barcode||'')}</span><span><b>${+p.price>0?fmt(p.price):'нет цены'}</b></span><span class="meta">в наличии ${p.stock} · продано за 30 дн. ${p.sold30}</span></div>
     <label class="btn primary" style="cursor:pointer;text-align:center;padding:16px;font-size:17px">${PH.busy?'Загружаем…':'📷 Снять фото'}<input type="file" id="ph-file" accept="image/*" capture="environment" hidden ${PH.busy?'disabled':''}></label>
     <div class="row" style="gap:8px"><button class="btn" id="ph-prev" ${PH.i?'':'disabled'}>← Назад</button><button class="btn" id="ph-skip">Пропустить →</button></div>
+    <button class="btn small" id="ph-grp" title="Под этим штрихкодом много разных изделий (например «Брелок Сделай сам») — одно фото не подойдёт. Товар уйдёт из фотосессии и не будет выводиться на сайт.">🧩 Сборный товар — фото не нужно</button>
   </div>
   ${R.length>1?`<details style="margin-top:12px"><summary class="meta" style="cursor:pointer">Вся очередь (${R.length})</summary><div class="scroll"><table>${R.map((x,n)=>`<tr style="${n===PH.i?'background:var(--soft)':''}"><td><button class="btn small" data-phgo="${n}" style="border:0;background:none;padding:0;text-align:left">${esc(x.name)}</button></td><td class="num meta">${esc(x.barcode||'')}</td><td class="num">${x.sold30}</td></tr>`).join('')}</table></div></details>`:''}`}`;
 }
@@ -1904,6 +1905,8 @@ async function photoUpload(file){
 }
 document.addEventListener('click', async e => { if(S.view!=='photo') return; const t = e.target.closest('button'); if(!t) return; const R = (PH.data&&PH.data.rows)||[];
   if(t.id==='ph-skip'){ PH.i = Math.min(R.length-1, PH.i+1); render(); }
+  else if(t.id==='ph-grp'){ const p = R[PH.i]; if(!p) return; t.disabled = true; const { error } = await sb.rpc('product_mark_group', { p_id:p.id, p_on:true }); if(error){ t.disabled = false; return toast(errText(error)); }
+    R.splice(PH.i, 1); if(PH.data.total) PH.data.total--; if(PH.i >= R.length) PH.i = Math.max(0, R.length-1); toast(`«${p.name}» отмечен как сборный товар (общий штрихкод) — фото больше не попросит`); render(); }
   else if(t.id==='ph-prev'){ PH.i = Math.max(0, PH.i-1); render(); }
   else if(t.id==='ph-find'){ PH.q = $('#ph-q').value.trim(); PH.data = null; render(); await loadPhoto(); render(); }
   else if(t.id==='ph-clear'){ PH.q = ''; PH.data = null; render(); await loadPhoto(); render(); }
