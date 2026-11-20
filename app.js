@@ -232,7 +232,7 @@ function renderShell(){
   if(S.me.role !== 'owner' && Array.isArray(acc)){ const keep = tabs.filter(([v]) => acc.includes(v)); tabs.splice(0, tabs.length, ...keep); }
   // остальные вкладки: владельцу все, остальным — по настройке «Какие вкладки видит каждая роль» (или по умолчанию)
   for(const [v,t] of EXTRA_TABS){ if(S.me.role==='owner' || v==='day' || (Array.isArray(acc) ? acc.includes(v) : (EXTRA_DEF[v]||[]).includes(S.me.role))) tabs.push([v, v==='pay' && !isBoss() ? 'Моя зарплата' : t]); }
-  if(S.me.role==='owner') tabs.push(['adm','Административный штат']);
+  if(S.me.role==='owner') tabs.push(['adm','Административный штат'], ['audit','Журнал']);
   // касса Silver (продажа, смены, расходы) пока не используется — чеки пробиваются в Wipon; включается настройкой pos_enabled
   if(!S.posOn){ const off = ['pos','shifts', ...(isBoss() ? [] : ['cash'])]; tabs.splice(0, tabs.length, ...tabs.filter(([v]) => !off.includes(v)));
     // без кассы Silver «Расходы» — это журнал расходов магазинов (из тетрадей), он живёт в «Аналитике» рядом с «Рентабельностью»
@@ -254,7 +254,7 @@ function renderShell(){
 }
 // вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
 const GROUPS = [['home','✅','Мой день',['day']],['goods','📦','Товары',['flow','wh','po','nom','photo','site']],['analytics','📈','Аналитика',['analytics','profit']],
-  ['team','👥','Команда',['me','emps','cons','pay','adm']],['kassa','🧾','Чеки',['pos','shifts','cash','sales']],['clients','💳','Клиенты',['promo','content','bonus','certs']]];
+  ['team','👥','Команда',['me','emps','cons','pay','adm','audit']],['kassa','🧾','Чеки',['pos','shifts','cash','sales']],['clients','💳','Клиенты',['promo','content','bonus','certs']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 // старые адреса вкладок: #attn → «Мой день», #stock → «Склад» в режиме «Остатки»
 function viewAlias(){ if(S.view==='attn') S.view = 'day'; else if(S.view==='stock'){ S.view = 'wh'; S.wmode = 'stock'; } }
@@ -315,7 +315,7 @@ function render(){
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart, y0 = scrollY;
   if(lazyPending(S.view)){ $('#main').innerHTML = `<div class="card" style="text-align:center;padding:28px 16px"><div style="font-size:32px">📊</div><p style="margin:8px 0 14px">На телефоне аналитика загружается только по запросу — так приложение работает быстрее.</p><button class="btn primary" data-lazyload="${S.view}">Загрузить</button></div>`; return; }
-  ({ pos:renderPos, sales:renderSales, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, photo:renderPhoto, day:renderDay })[S.view]();
+  ({ pos:renderPos, sales:renderSales, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, photo:renderPhoto, day:renderDay, audit:renderAudit })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus({ preventScroll:true }); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
   if(y0 && Math.abs(scrollY - y0) > 2) scrollTo(0, y0);  // перерисовка не должна сбрасывать прокрутку
 }
@@ -1992,15 +1992,25 @@ async function openBonusClient(id){ BK.cur = id; BK.card = null; render(); const
 const dshort = d => d ? new Date(d).toLocaleDateString('ru-RU') : '—';
 /* ---------- загрузка выгрузок Wipon: продажи и остатки ---------- */
 const WU = { store:null, msg:'', last:null };
-async function wuLoadLast(){ const { data } = await sb.rpc('wipon_last'); WU.last = data || {}; if(['sales','wh','day'].includes(S.view)) render(); }
+async function wuLoadLast(){ const { data } = await sb.rpc('wipon_last'); WU.last = data || {}; wuLoadSrv(); if(['sales','wh','day'].includes(S.view)) render(); }
+/* обновление из Wipon на сервере (закладка один раз передаёт сеанс Wipon) — статус без токена */
+async function wuLoadSrv(){ if(!S.me || S.me.role==='consultant') return; const { data } = await sb.functions.invoke('wipon_srv', { body:{ action:'status' } }).catch(() => ({})); if(data && !data.error){ WU.srv = data; if(['day','sales','wh'].includes(S.view)) render(); } }
+function wuSrvLine(){ const v = WU.srv; if(!v) return '';
+  const hm = t => t ? new Date(t).toLocaleString('ru-RU',{ day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Asia/Almaty' }) : '—';
+  if(v.expired || (!v.active && v.set_at)) return `<div class="card" style="margin-top:12px;border-left:4px solid var(--bad)"><b>⚠ Сеанс Wipon закончился</b><br><span class="meta">Чеки и остатки из Wipon сейчас не приходят. ${S.me.role==='owner'?'Откройте console.wipon.kz и нажмите закладку Silver — сервер снова будет обновлять сам.':'Попросите владельца открыть Wipon и нажать закладку Silver.'}${v.last_ok_at?' Последнее обновление: '+hm(v.last_ok_at)+'.':''}</span></div>`;
+  if(v.active) return `<span class="chip ok" title="${esc(v.last_error||'')}">🟢 Обновляется сервером · последнее обновление ${hm(v.last_ok_at)}</span>${v.last_error?` <span class="chip warn" title="${esc(v.last_error)}">была ошибка ${hm(v.last_error_at)}</span>`:''}`;
+  return ''; }
 /* блок «Обновление данных из Wipon» для «Моего дня» владельца: когда последний раз пришли чеки и остатки + закладка */
 function wiponSyncHtml(){
+  if(S.me && S.me.role!=='owner' && S.me.role!=='consultant'){ const v = WU.srv; return v && (v.expired || (!v.active && v.set_at)) ? wuSrvLine() : ''; }
   if(!S.me || S.me.role!=='owner') return '';
+  const sv = WU.srv, srvWarn = sv && (sv.expired || (!sv.active && sv.set_at));
   const L = WU.last || {}, ago = t => { if(!t) return '<span class="chip zero">нет</span>'; const h = (Date.now() - new Date(t)) / 36e5; return `<span class="chip ${h>3?'warn':'ok'}">${wuDt(t)}</span>`; };
-  return `<details class="card" style="margin-top:14px" ${WU.dopen?'open':''} id="wu-day"><summary style="cursor:pointer"><b>🔄 Обновление данных из Wipon</b> <span class="meta">— чеки каждые 15 мин, остатки раз в час, пока открыт кабинет Wipon с закладкой</span></summary>
+  return `<details class="card" style="margin-top:14px" ${WU.dopen?'open':''} id="wu-day"><summary style="cursor:pointer"><b>🔄 Обновление данных из Wipon</b> <span class="meta">— ${sv&&sv.active?'сервер сам забирает чеки каждые 15 мин и остатки раз в час, вкладку Wipon держать открытой не нужно':'чеки каждые 15 мин, остатки раз в час'}</span> ${sv&&sv.active?wuSrvLine():''}</summary>
+    ${srvWarn?wuSrvLine():''}
     <div class="scroll" style="margin-top:8px"><table><thead><tr><th>Магазин</th><th>Чеки обновлены</th><th>Остатки обновлены</th></tr></thead><tbody>
     ${S.allStores.map(x=>`<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td>${ago((L['sales:'+x.id]||{}).at)}</td><td>${ago((L['stock:'+x.id]||{}).at)}</td></tr>`).join('')}</tbody></table></div>
-    <div class="cust stack" style="gap:6px;margin-top:8px"><span class="meta">Как включить: 1) «Получить закладку» и перетащите кнопку на панель закладок Chrome. 2) Откройте console.wipon.kz и нажмите закладку. 3) Переключитесь внизу кабинета на второе ИП хотя бы раз — дальше обновляются оба. Если закладку обновили — перезагрузите страницу Wipon и нажмите её снова.</span>
+    <div class="cust stack" style="gap:6px;margin-top:8px"><span class="meta">${sv&&sv.set_at?'':'<b>Обновите закладку: нажмите «Получить закладку» и замените старую</b> — новая один раз передаёт сеанс Wipon серверу, и дальше Silver обновляется сам, даже когда вкладка Wipon закрыта. '}Как включить: 1) «Получить закладку» и перетащите кнопку на панель закладок Chrome (старую удалите). 2) Откройте console.wipon.kz и нажмите закладку. 3) Переключитесь внизу кабинета на второе ИП и нажмите закладку ещё раз — сервер будет обновлять оба. Когда Wipon завершит сеанс (выход из кабинета, смена пароля), Silver покажет предупреждение — тогда войдите в Wipon и нажмите закладку снова.</span>
       <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">${WU.bm?`<a class="btn small primary" href="${esc(WU.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Wipon</a><span class="meta">← перетащите на панель закладок</span>`:`<button class="btn small" id="wu-bm">Получить закладку</button>`}</div></div></details>`;
 }
 document.addEventListener('toggle', e => { if(e.target && e.target.id==='wu-day') WU.dopen = e.target.open; }, true);
@@ -2081,7 +2091,20 @@ function silverWiponSync(K){
       b.textContent = 'Silver ✓ ' + new Date().toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit' }) + ' · новых чеков: ' + t[0] + ' · возвратов: ' + t[1] + (t[2] ? ' · остатки обновлены (' + t[2] + ' скл.)' : '') + ' · кабинетов ИП: ' + E.length + (bad.length ? ' · ошибка: ' + bad[0] : '') + ' · следующая через 15 мин';
     }catch(e){ b.textContent = 'Silver: ошибка — ' + e.message + ' (повторим через 15 мин)'; }
   }
-  window.__ss = { run }; run(); setInterval(run, 9e5);
+  // новый режим: передаём сеанс Wipon серверу Silver — дальше он обновляет сам, вкладку можно закрыть
+  const SRV = 'https://ottuadjdksxipfjytlyv.supabase.co/functions/v1/wipon_srv';
+  const call = async body => { const r = await fetch(SRV, { method:'POST', headers:{ 'content-type':'application/json', 'x-ingest':K }, body:JSON.stringify(body) }); const j = await r.json().catch(() => ({})); if(!r.ok || j.error) throw Error(j.error || ('Silver ' + r.status)); return j; };
+  async function srv(){
+    b.textContent = 'Silver: передаём сеанс Wipon серверу…';
+    const v = JSON.parse(localStorage.getItem('vuex')), cur = v.employee.item.id, E = L('silver_wipon_emps') || [];
+    if(!E.includes(cur)){ E.push(cur); P('silver_wipon_emps', E); }
+    const s = await call({ action:'set_token', token:v.user.token, emps:E });
+    b.textContent = 'Silver: сеанс передан (кабинетов ИП: ' + s.cabinets + '), загружаем данные…';
+    let p = null; try{ p = await call({ action:'pull_now' }); }catch(_){ /* сервер повторит сам через 15 мин */ }
+    b.textContent = 'Silver ✓ будет обновляться сам каждые 15 минут — вкладку можно закрыть' + (p && p.sales != null ? ' · новых чеков: ' + p.sales + ' · возвратов: ' + p.refunds : '') + ' · второе ИП: переключитесь на него и нажмите закладку ещё раз';
+  }
+  srv().then(() => { window.__ss = { run: () => srv().catch(e => { b.textContent = 'Silver: ' + e.message; }) }; })
+    .catch(e => { b.textContent = 'Silver: сервер не принял сеанс (' + e.message + ') — обновляем из этой вкладки'; window.__ss = { run }; run(); setInterval(run, 9e5); });
 }
 function wiponBookmarklet(key){ return 'javascript:' + encodeURIComponent('(' + silverWiponSync.toString() + ')(' + JSON.stringify(key) + ')'); }
 document.addEventListener('click', async e => { const t = e.target.closest('button'); if(!t || t.id!=='wu-bm') return; t.disabled = true;
@@ -2438,7 +2461,7 @@ function attnHtml(embed, role){
 function attnTables(A, ago, today, dayOf){
   return `${(A.site||[]).length?`<div class="card" style="margin-top:14px"><b>Сайты</b><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Сайт</th><th>Каталог обновлён</th><th>Проверить связи</th><th>Без привязки</th><th>Нет на сайте</th></tr></thead><tbody>
     ${A.site.map(x=>`<tr><td>${x.site==='moon'?'MOON':'Sunshine'}</td><td>${ago(x.loaded)}</td><td class="num">${x.review}</td><td class="num">${x.siteonly}</td><td class="num">${(+x.baseonly).toLocaleString('ru-RU')}</td></tr>`).join('')}</tbody></table></div></div>`:''}
-  ${S.me.role==='owner'?`<div class="card" style="margin-top:14px"><b>🛟 Резервные копии базы</b><p class="meta" style="margin:4px 0">Каждую ночь в 03:00 Silver сохраняет копию всех данных и хранит 7 дней. Видите только вы.</p>
+  ${S.me.role==='owner'?`<div class="card" style="margin-top:14px"><b>🛟 Резервные копии базы</b><p class="meta" style="margin:4px 0">Каждую ночь в 03:00 Silver сохраняет копию всех данных и хранит 7 дней. Видите только вы.</p>${gdHtml()}
     ${(A.backups||[]).length?`<div class="scroll"><table style="margin-top:4px"><tbody>${A.backups.map(b=>`<tr><td>${b.day.split('-').reverse().join('.')}</td><td>${b.ok===b.parts?`<span class="chip ok">✓ полная</span>`:`<span class="chip warn">${b.ok} из ${b.parts} частей</span>`}</td><td class="meta">${(+b.rows||0).toLocaleString('ru-RU')} строк${b.at?' · '+new Date(b.at).toLocaleTimeString('ru-RU',{timeZone:'Asia/Almaty',hour:'2-digit',minute:'2-digit'}):''}</td><td><button class="btn small" data-bkday="${b.day}">⬇ Скачать</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="meta">Первая копия появится сегодня ночью.</div>'}</div>`:''}
   <div class="card" style="margin-top:14px"><b>Загрузки из Wipon</b><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Магазин</th><th>Продажи</th><th>Остатки</th></tr></thead><tbody>
     ${(A.wipon||[]).map(w=>`<tr><td>${esc(storeName(w.store_id))}</td><td style="color:${dayOf(w.sales)===today?'var(--ok)':'inherit'}">${ago(w.sales)}</td><td>${ago(w.stock)}</td></tr>`).join('')}</tbody></table></div></div>`;
@@ -2449,9 +2472,112 @@ document.addEventListener('click', async e => { if(S.view!=='day') return; const
   if(t.id==='attn-ref'){ S.attn = null; render(); await loadAttn(); render(); }
   else if(t.dataset.bkday){ const day = t.dataset.bkday; const { data:files } = await sb.storage.from('backups').list(day, { limit:500 }); const paths = (files||[]).filter(f=>/\.\d{3}\.ndjson\.gz$/.test(f.name)).map(f=>day+'/'+f.name);
     const { data:urls, error } = await sb.storage.from('backups').createSignedUrls(paths, 3600); if(error) return toast(errText(error));
-    modal(`<div class="row"><h3 style="margin:0">Копия за ${day.split('-').reverse().join('.')}</h3><button class="btn small" data-close>✕</button></div><p class="meta">Каждая таблица — отдельный файл (сжатый JSON). Ссылки действуют 1 час.</p><div class="stack" style="gap:4px;max-height:60vh;overflow:auto">${(urls||[]).map(u=>`<a href="${esc(u.signedUrl)}" target="_blank" rel="noopener">${esc(u.path.split('/')[1])}</a>`).join('')}</div>`); }
+    modal(`<div class="row"><h3 style="margin:0">Копия за ${day.split('-').reverse().join('.')}</h3><button class="btn small" data-close>✕</button></div>
+      <p><button class="btn primary" data-bktar="${day}">⬇ Скачать всё одним файлом (.tar)</button></p>
+      <p class="meta">Или по отдельности: каждая таблица — отдельный файл (сжатый JSON). Ссылки действуют 1 час.</p><div class="stack" style="gap:4px;max-height:60vh;overflow:auto">${(urls||[]).map(u=>`<a href="${esc(u.signedUrl)}" target="_blank" rel="noopener">${esc(u.path.split('/')[1])}</a>`).join('')}</div>`); }
   else if(t.dataset.attngo){ const v = t.dataset.attngo; if(v==='day'){ scrollTo(0,0); return; } if(!(S.tabs||[]).some(x=>x[0]===v)) return toast('У вас нет доступа к этой вкладке'); S.view = v; (S.lastView ||= {})[groupOf(v)[0]] = v; render(); scrollTo(0,0); await loadView(); }
 });
+
+/* ---------- резервная копия одним файлом: все части за день → .tar (без сторонних библиотек) ---------- */
+const BKI = { info:null, busy:'' };
+async function bkInfo(){ const { data } = await sb.rpc('backup_info'); BKI.info = data || null; if(S.view==='day') render(); }
+function bkTarHeader(name, size){
+  const h = new Uint8Array(512), enc = new TextEncoder(), put = (s, off, len) => { const b = enc.encode(s); h.set(b.slice(0, len), off); };
+  const oct = (n, len) => n.toString(8).padStart(len - 1, '0') + '\0';
+  put(name, 0, 100); put(oct(0o644, 8), 100, 8); put(oct(0, 8), 108, 8); put(oct(0, 8), 116, 8); put(oct(size, 12), 124, 12);
+  put(oct(Math.floor(Date.now()/1000), 12), 136, 12); put('        ', 148, 8); put('0', 156, 1); put('ustar\0', 257, 6); put('00', 263, 2);
+  let sum = 0; for(const b of h) sum += b; put(sum.toString(8).padStart(6, '0') + '\0 ', 148, 8); return h;
+}
+async function bkTar(day){
+  if(BKI.busy) return; BKI.busy = day; render(); toast('Собираем копию — это займёт до минуты');
+  try{
+    const { data:files, error:le } = await sb.storage.from('backups').list(day, { limit:1000 }); if(le) throw le;
+    const paths = (files||[]).filter(f => /\.ndjson\.gz$/.test(f.name)).map(f => day + '/' + f.name);
+    if(!paths.length) throw new Error('В копии за этот день нет файлов');
+    const { data:urls, error } = await sb.storage.from('backups').createSignedUrls(paths, 3600); if(error) throw error;
+    const parts = []; let total = 0;
+    for(const u of urls){ const r = await fetch(u.signedUrl); if(!r.ok) throw new Error('Не скачался файл ' + u.path); const b = new Uint8Array(await r.arrayBuffer());
+      const pad = (512 - b.length % 512) % 512; parts.push(bkTarHeader('silver-' + u.path, b.length), b, new Uint8Array(pad)); total += b.length; }
+    parts.push(new Uint8Array(1024));
+    const blob = new Blob(parts, { type:'application/x-tar' }), a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `silver-backup-${day}.tar`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60e3);
+    await sb.rpc('backup_mark_downloaded'); BKI.info = { ...(BKI.info||{}), downloaded_at: new Date().toISOString() };
+    toast(`Скачано: ${paths.length} файлов, ${(total/1e6).toFixed(1)} МБ. Сохраните файл на свой компьютер или Google Drive.`);
+  }catch(err){ toast(errText(err)); }
+  BKI.busy = ''; render();
+}
+/* ---------- копия на Google Диск владельца: скрипт Google Apps Script в её аккаунте сам забирает архив каждый день ---------- */
+const gdFresh = I => !!(I && I.gdrive_at && Date.now() - new Date(I.gdrive_at) < 36 * 3600e3);
+function gdHtml(){
+  const I = BKI.info || {}, b = I.bundle, at = I.gdrive_at ? new Date(I.gdrive_at).toLocaleString('ru-RU',{timeZone:'Asia/Almaty',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+  return `<div class="card" style="margin:8px 0;padding:8px 12px;border-left:4px solid ${gdFresh(I)?'var(--ok)':'var(--warn,#e2a400)'}"><b>☁️ Копия на Google Диск каждый день</b><br>
+    <span class="meta">${I.gdrive_at ? `Последняя копия на Диске: ${esc(at)}${I.gdrive_name?' · '+esc(I.gdrive_name):''}${gdFresh(I)?'':' — давно не обновлялась, проверьте скрипт'}` : 'Ещё не настроено.'}${b&&b.bytes?` Размер архива: ${(b.bytes/1e6).toFixed(1)} МБ, на Диске хранится 10 последних (≈ ${(b.bytes*10/1e6).toFixed(0)} МБ).`:''}</span>
+    <div class="row" style="justify-content:flex-start;gap:6px;margin-top:6px"><button class="btn small" data-gdscript="1">${I.gdrive_at?'Показать скрипт':'Настроить — показать скрипт'}</button></div></div>`;
+}
+function gdScript(key){
+  return `// Silver → Google Диск: каждый день сохраняет свежую резервную копию базы Silver
+// в папку «Silver — резервные копии» и хранит 10 последних (старые уходят в корзину Диска).
+// Ключ ниже даёт право только скачать архив копии — не храните скрипт в общих папках.
+const SILVER_URL = 'https://ottuadjdksxipfjytlyv.supabase.co/functions/v1/backup_pull';
+const SILVER_KEY = '${key}';
+const FOLDER = 'Silver — резервные копии';
+const KEEP = 10;
+
+// Главная функция: её запускает расписание раз в день.
+function silverBackup() {
+  // 1. Спрашиваем у Silver ссылку на свежий архив
+  const r = UrlFetchApp.fetch(SILVER_URL, { method: 'get', headers: { 'x-backup-key': SILVER_KEY }, muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) throw new Error('Silver не отдал копию: ' + r.getResponseCode() + ' ' + r.getContentText().slice(0, 200));
+  const info = JSON.parse(r.getContentText());
+  // 2. Папка на Диске (создаём, если её ещё нет)
+  const it = DriveApp.getFoldersByName(FOLDER);
+  const folder = it.hasNext() ? it.next() : DriveApp.createFolder(FOLDER);
+  // 3. Если копия за этот день уже лежит — второй раз не качаем
+  if (!folder.getFilesByName(info.name).hasNext()) {
+    const f = UrlFetchApp.fetch(info.url, { muteHttpExceptions: true });
+    if (f.getResponseCode() !== 200) throw new Error('Не скачался архив: ' + f.getResponseCode());
+    folder.createFile(f.getBlob().setName(info.name));
+  }
+  // 4. Оставляем 10 последних копий, остальные — в корзину Диска (30 дней можно восстановить)
+  const files = [];
+  const fi = folder.getFiles();
+  while (fi.hasNext()) { const x = fi.next(); if (/^silver-\d{4}-\d{2}-\d{2}\.tar$/.test(x.getName())) files.push(x); }
+  files.sort((a, b) => b.getName().localeCompare(a.getName()));
+  files.slice(KEEP).forEach(x => x.setTrashed(true));
+  // 5. Сообщаем Silver, что копия сохранена (чтобы в «Моём дне» было видно)
+  UrlFetchApp.fetch(SILVER_URL, { method: 'post', contentType: 'application/json', headers: { 'x-backup-key': SILVER_KEY },
+    payload: JSON.stringify({ action: 'done', name: info.name, kept: Math.min(files.length, KEEP) }), muteHttpExceptions: true });
+}
+
+// Запустите ОДИН раз: ставит ежедневный запуск около 04:00 по Алматы и сразу делает первую копию.
+function install() {
+  ScriptApp.getProjectTriggers().forEach(t => { if (t.getHandlerFunction() === 'silverBackup') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('silverBackup').timeBased().everyDays(1).atHour(4).inTimezone('Asia/Almaty').create();
+  silverBackup();
+}
+`;
+}
+document.addEventListener('click', async e => { const t = e.target.closest && e.target.closest('button[data-gdscript],button[data-gdcopy]'); if(!t) return;
+  if(t.dataset.gdcopy){ const ta = $('#gd-code'); try{ await navigator.clipboard.writeText(ta.value); toast('Скрипт скопирован'); }catch(_){ ta.select(); toast('Выделено — нажмите Ctrl+C / ⌘C'); } return; }
+  t.disabled = true; const { data:key, error } = await sb.rpc('backup_gdrive_script'); t.disabled = false; if(error || !key) return toast(error ? errText(error) : 'Нет доступа');
+  modal(`<div class="row"><h3 style="margin:0">Копия на Google Диск</h3><button class="btn small" data-close>✕</button></div>
+    <ol class="meta" style="margin:8px 0;padding-left:18px;line-height:1.6">
+      <li>Откройте <b>script.google.com</b> под своим Google-аккаунтом → <b>Новый проект</b>.</li>
+      <li>Сотрите всё в редакторе и вставьте скрипт ниже (кнопка «Скопировать»).</li>
+      <li>Нажмите <b>Сохранить</b> (значок дискеты), назовите проект, например «Silver копии».</li>
+      <li>Сверху выберите функцию <b>install</b> и нажмите <b>Выполнить</b>.</li>
+      <li>Google попросит разрешения — выберите свой аккаунт и разрешите доступ к Диску (если пишет «приложение не проверено» — «Дополнительно» → «Перейти»). Готово: папка «Silver — резервные копии» появится на Диске, дальше копия сохраняется каждый день около 04:00.</li></ol>
+    <textarea id="gd-code" readonly rows="14" style="width:100%;font-family:ui-monospace,monospace;font-size:12px">${esc(gdScript(key))}</textarea>
+    <div class="row" style="justify-content:flex-start;gap:6px;margin-top:8px"><button class="btn primary" data-gdcopy="1">Скопировать</button><span class="meta">В скрипте ключ доступа к копиям — не пересылайте его никому.</span></div>`); });
+function bkRemind(){
+  const I = BKI.info; if(!I || !I.last_day) return '';
+  if(gdFresh(I)) return '';  // копия на Google Диске свежая — это и есть копия «на стороне»
+  const days = I.downloaded_at ? Math.floor((Date.now() - new Date(I.downloaded_at)) / 864e5) : null;
+  if(days !== null && days < 7) return '';
+  return `<div class="card row" style="flex-wrap:wrap;gap:8px;margin-top:12px;border-left:4px solid var(--warn,#e2a400)"><span style="flex:1;min-width:220px">🛟 <b>Скачайте резервную копию себе</b><br><span class="meta">Копии хранятся там же, где сама база. Раз в неделю сохраняйте свежую копию на компьютер или Google Drive — ${days===null?'ещё ни разу не скачивали':'последний раз '+days+' дн. назад'}.</span></span>
+    <button class="btn small" data-gdscript="1">☁️ Копировать на Google Диск каждый день</button><button class="btn small primary" data-bktar="${I.last_day}">${BKI.busy?'Собираем…':'⬇ Скачать копию за '+String(I.last_day).split('-').reverse().join('.')}</button></div>`;
+}
+document.addEventListener('click', e => { const t = e.target.closest && e.target.closest('[data-bktar]'); if(!t) return; e.preventDefault(); bkTar(t.dataset.bktar); });
 
 /* ---------- фотосессия: товары в наличии без фото, самые продаваемые первыми ---------- */
 const PH = { store:null, q:'', data:null, i:0, busy:false, done:0 };
@@ -2527,6 +2653,7 @@ document.addEventListener('click', e => { if(S.view!=='po') return; const t = e.
 /* ---------- закуп: группы «что дозаказать» и справочник поставщиков ---------- */
 document.addEventListener('click', async e => { if(S.view!=='po') return; const t = e.target.closest('button'); if(!t) return; const d = t.dataset;
   if('poscat' in d){ PO.scat = d.poscat; render(); }
+  else if('posbrand' in d || d.posper || d.posdays){ if('posbrand' in d) PO.sbrand = d.posbrand; if(d.posper) PO.sper = +d.posper; if(d.posdays) PO.sdays = +d.posdays; PO.sug = null; PO.scat = ''; render(); await loadPo(); render(); }
   else if(t.id==='po-supmore'){ PO.supLim = (PO.supLim||100) + 100; render(); }
   else if(d.supoq){ const s = (PO.sups||[]).find(x=>x.name===d.supoq); PO.mode = 'orders'; PO.filter = 'all'; PO.oq = s ? (s.name) : ''; PO.list = null; render(); await loadPo(); render(); }
   else if(d.supedit){ const s = (PO.sups||[]).find(x=>x.name===d.supedit); if(!s) return;
@@ -2585,7 +2712,7 @@ function renderBonus(){
     <div class="filters"><input id="bk-q" placeholder="Телефон или имя" value="${esc(BK.q)}" style="flex:1;min-width:160px" inputmode="search">
       <select id="bk-filter">${[['bonus','С бонусами'],['all','Все клиенты'],['nobonus','Без бонусов'],['birthday','ДР в ближайшие 7 дней'],['nobday','Без даты рождения']].map(([k,v])=>`<option value="${k}" ${BK.filter===k?'selected':''}>${v}</option>`).join('')}</select>
       <select id="bk-sort">${[['balance','По бонусам'],['purchases','По числу покупок'],['total','По сумме покупок'],['last','По последней покупке'],['name','По имени']].map(([k,v])=>`<option value="${k}" ${BK.sort===k?'selected':''}>${v}</option>`).join('')}</select></div>
-    ${!L?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${n(L.total)}</p>
+    ${!L?'<div class="empty">Загружаем…</div>':L.need_q?'<div class="card" style="padding:14px">🔎 Введите телефон или имя (от 4 символов), чтобы найти клиента</div>':`<p class="meta">Найдено: ${n(L.total)}</p>
     <div class="list">${L.rows.map(c=>`<button class="prod" style="grid-template-columns:minmax(0,1fr) auto;${BK.cur===c.id?'background:var(--soft)':''}" data-bkopen="${c.id}"><span><b>${esc(c.name||'Без имени')}</b><br>
       <span class="meta num">${esc(c.phone)} · покупок ${c.purchases||0} на ${fmt(c.total||0)}${c.last_at?' · последняя '+dshort(c.last_at):''}${c.birthday?' · ДР '+new Date(c.birthday).toLocaleDateString('ru-RU',{day:'numeric',month:'long'}):''}</span>
       ${c.next_burn?`<br><span class="meta">ближайшее сгорание ${dshort(c.next_burn)}</span>`:''}</span><span class="price num">${n(c.balance)} б.</span></button>`).join('') || '<div class="empty">Никого не найдено</div>'}</div>
@@ -2614,7 +2741,10 @@ function renderBonus(){
 }
 
 /* ---------- закуп ---------- */
-const PO = { mode:'orders', filter:'open', list:null, sug:null, an:null, anPer:'month', q:'', found:[], d:null };
+/* что дозаказать: при наведении — остаток и продажи по каждому магазину */
+function poByStore(p, k, total){ const B = p.by_store || {}, ids = Object.keys(B); if(!ids.length) return `${total}`;
+  return `<span class="nm-st" tabindex="0">${total}<span class="nm-st-pop">${S.allStores.filter(st=>B[st.id]).map(st=>{ const b = B[st.id]; return `<span class="row" style="gap:12px"><span>${esc(BRAND[st.brand]+' · '+st.address)}</span><span class="num">остаток <b>${+b.stock||0}</b> · продано <b>${+b.sold||0}</b></span></span>`; }).join('')}</span></span>`; }
+const PO = { mode:'orders', filter:'open', list:null, sug:null, an:null, anPer:'month', q:'', found:[], d:null, sbrand:'', sper:30, sdays:30 };
 const PO_ST = { ordered:['warn','заказано'], transit:['warn','в пути'], received:['ok','получено'], cancelled:['zero','отменён'] };
 const poNew = () => ({ supplier:'', store:S.store, eta:'', cargo:'', note:'', items:[], cur:'CNY', rate:'', pct:10 });
 const CUR = { KZT:'₸', CNY:'¥', USD:'$', RUB:'₽' };
@@ -2626,7 +2756,7 @@ const poEdit = () => S.me && ['owner','manager','purchaser'].includes(S.me.role)
 async function loadPo(){
   if(!PO.fx){ const r = await sb.rpc('fx_current'); PO.fx = r.data || {}; }
   if(PO.mode==='orders'){ const { data, error } = await sb.rpc('po_list', { p_status: PO.filter==='all'?null:PO.filter }); if(error) toast(errText(error)); PO.list = data||[]; }
-  if(PO.mode==='suggest'){ const { data, error } = await sb.rpc('po_suggest', { p_days:30 }); if(error) toast(errText(error)); PO.sug = data||[]; }
+  if(PO.mode==='suggest'){ const k = [PO.sdays, PO.sbrand, PO.sper].join('|'); const { data, error } = await sb.rpc('po_suggest2', { p_days:PO.sdays||30, p_brand:PO.sbrand||null, p_sales_days:PO.sper||30 }); if(error) toast(errText(error)); if(k===[PO.sdays, PO.sbrand, PO.sper].join('|')) PO.sug = data||[]; }
   if(PO.mode==='sup'){ const { data, error } = await sb.rpc('suppliers_list'); if(error) toast(errText(error)); PO.sups = data||[]; }
   if(PO.mode==='an'){ const now = new Date(), iso = x => x.toLocaleDateString('sv-SE'); const from = PO.anPer==='month' ? new Date(now.getFullYear(), now.getMonth(), 1) : PO.anPer==='q' ? new Date(now.getFullYear(), now.getMonth()-2, 1) : new Date(now.getFullYear(), 0, 1);
     const { data, error } = await sb.rpc('po_analytics', { p_from: iso(from), p_to: iso(now) }); if(error) toast(errText(error)); PO.an = data||{}; }
@@ -2696,16 +2826,21 @@ function renderPo(){
     const groups = L ? [...L.reduce((m,p)=>{ (m.get(gk(p)) || m.set(gk(p), []).get(gk(p))).push(p); return m; }, new Map())].sort((a,b)=> bySup ? ((!a[0])-(!b[0]) || b[1].reduce((s,p)=>s+(+p.need||0),0)-a[1].reduce((s,p)=>s+(+p.need||0),0)) : b[1].length-a[1].length) : [];
     const gTitle = (k, ps) => !bySup ? esc(k) : !k ? 'Поставщик не известен' : esc(ps[0].sup_ru && !/[\u4e00-\u9fff]/.test(ps[0].sup_ru) ? ps[0].sup_ru : 'Поставщик из Китая');
     const row = p => `<tr><td data-l="">${thumb(p)}</td><td class="mc-t">${pcl(p.id, esc(p.name))}<br><span class="meta num">${esc(p.barcode)}${p.cost?' · закуп '+fmt(p.cost):''}</span>${p.purchase_url?` · <a href="${esc(p.purchase_url)}" target="_blank" rel="noopener" class="meta">у поставщика ↗</a>`:''}</td>
-        <td class="num" data-l="Продано 30 дн.">${p.sold30}</td><td class="num" data-l="Остаток" ${p.stock<=0?'style="color:var(--bad)"':''}>${p.stock}${p.days_left!=null?`<br><span class="meta">на ${p.days_left} дн.</span>`:''}</td><td class="num" data-l="Едет">${p.incoming||'—'}</td><td class="num" data-l="Дозаказать"><b>${p.need}</b></td>
+        <td class="num" data-l="Продано ${PO.sper||30} дн.">${poByStore(p, 'sold', p.sold??p.sold30)}${p.per_day!=null?`<br><span class="meta">≈ ${(+p.per_day).toLocaleString('ru-RU')} в день</span>`:''}</td><td class="num" data-l="Остаток" ${p.stock<=0?'style="color:var(--bad)"':''}>${poByStore(p, 'stock', p.stock)}${p.days_left!=null?`<br><span class="meta">на ${p.days_left} дн.</span>`:''}</td><td class="num" data-l="Едет">${p.incoming||'—'}</td><td class="num" data-l="Дозаказать"><b>${p.need}</b></td>
         <td class="mc-a">${poEdit()?`<button class="btn small" data-posug="${p.id}" data-need="${p.need}" data-cost="${p.cost??''}">В заказ</button>`:''}</td></tr>`;
-    body = `<p class="meta" style="margin:0 0 8px">Товары, которые продавались за 30 дней и которых не хватит на следующие 30 дней (с учётом того, что уже едет). Выберите категорию или найдите по слову — например «краб», «кольцо», «жемчуг».</p>
+    const segB = (k, cur, arr) => `<div class="seg">${arr.map(([v,t])=>`<button data-${k}="${v}" aria-pressed="${String(cur)===String(v)}">${t}</button>`).join('')}</div>`;
+    body = `<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px 14px;margin-bottom:8px">
+      <span class="row" style="gap:6px"><span class="meta">Бренд:</span>${segB('posbrand', PO.sbrand||'', [['','Все'],['moon','MOON'],['sunshine','Sunshine']])}</span>
+      <span class="row" style="gap:6px"><span class="meta">Скорость продаж за:</span>${segB('posper', PO.sper||30, [[30,'30 дн.'],[60,'60 дн.'],[90,'90 дн.']])}</span>
+      <span class="row" style="gap:6px"><span class="meta">Заказать запас на:</span>${segB('posdays', PO.sdays||30, [[30,'30 дн.'],[45,'45 дн.'],[60,'60 дн.'],[90,'90 дн.']])}</span></div>
+    <p class="meta" style="margin:0 0 8px">Как считается: средние продажи в день за последние ${PO.sper||30} дн. × ${PO.sdays||30} дн. запаса − остаток по всей сети − то, что уже едет. В списке только то, чего не хватит на ${PO.sdays||30} дн.${PO.sbrand?' Бренд: '+(PO.sbrand==='moon'?'MOON':'Sunshine')+' (и общие товары).':''} Наведите на «Продано» или «Остаток» — покажет по магазинам.</p>
     <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:8px"><input id="po-sq" type="search" placeholder="🔍 Слово из названия или штрихкод" value="${esc(PO.sq||'')}" style="flex:1;min-width:220px" autocomplete="off">
       <span class="meta">Группировать:</span><div class="seg"><button data-posgrpby="cat" aria-pressed="${!bySup}">по категориям</button><button data-posgrpby="sup" aria-pressed="${bySup}">по поставщикам</button></div></div>
     ${A?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:10px"><button class="btn small ${!cat?'primary':''}" data-poscat="">Все (${A.length})</button>${cats.map(([c,n])=>`<button class="btn small ${cat===c?'primary':''}" data-poscat="${esc(c)}">${esc(c)} (${n})</button>`).join('')}</div>`:''}
     ${!A?'<div class="empty">Считаем…</div>':!L.length?'<div class="empty">Ничего не найдено</div>':groups.map(([c,ps])=>`<details class="card" style="margin-bottom:8px;padding:8px 12px" ${groups.length===1||(PO.sopen||{})[(bySup?'s:':'')+c]?'open':''} data-posgrp="${esc((bySup?'s:':'')+c)}"><summary style="cursor:pointer;font-weight:600">${gTitle(c, ps)} <span class="meta">· ${ps.length} поз. · дозаказать ${ps.reduce((a,p)=>a+(+p.need||0),0)} шт.</span></summary>
       ${bySup&&c?`<div class="row" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px">${ps[0].sup_url?`<a class="btn small" href="${esc(ps[0].sup_url)}" target="_blank" rel="noopener">Магазин ↗</a>`:''}${poEdit()?`<button class="btn small primary" data-posupall="${esc(c)}">Сформировать заказ у этого поставщика (${ps.length} поз.)</button>`:''}</div>`:''}
       ${bySup&&!c?'<div class="meta" style="margin-top:6px">У этих товаров нет связи с заказами из Китая — поставщик не определён. Ссылка «у поставщика ↗» ведёт на товар.</div>':''}
-      <div class="scroll" style="margin-top:6px"><table class="mc"><thead><tr><th></th><th>Товар</th><th>Продано 30 дн.</th><th>Остаток</th><th>Едет</th><th>Дозаказать</th><th></th></tr></thead><tbody>${ps.map(row).join('')}</tbody></table></div></details>`).join('')}`;
+      <div class="scroll" style="margin-top:6px"><table class="mc"><thead><tr><th></th><th>Товар</th><th>Продано ${PO.sper||30} дн.</th><th>Остаток</th><th>Едет</th><th>Дозаказать</th><th></th></tr></thead><tbody>${ps.map(row).join('')}</tbody></table></div></details>`).join('')}`;
   }
   if(PO.mode==='sup'){
     const A = PO.sups, q = (PO.supq||'').trim().toLowerCase();
@@ -2900,11 +3035,11 @@ async function loadDay(){
   const { data, error } = await sb.rpc('my_day', { p_store: DAY.store || S.store || null });
   if(error){ toast(errText(error)); DAY.data = { mgr:[], buy:[], sell:[] }; } else DAY.data = data;
   if(DAY.role==='buy') loadDaySug();
-  if(S.me.role==='owner') wuLoadLast();
+  if(S.me.role==='owner') wuLoadLast(); else if(S.me.role!=='consultant' && !WU.srv) wuLoadSrv();
   if(DAY.role==='own') loadPulse();
   if(S.canAttn && !S.attn) loadAttn().then(() => { if(S.view==='day') render(); });
 }
-async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; if(S.view==='day') render(); if(!data.ai) loadAiSpend(); loadCashStat(); anStatus(); }
+async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; if(S.view==='day') render(); if(!data.ai) loadAiSpend(); loadCashStat(); anStatus(); bkInfo(); }
 /* наличные в кассе: остаток по тетради + наличные продажи Wipon с тех пор − расходы, внесённые в Silver */
 async function loadCashStat(){ const { data, error } = await sb.rpc('cash_status'); if(error) return; DAY.cash = {}; (data||[]).forEach(c => DAY.cash[c.store] = c); if(['day','cash'].includes(S.view)) render(); }
 function cashCell(x){ const c = (DAY.cash||{})[x.id]; if(!c) return '<span class="meta">…</span>'; if(c.est_kzt == null) return '<span class="meta">нет данных</span>';
@@ -3006,7 +3141,7 @@ function renderDay(){
   const today = new Date().toLocaleDateString('ru-RU',{timeZone:'Asia/Almaty',weekday:'long',day:'numeric',month:'long'});
   if(r==='own'){ $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="day-ref">Обновить</button></div>
     <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><span class="meta">Посмотреть как:</span><div class="seg" style="display:inline-flex">${DAY_ROLES.map(([k,t])=>`<button data-dayrole="${k}" aria-pressed="${k===r}">${t}</button>`).join('')}</div></div>
-    ${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${DAY.pulse?anHtml():''}${S.canAttn?attnHtml(true,'own'):''}${wiponSyncHtml()}`; DAY.items = []; return; }
+    ${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${DAY.pulse?bkRemind()+anHtml():''}${S.canAttn?attnHtml(true,'own'):''}${wiponSyncHtml()}`; DAY.items = []; return; }
   let items = D ? [...(D[r]||[])] : [];
   if(r==='buy'){ const sg = DAY.sug && DAY.sug!=='wait' ? DAY.sug : null;
     items.unshift({ k:'sug', t:'Дозаказать — товар заканчивается', n: sg ? sg.n : 1, wait: !sg, h: sg ? (sg.n ? `Всего ${sg.units.toLocaleString('ru-RU')} шт. Удобно формировать заказ сразу по поставщику.` : '') : 'Считаем…', go:'po', mode:'suggest', lvl:'warn' }); }
@@ -3425,6 +3560,7 @@ async function loadView0(){
   if(S.view==='content'){ render(); await loadContent(); render(); }
   if(S.view==='me'){ render(); await loadMe(); render(); }
   if(S.view==='adm'){ render(); await loadAdm(); render(); }
+  if(S.view==='audit'){ render(); await loadAudit(); render(); }
   if(S.view==='flow'){ render(); await loadFlow(); render(); }
   if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); }
   if(S.view==='site'){ render(); await loadSite(); render(); }
@@ -3580,6 +3716,69 @@ const AD_F = [['bonus','Премия'],['paid_cash','Выплачено нали
 async function loadAdm(){ AD.list = null; const { data, error } = await sb.rpc('admin_pay_list', { p_month: AD.month+'-01' }); if(error) toast(errText(error)); AD.list = data || []; }
 const adCalc = a => { const due = (+a.accrued||0) + (+a.bonus||0) - (+a.deduction||0), card = a.all_card ? due : (+a.official_card||0), paid = (+a.paid_cash||0) + (+a.paid_card||0);
   return { due, card, cash: due - card, paid, rest: due - paid, cost: due + (+a.tax||0) }; };
+/* ---------- журнал действий (только владелец): кто и что менял ---------- */
+const AU = { ent:'', actor:'', q:'', rows:null, more:false, busy:false };
+const AU_GROUPS = [['','Всё'],['product,cost','Цены и товары'],['employee','Сотрудники и права'],['stock','Склад'],['sales','Возвраты'],['settings,secret','Настройки и ключи'],['instagram,content','Instagram'],['certificate,bonus','Сертификаты и бонусы']];
+const AU_ENT = { product:'Товар', cost:'Себестоимость', employee:'Сотрудник', settings:'Настройка', secret:'Ключ', instagram:'Instagram', sales:'Чек', certificate:'Сертификат', content:'Пост', bonus:'Бонусы вручную', stock:'Склад' };
+const AU_ACT = { insert:'добавлено', update:'изменено', delete:'удалено' };
+const AU_F = { price:'Цена', cost:'Себестоимость', name:'Название', barcode:'Штрихкод', sku:'Артикул', brand:'Бренд', category_id:'Категория', archived:'В архиве', is_group:'Общий штрихкод', is_service:'Услуга',
+  supplier_id:'Поставщик', purchase_url:'Ссылка на закуп', merged_into:'Объединён с', full_name:'Имя', phone:'Телефон', role:'Роль', active:'Работает', home_store_id:'Основной магазин', store_ids:'Магазины',
+  official:'Официально', auth_user_id:'Вход в Silver', value:'Значение', status:'Статус', nominal:'Номинал', balance:'Остаток', expires_at:'Действует до', posted_url:'Ссылка на пост', amount:'Бонусы', reason:'Причина',
+  connected:'Подключён', username:'Аккаунт', type:'Операция', store:'Магазин', items:'Позиций', qty:'Штук', number:'Номер', kind:'Тип', total:'Сумма', original_sale_id:'Исходный чек', wipon_id:'Wipon', customer_id:'Клиент', product:'Товар' };
+const AU_SET = { tab_access:'Какие вкладки видит каждая роль', tab_edit:'Где роль может менять данные', pos_enabled:'Касса Silver', backup_downloaded_at:'Резервная копия скачана', writeoff_approvers:'Кто подтверждает списания', pay_rules:'Правила зарплаты', tax_rate:'Налог' };
+const AU_MOVE = { receipt:'Приёмка', writeoff:'Списание', audit:'Ревизия', capitalize:'Оприходование', transfer_out:'Перемещение' };
+function auVal(f, v, a){
+  if(v===null || v===undefined || v==='') return '—';
+  if(['price','cost','nominal','balance','total'].includes(f)) return fmt(+v);
+  if(typeof v==='boolean') return f==='connected' ? (v?'да':'нет') : (v?'да':'нет');
+  if(f==='auth_user_id') return 'есть';
+  if(f==='role') return ROLE[v] || v;
+  if(f==='store' || f==='home_store_id') return storeName(+v);
+  if(f==='store_ids') return Array.isArray(v) ? v.map(x=>storeName(+x)).join(', ') : String(v);
+  if(f==='type' && a.entity==='stock') return AU_MOVE[v] || v;
+  if(f==='expires_at') return new Date(v).toLocaleDateString('ru-RU');
+  const t = typeof v==='object' ? JSON.stringify(v) : String(v);
+  return t.length > 140 ? `<details><summary class="meta" style="cursor:pointer">${esc(t.slice(0,60))}…</summary><span style="overflow-wrap:anywhere;font-size:12px">${esc(t)}</span></details>` : esc(t);
+}
+function auChanges(a){
+  const C = a.changes || {}, keys = Object.keys(C).filter(k => !(a.entity==='stock' && k==='product') && !(a.entity==='bonus' && k==='customer_id'));
+  if(a.entity==='stock'){ const g = k => (C[k]||[])[1]; return `${esc(AU_MOVE[g('type')]||g('type')||'')} · ${esc(storeName(+g('store')))} · позиций ${g('items')||0}, штук ${(+g('qty')>0?'+':'')+(g('qty')||0)}`; }
+  if(a.entity==='secret') return 'значение ключа заменено (само значение не хранится)';
+  return keys.map(k => { const [o, n] = C[k] || []; const f = a.entity==='settings' ? 'value' : k;
+    return `<div><span class="meta">${esc(AU_F[k]||k)}:</span> ${a.action==='insert' ? auVal(f, n, a) : a.action==='delete' ? auVal(f, o, a) : auVal(f, o, a)+' → <b>'+auVal(f, n, a)+'</b>'}</div>`; }).join('') || '<span class="meta">—</span>';
+}
+function auWhat(a){
+  const e = AU_ENT[a.entity] || a.entity, lbl = a.entity==='settings' ? (AU_SET[a.entity_id] || a.entity_id) : a.entity==='secret' ? a.entity_id : a.entity==='instagram' ? (a.entity_id==='moon' ? 'MOON' : 'Sunshine') : (a.label || '');
+  return `<b>${esc(e)}</b>${lbl?`: ${a.entity==='stock'||a.entity==='product'||a.entity==='cost' ? pcl(a.entity==='stock' ? ((a.changes||{}).product||[])[1] : a.entity_id, esc(lbl)) : esc(lbl)}`:''} <span class="meta">— ${a.note ? esc(a.note) : AU_ACT[a.action]||a.action}</span>`;
+}
+async function loadAudit(more){
+  if(AU.busy) return; AU.busy = true;
+  const before = more && AU.rows && AU.rows.length ? AU.rows[AU.rows.length-1].at : null;
+  const { data, error } = await sb.rpc('audit_list', { p_entity:AU.ent||null, p_actor:AU.actor||null, p_q:AU.q||null, p_limit:100, p_before:before });
+  AU.busy = false; if(error){ toast(errText(error)); AU.rows = AU.rows || []; return; }
+  AU.rows = more ? [...(AU.rows||[]), ...(data||[])] : (data||[]); AU.more = (data||[]).length === 100;
+  if(!more) AU.actors = AU.actors || {}; (data||[]).forEach(a => { if(a.actor) (AU.actors ||= {})[a.actor] = a.actor_name; });
+}
+function renderAudit(){
+  const L = AU.rows, A = AU.actors || {};
+  $('#main').innerHTML = `<h2>Журнал действий</h2>
+  <p class="meta" style="margin:2px 0 10px">Кто и что менял: цены и себестоимость, сотрудников и права, склад вручную (приёмка, списание, ревизия, оприходование, перемещение), возвраты, настройки, ключи, Instagram. Загрузки из Wipon не пишутся. Хранится 400 дней, видите только вы.</p>
+  <div class="filters">${AU_GROUPS.map(([k,v])=>`<button class="btn small ${AU.ent===k?'primary':''}" data-auent="${k}">${v}</button>`).join('')}</div>
+  <div class="filters"><select id="au-actor" aria-label="Сотрудник"><option value="">Все сотрудники</option>${Object.entries(A).map(([id,n])=>`<option value="${id}" ${AU.actor===id?'selected':''}>${esc(n||'—')}</option>`).join('')}</select>
+    <input id="au-q" placeholder="Поиск: товар, сотрудник, значение" value="${esc(AU.q)}" style="flex:1;min-width:180px" inputmode="search"></div>
+  ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Записей пока нет — журнал ведётся с 20.11.2026</div>':`<div class="scroll"><table class="mc"><thead><tr><th>Когда</th><th>Кто</th><th>Что</th><th>Было → стало</th></tr></thead><tbody>
+    ${L.map(a=>`<tr><td class="num" data-l="Когда" style="white-space:nowrap">${new Date(a.at).toLocaleString('ru-RU',{timeZone:'Asia/Almaty',day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
+      <td data-l="Кто">${esc(a.actor_name||'—')}</td><td class="mc-t">${auWhat(a)}</td><td data-l="Изменения" style="min-width:220px">${auChanges(a)}</td></tr>`).join('')}</tbody></table></div>
+    ${AU.more?`<button class="btn" id="au-more" style="width:100%;margin-top:8px">${AU.busy?'Загружаем…':'Показать ещё'}</button>`:''}`}`;
+}
+let auTimer;
+document.addEventListener('click', async e => { if(S.view!=='audit') return; const t = e.target.closest('button'); if(!t) return;
+  if(t.dataset.auent!==undefined){ AU.ent = t.dataset.auent; AU.rows = null; render(); await loadAudit(); render(); }
+  else if(t.id==='au-more'){ await loadAudit(true); render(); } });
+document.addEventListener('change', async e => { if(S.view!=='audit' || e.target.id!=='au-actor') return; AU.actor = e.target.value; AU.rows = null; render(); await loadAudit(); render(); });
+document.addEventListener('input', e => { if(S.view!=='audit' || e.target.id!=='au-q') return; AU.q = e.target.value; clearTimeout(auTimer);
+  auTimer = setTimeout(async () => { await loadAudit(); render(); }, 350); });
+
 function renderAdm(){
   if(S.me.role!=='owner'){ $('#main').innerHTML = '<div class="empty">Нет доступа</div>'; return; }
   const L = AD.list, C = (L||[]).map(adCalc), sum = k => C.reduce((t,c)=>t+c[k],0), ep = L&&L[0] ? +L[0].ep_rate : 24.8, taxes = (L||[]).reduce((t,a)=>t+(+a.tax||0),0);
