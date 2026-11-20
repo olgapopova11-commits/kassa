@@ -2539,6 +2539,14 @@ async function loadDay(){
   if(DAY.role==='own') loadPulse();
 }
 async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; if(S.view==='day') render(); }
+/* точка безубыточности магазина: постоянные расходы месяца ÷ доля, что остаётся с продажи после себестоимости и налога */
+function beCell(x){
+  const m = +x.be_margin, fx = (+x.be_fixed||0) + (+x.be_opex||0); if(!(m>0) || !fx) return '<span class="meta">нет расходов</span>';
+  const be = Math.round(fx / m / 1000) * 1000, now = new Date(), dim = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+  const done = Math.round(+x.mtd / be * 100), need = Math.round((now.getDate() - 1 + now.getHours()/24) / dim * 100);
+  const cats = String(x.be_cats||''), miss = [/аренд/i.test(cats)?'':'аренда'].filter(Boolean);
+  return `<b class="num">${fmt(be)}</b><br><span class="chip ${done>=100?'ok':done>=need?'ok':'warn'}" title="к этому дню по плану нужно ${need}%">${done>=100?'✓ пройдена':done+'% · надо '+need+'%'}</span>${miss.length?` <span class="chip zero" title="Не внесено в «Рентабельность → расходы магазина»">нет: ${miss.join(', ')}</span>`:''}`;
+}
 function pulseHtml(P){
   if(!P) return '<div class="empty">Собираем картину по сети…</div>';
   const St = P.stores || [], sum = k => St.reduce((a,x)=>a+(+x[k]||0),0), pct = (a,b) => b>0 ? Math.round((a-b)/b*100) : null;
@@ -2556,9 +2564,10 @@ function pulseHtml(P){
       ${tile('Чеков сегодня', C.toLocaleString('ru-RU'), T&&C?'средний чек '+fmt(Math.round(T/C)):'')}
       ${tile('С начала месяца', fmt(M), `${chip(pct(M,MP))} к тому же периоду прошлого месяца`)}</div>
     <h3 style="margin:16px 0 6px">Магазины</h3>
-    <div class="scroll"><table><thead><tr><th>Магазин</th><th>Сегодня</th><th>Неделю назад</th><th></th><th>Месяц</th><th></th><th>Возвраты 2 дня</th><th>Чеки Wipon</th><th>Остатки Wipon</th></tr></thead><tbody>
+    <div class="scroll"><table><thead><tr><th>Магазин</th><th>Сегодня</th><th>Неделю назад</th><th></th><th>Месяц</th><th></th><th title="Сколько нужно продать за месяц, чтобы покрыть аренду, коммуналку и расходы магазина">Безубыточность в месяц</th><th>Возвраты 2 дня</th><th>Чеки Wipon</th><th>Остатки Wipon</th></tr></thead><tbody>
       ${St.map(x=>`<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td class="num"><b>${fmt(x.today)}</b></td><td class="num meta">${fmt(x.week_ago)}</td><td>${chip(pct(+x.today,+x.week_ago))}</td>
-        <td class="num">${fmt(x.mtd)}</td><td>${chip(pct(+x.mtd,+x.mtd_prev))}</td><td class="num">${+x.returns_2d?'<span class="chip warn">'+x.returns_2d+'</span>':'0'}</td><td>${fresh(x.sync_sales)}</td><td>${fresh(x.sync_stock)}</td></tr>`).join('')}</tbody></table></div>
+        <td class="num">${fmt(x.mtd)}</td><td>${chip(pct(+x.mtd,+x.mtd_prev))}</td><td>${beCell(x)}</td><td class="num">${+x.returns_2d?'<span class="chip warn">'+x.returns_2d+'</span>':'0'}</td><td>${fresh(x.sync_sales)}</td><td>${fresh(x.sync_stock)}</td></tr>`).join('')}</tbody></table></div>
+    <p class="meta" style="margin:6px 0 0">Безубыточность = (аренда, коммуналка и другие расходы из «Рентабельности» + хозрасходы магазина из журнала «Расходы магазинов», в среднем за 3 мес.) ÷ доля, что остаётся с продажи после себестоимости и налога (по продажам за 90 дней). Зарплаты пока не учтены — впишите их в расходы магазина, и точка станет точной.</p>
     <h3 style="margin:16px 0 6px">Где застряла работа</h3>
     ${stuck.length?`<div class="stack" style="gap:6px">${stuck.map(([n,t,v])=>`<div class="card row" style="flex-wrap:wrap;gap:8px;padding:8px 12px"><span style="flex:1;min-width:200px">${t}</span><span class="chip warn">${(+n).toLocaleString('ru-RU')}</span><button class="btn small" data-pulsego="${v}">Открыть →</button></div>`).join('')}</div>`:'<div class="card">✅ Ничего не застряло</div>'}
     <h3 style="margin:16px 0 6px">Ходовые товары закончились <span class="meta">— продавались за 30 дней, на остатке 0</span></h3>
