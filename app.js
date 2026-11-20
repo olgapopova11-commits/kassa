@@ -2087,14 +2087,19 @@ function renderPo(){
     const A = PO.sug, q = (PO.sq||'').trim().toLowerCase(), cat = PO.scat||'';
     const cats = A ? [...A.reduce((m,p)=>m.set(p.cat,(m.get(p.cat)||0)+1), new Map())].sort((a,b)=>b[1]-a[1]) : [];
     const L = A && A.filter(p => (!cat || p.cat===cat) && (!q || q.split(/\s+/).every(w => (p.name+' '+p.barcode).toLowerCase().includes(w))));
-    const groups = L ? [...L.reduce((m,p)=>{ (m.get(p.cat) || m.set(p.cat, []).get(p.cat)).push(p); return m; }, new Map())] : [];
+    const bySup = PO.sgrp==='sup', gk = p => bySup ? (p.sup||'') : p.cat;
+    const groups = L ? [...L.reduce((m,p)=>{ (m.get(gk(p)) || m.set(gk(p), []).get(gk(p))).push(p); return m; }, new Map())].sort((a,b)=> bySup ? ((!a[0])-(!b[0]) || b[1].reduce((s,p)=>s+(+p.need||0),0)-a[1].reduce((s,p)=>s+(+p.need||0),0)) : b[1].length-a[1].length) : [];
+    const gTitle = (k, ps) => !bySup ? esc(k) : !k ? 'Поставщик не известен' : esc(ps[0].sup_ru && !/[\u4e00-\u9fff]/.test(ps[0].sup_ru) ? ps[0].sup_ru : 'Поставщик из Китая');
     const row = p => `<tr><td>${thumb(p)}</td><td>${esc(p.name)}<br><span class="meta num">${esc(p.barcode)}${p.cost?' · закуп '+fmt(p.cost):''}</span>${p.purchase_url?` · <a href="${esc(p.purchase_url)}" target="_blank" rel="noopener" class="meta">у поставщика ↗</a>`:''}</td>
         <td class="num">${p.sold30}</td><td class="num" ${p.stock<=0?'style="color:var(--bad)"':''}>${p.stock}${p.days_left!=null?`<br><span class="meta">на ${p.days_left} дн.</span>`:''}</td><td class="num">${p.incoming||'—'}</td><td class="num"><b>${p.need}</b></td>
         <td>${poEdit()?`<button class="btn small" data-posug="${p.id}" data-need="${p.need}" data-cost="${p.cost??''}">В заказ</button>`:''}</td></tr>`;
     body = `<p class="meta" style="margin:0 0 8px">Товары, которые продавались за 30 дней и которых не хватит на следующие 30 дней (с учётом того, что уже едет). Выберите категорию или найдите по слову — например «краб», «кольцо», «жемчуг».</p>
-    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:8px"><input id="po-sq" type="search" placeholder="🔍 Слово из названия или штрихкод" value="${esc(PO.sq||'')}" style="flex:1;min-width:220px" autocomplete="off"></div>
+    <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:8px"><input id="po-sq" type="search" placeholder="🔍 Слово из названия или штрихкод" value="${esc(PO.sq||'')}" style="flex:1;min-width:220px" autocomplete="off">
+      <span class="meta">Группировать:</span><div class="seg"><button data-posgrpby="cat" aria-pressed="${!bySup}">по категориям</button><button data-posgrpby="sup" aria-pressed="${bySup}">по поставщикам</button></div></div>
     ${A?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:10px"><button class="btn small ${!cat?'primary':''}" data-poscat="">Все (${A.length})</button>${cats.map(([c,n])=>`<button class="btn small ${cat===c?'primary':''}" data-poscat="${esc(c)}">${esc(c)} (${n})</button>`).join('')}</div>`:''}
-    ${!A?'<div class="empty">Считаем…</div>':!L.length?'<div class="empty">Ничего не найдено</div>':groups.map(([c,ps])=>`<details class="card" style="margin-bottom:8px;padding:8px 12px" ${groups.length===1||(PO.sopen||{})[c]?'open':''} data-posgrp="${esc(c)}"><summary style="cursor:pointer;font-weight:600">${esc(c)} <span class="meta">· ${ps.length} поз. · дозаказать ${ps.reduce((a,p)=>a+(+p.need||0),0)} шт.</span></summary>
+    ${!A?'<div class="empty">Считаем…</div>':!L.length?'<div class="empty">Ничего не найдено</div>':groups.map(([c,ps])=>`<details class="card" style="margin-bottom:8px;padding:8px 12px" ${groups.length===1||(PO.sopen||{})[(bySup?'s:':'')+c]?'open':''} data-posgrp="${esc((bySup?'s:':'')+c)}"><summary style="cursor:pointer;font-weight:600">${gTitle(c, ps)} <span class="meta">· ${ps.length} поз. · дозаказать ${ps.reduce((a,p)=>a+(+p.need||0),0)} шт.</span></summary>
+      ${bySup&&c?`<div class="row" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px">${ps[0].sup_url?`<a class="btn small" href="${esc(ps[0].sup_url)}" target="_blank" rel="noopener">Магазин ↗</a>`:''}${poEdit()?`<button class="btn small primary" data-posupall="${esc(c)}">Сформировать заказ у этого поставщика (${ps.length} поз.)</button>`:''}</div>`:''}
+      ${bySup&&!c?'<div class="meta" style="margin-top:6px">У этих товаров нет связи с заказами из Китая — поставщик не определён. Ссылка «у поставщика ↗» ведёт на товар.</div>':''}
       <div class="scroll" style="margin-top:6px"><table><thead><tr><th></th><th>Товар</th><th>Продано 30 дн.</th><th>Остаток</th><th>Едет</th><th>Дозаказать</th><th></th></tr></thead><tbody>${ps.map(row).join('')}</tbody></table></div></details>`).join('')}`;
   }
   if(PO.mode==='sup'){
@@ -2397,6 +2402,11 @@ document.addEventListener('click', async e => {
   else if(d.poper){ PO.anPer=d.poper; PO.an=null; render(); await loadPo(); render(); }
   else if(d.poadd){ const p = PO.found.find(x=>x.id===d.poadd); const dd = PO.d || (PO.d=poNew()); if(p){ const ex = dd.items.find(i=>i.pid===p.id); if(ex) ex.qty++; else dd.items.push({ pid:p.id, name:p.name, barcode:p.barcode, qty:1, cost:'' }); } PO.q=''; PO.found=[]; render(); }
   else if(d.podel!=null){ PO.d.items.splice(+d.podel,1); render(); }
+  else if(d.posgrpby){ PO.sgrp = d.posgrpby; render(); }
+  else if(d.posupall){ const ps = (PO.sug||[]).filter(x=>x.sup===d.posupall && (!PO.scat || x.cat===PO.scat)); const dd = PO.d = poNew();
+    dd.supplier = d.posupall;
+    ps.forEach(p => dd.items.push({ pid:p.id, name:p.name, barcode:p.barcode, qty:Math.max(1,+p.need||1), cost:p.cost??'' }));
+    PO.mode = 'new'; render(); scrollTo(0,0); toast(`Новый заказ: ${ps.length} поз. — проверьте количество и оформите`); }
   else if(d.posug){ const p = (PO.sug||[]).find(x=>x.id===d.posug); const dd = PO.d || (PO.d=poNew()); if(p && !dd.items.some(i=>i.pid===p.id)) dd.items.push({ pid:p.id, name:p.name, barcode:p.barcode, qty:Math.max(1,+d.need||1), cost:p.cost??'' }); toast('Добавлено в новый заказ ('+dd.items.length+' поз.)'); t.disabled=true; }
   else if(t.id==='po-save'){ const dd = PO.d; t.disabled=true;
     const { data, error } = await sb.rpc('po_save', { p:{ supplier:dd.supplier, store_id:+dd.store, eta:dd.eta, cargo_cost:dd.cargo, note:dd.note, currency:dd.cur, rate:dd.cur==='KZT'?1:poRate(dd), delivery_pct:dd.pct, items:dd.items.map(i=>({ product_id:i.pid, qty:+i.qty, price_cur:i.cost===''?null:+i.cost })) } });
