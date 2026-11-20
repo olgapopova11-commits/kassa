@@ -2070,7 +2070,7 @@ async function loadContent(){
 }
 async function ctAI(body){
   const { data, error } = await sb.functions.invoke('content', { body });
-  if(error){ let m = error.message; try{ const j = await error.context.json(); m = j.error || m; }catch(_){} throw new Error(m==='no_key' ? 'ИИ ещё не подключён — нужен ключ Anthropic' : m); }
+  if(error){ let m = error.message; try{ const j = await error.context.json(); m = j.error || m; }catch(_){} throw new Error(m==='no_key' ? 'ИИ ещё не подключён — владелец вписывает ключ Anthropic в «Контенте» или «Моём дне»' : m); }
   return data;
 }
 function ctProducts(c){ return (c.products||[]).length ? `<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-top:6px">${c.products.map(p=>`<span class="row" style="gap:6px;border:1px solid var(--line);border-radius:10px;padding:4px 8px 4px 4px">${thumb(p)}<span style="font-size:13px">${esc(p.name)}<br><span class="meta">${fmt(p.price)} · в наличии ${p.stock}</span></span></span>`).join('')}</div>` : ''; }
@@ -2105,7 +2105,8 @@ function renderContent(){
   <details class="card" style="margin-bottom:10px"><summary style="cursor:pointer"><b>🚫 Нельзя в Instagram</b> <span class="meta">— товары с этими словами в названии не попадают в идеи и посты</span></summary>
     <textarea id="ct-banned" rows="3" style="width:100%;margin-top:6px">${esc(CT.banned||'')}</textarea>
     <div class="row"><span class="meta">Слова через запятую: бренды и узнаваемые модели (клевер, гвоздь…).</span><button class="btn small primary" id="ct-banned-save">Сохранить</button></div></details>`:''}
-  ${CT.ai===false?`<div class="card meta" style="margin-bottom:10px">✨ ИИ пока не подключён. «Идеи из данных Silver» и ручные посты уже работают. Чтобы ИИ сам писал идеи и тексты, владелец добавляет ключ Anthropic в Supabase → Edge Functions → Secrets под именем ANTHROPIC_API_KEY.</div>`:''}
+  ${CT.ai===false?`<div class="card" style="margin-bottom:10px"><span class="meta">✨ ИИ (Claude) пока не подключён. «Идеи из данных Silver» и ручные посты уже работают.${S.me.role==='owner'?' Впишите ключ Anthropic (console.anthropic.com → API Keys → Create Key) — он хранится на сервере и в браузер не возвращается.':' Ключ Anthropic вписывает владелец.'}</span>
+    ${S.me.role==='owner'?`<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap"><input id="ct-key" type="password" placeholder="sk-ant-…" autocomplete="off" style="flex:1;min-width:200px"><button class="btn small primary" id="ct-key-save">Сохранить ключ</button></div>`:''}</div>`:''}
   ${CT.add?`<div class="card stack" style="margin-bottom:10px;gap:6px"><b>Своя идея</b><input id="ct-n-title" placeholder="Коротко: о чём пост"><textarea id="ct-n-idea" rows="2" placeholder="Что снять, зачем"></textarea>
     <div class="row" style="justify-content:flex-start;gap:6px"><select id="ct-n-fmt">${Object.entries(CT_FMT).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select><button class="btn small primary" id="ct-n-save">Добавить</button><button class="btn small" id="ct-n-cancel">Отмена</button></div></div>`:''}
   ${!L?'<div class="empty">Загружаем…</div>':`<div class="grid2"><div>
@@ -2123,6 +2124,7 @@ document.addEventListener('click', async e => {
   const find = id => (CT.list||[]).find(x=>x.id===id);
   try{
     if(d.ctbrand){ CT.brand = d.ctbrand; CT.list = null; render(); await loadContent(); render(); }
+    else if(t.id==='ct-key-save'){ const k = ($('#ct-key').value||'').trim(); if(!k) return; t.disabled = true; await ctAI({ action:'set_key', key:k }).catch(err => { t.disabled = false; throw err; }); CT.ai = null; AN.st = null; toast('Ключ Claude сохранён'); await loadContent(); render(); }
     else if(t.id==='ct-add'){ CT.add = true; render(); }
     else if(t.id==='ct-banned-save'){ const v = $('#ct-banned').value; const { error } = await sb.rpc('content_banned_set', { p:v }); if(error) throw error; CT.banned = v; toast('Список сохранён'); }
     else if(t.id==='ct-n-cancel'){ CT.add = false; render(); }
@@ -2709,7 +2711,7 @@ async function loadDay(){
   if(S.me.role==='owner') wuLoadLast();
   if(DAY.role==='own') loadPulse();
 }
-async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; if(S.view==='day') render(); if(!data.ai) loadAiSpend(); loadCash(); }
+async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; if(S.view==='day') render(); if(!data.ai) loadAiSpend(); loadCash(); anStatus(); }
 /* наличные в кассе: остаток по тетради + наличные продажи Wipon с тех пор − расходы, внесённые в Silver */
 async function loadCash(){ const { data, error } = await sb.rpc('cash_status'); if(error) return; DAY.cash = {}; (data||[]).forEach(c => DAY.cash[c.store] = c); if(S.view==='day') render(); }
 function cashCell(x){ const c = (DAY.cash||{})[x.id]; if(!c) return '<span class="meta">…</span>'; if(c.est_kzt == null) return '<span class="meta">нет данных</span>';
@@ -2725,7 +2727,7 @@ async function loadAiSpend(){
   DAY.ai = { today:sum(td), month:sum(R), n_today:td.length, n_month:R.length, rate:+(rt&&rt.value)||520 }; if(S.view==='day') render(); }
 function aiTile(P){ const A = P.ai ? { rate:520, ...(DAY.ai||{}), ...P.ai } : DAY.ai; if(!A) return '';
   const usd = v => '$'+(+v||0).toFixed((+v||0)<10?2:0), kzt = v => fmt(Math.round((+v||0)*(A.rate||520)));
-  return `<div class="card" style="flex:1;min-width:170px;padding:10px 12px" title="Генерация AI-фото и распознавание отчётов смен через Grok (xAI)"><div class="meta">Расход Grok (AI)</div><div style="font-size:22px;font-weight:700" class="num">${usd(A.today)} <span class="meta" style="font-size:13px;font-weight:400">≈ ${kzt(A.today)} сегодня</span></div><div class="meta">с начала месяца ${usd(A.month)} ≈ ${kzt(A.month)} · ${(+(A.n_month||0)).toLocaleString('ru-RU')} запросов</div></div>`; }
+  return `<div class="card" style="flex:1;min-width:170px;padding:10px 12px" title="Grok (xAI): AI-фото и распознавание отчётов смен · Claude: контент-план и разбор"><div class="meta">Расход на ИИ</div><div style="font-size:22px;font-weight:700" class="num">${usd(A.today)} <span class="meta" style="font-size:13px;font-weight:400">≈ ${kzt(A.today)} сегодня</span></div><div class="meta">с начала месяца ${usd(A.month)} ≈ ${kzt(A.month)} · ${(+(A.n_month||0)).toLocaleString('ru-RU')} запросов</div></div>`; }
 /* у команды в работе: дела менеджера и закупа (их не дублируем владельцу) */
 function teamLine(D){ if(!D) return ''; const c = L => (L||[]).filter(i => +i.n > 0).length, m = c(D.mgr), b = c(D.buy);
   return `<div class="card row" style="flex-wrap:wrap;gap:8px;padding:8px 12px;margin-top:10px"><span style="flex:1;min-width:200px">У команды в работе: менеджер — <b>${m}</b>, закуп — <b>${b}</b> <span class="meta">· эти дела в их списках, вам за ними следить не нужно</span></span>
@@ -2738,6 +2740,29 @@ function beCell(x){
   const cats = String(x.be_cats||''), miss = [/аренд/i.test(cats)?'':'аренда'].filter(Boolean);
   return `<b class="num">${fmt(be)}</b><br><span class="chip ${done>=100?'ok':done>=need?'ok':'warn'}" title="к этому дню по плану нужно ${need}%">${done>=100?'✓ пройдена':done+'% · надо '+need+'%'}</span>${miss.length?` <span class="chip zero" title="Не внесено в «Рентабельность → расходы магазина»">нет: ${miss.join(', ')}</span>`:''}`;
 }
+/* разбор ИИ (Claude) для владельца: цифры Silver → выводы и действия на завтра */
+const AN = { busy:false, text:'', q:'', st:null, key:false };
+function anHtml(){
+  const st = AN.st;
+  if(st && !st.ai) return `<div class="card" style="margin-top:12px"><b>✨ Разбор от ИИ (Claude)</b><p class="meta" style="margin:4px 0 8px">Подключите ключ Anthropic — и Claude будет разбирать цифры сети и писать идеи и посты в «Контенте». Ключ: console.anthropic.com → API Keys → Create Key. Хранится на сервере, в браузер не возвращается.</p>
+    <div class="row" style="gap:6px;flex-wrap:wrap"><input id="an-key" type="password" placeholder="sk-ant-…" autocomplete="off" style="flex:1;min-width:200px"><button class="btn small primary" id="an-key-save">Сохранить ключ</button></div></div>`;
+  return `<div class="card" style="margin-top:12px"><div class="row" style="flex-wrap:wrap;gap:8px"><b style="flex:1">✨ Разбор от ИИ (Claude)</b>
+    <button class="btn small primary" id="an-go" ${AN.busy||!st?'disabled':''}>${AN.busy?'Думает… (~30 сек)':AN.text?'Обновить разбор':'Разобрать день'}</button></div>
+    <div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap"><input id="an-q" placeholder="Или спросите: почему просел Толе би? где взять 2 млн до конца месяца?" value="${esc(AN.q)}" style="flex:1;min-width:200px"><button class="btn small" id="an-ask" ${AN.busy||!st?'disabled':''}>Спросить</button></div>
+    ${AN.text?`<div style="white-space:pre-wrap;margin-top:10px;line-height:1.5">${esc(AN.text).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^#+ ?(.*)$/gm,'<b>$1</b>')}</div>`:''}</div>`;
+}
+async function anStatus(){ if(AN.st) return; const { data } = await sb.functions.invoke('content', { body:{ action:'status' } }); AN.st = data || { ai:false }; if(S.view==='day') render(); }
+document.addEventListener('click', async e => { if(S.view!=='day') return; const t = e.target.closest('button'); if(!t) return;
+  if(t.id==='an-key-save'){ const k = ($('#an-key').value||'').trim(); if(!k) return; t.disabled = true;
+    const { error } = await sb.functions.invoke('content', { body:{ action:'set_key', key:k } });
+    if(error){ let m = error.message; try{ m = (await error.context.json()).error || m; }catch(_){} t.disabled = false; return toast(m); }
+    AN.st = null; CT.ai = null; toast('Ключ Claude сохранён'); await anStatus(); }
+  else if(t.id==='an-go' || t.id==='an-ask'){ AN.q = t.id==='an-ask' ? ($('#an-q').value||'').trim() : ''; if(t.id==='an-ask' && !AN.q) return toast('Напишите вопрос');
+    AN.busy = true; render();
+    const { data, error } = await sb.functions.invoke('content', { body:{ action:'analyze', question:AN.q } }); AN.busy = false;
+    if(error){ let m = error.message; try{ m = (await error.context.json()).error || m; }catch(_){} toast(m); render(); return; }
+    AN.text = data.text || ''; DAY.ai = null; render(); }
+});
 function pulseHtml(P){
   if(!P) return '<div class="empty">Собираем картину по сети…</div>';
   const St = P.stores || [], sum = k => St.reduce((a,x)=>a+(+x[k]||0),0), pct = (a,b) => b>0 ? Math.round((a-b)/b*100) : null;
@@ -2787,7 +2812,7 @@ function renderDay(){
   const today = new Date().toLocaleDateString('ru-RU',{timeZone:'Asia/Almaty',weekday:'long',day:'numeric',month:'long'});
   if(r==='own'){ $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="day-ref">Обновить</button></div>
     <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><span class="meta">Посмотреть как:</span><div class="seg" style="display:inline-flex">${DAY_ROLES.map(([k,t])=>`<button data-dayrole="${k}" aria-pressed="${k===r}">${t}</button>`).join('')}</div></div>
-    ${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${wiponSyncHtml()}`; DAY.items = []; return; }
+    ${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${DAY.pulse?anHtml():''}${wiponSyncHtml()}`; DAY.items = []; return; }
   let items = D ? [...(D[r]||[])] : [];
   if(r==='buy'){ const sg = DAY.sug && DAY.sug!=='wait' ? DAY.sug : null;
     items.unshift({ k:'sug', t:'Дозаказать — товар заканчивается', n: sg ? sg.n : 1, wait: !sg, h: sg ? (sg.n ? `Всего ${sg.units.toLocaleString('ru-RU')} шт. Удобно формировать заказ сразу по поставщику.` : '') : 'Считаем…', go:'po', mode:'suggest', lvl:'warn' }); }
