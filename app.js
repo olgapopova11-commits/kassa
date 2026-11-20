@@ -1359,11 +1359,25 @@ document.addEventListener('click', async e => { if(S.view!=='nom') return; const
 function nmModalSync(e, f, cats, inp){
   const M = $('#modal'), has = !!M.querySelector('#nm-modal');
   if(!e){ if(has) M.innerHTML = ''; return; }
+  if(e.id && !(f.hist ||= {})[e.id] && nmCanEdit()){ f.hist[e.id] = 'wait'; sb.rpc('product_price_history', { p_id:e.id }).then(({ data }) => { f.hist[e.id] = data || []; if(S.view==='nom' && f.ed && f.ed.id===e.id) render(); }); }
   const ae = document.activeElement, keep = ae && M.contains(ae) && ae.id ? { id:ae.id, s:ae.selectionStart, e:ae.selectionEnd } : null;
   const sc = has ? M.querySelector('.dialog').scrollTop : 0;
   M.innerHTML = `<div class="overlay" id="nm-modal"><div class="dialog" role="dialog" aria-modal="true" style="max-width:820px">${nmEditorHtml(e, f, cats, inp)}</div></div>`;
   M.querySelector('.dialog').scrollTop = sc;
   if(keep){ const el = document.getElementById(keep.id); if(el){ el.focus(); try{ el.setSelectionRange(keep.s, keep.e); }catch(_){} } }
+}
+/* история закупочных цен товара: где, у кого и почём брали */
+function nmHistHtml(H){
+  if(!H) return ''; if(H==='wait') return '<div class="meta">История закупок: загружаем…</div>';
+  if(!H.length) return '<div class="cust meta">📈 История закупок: этот товар ещё не связан ни с одним заказом. Связь появляется при приёмке заказа из Китая или Alibaba.</div>';
+  const CUR = { CNY:'¥', USD:'$', KZT:'₸' }, pr = h => h.price_cur!=null ? (CUR[h.currency]||'')+(+h.price_cur).toLocaleString('ru-RU',{maximumFractionDigits:2}) : '—';
+  const same = H.filter(h => h.price_cur!=null && h.currency===H[0].currency), last = same[0], best = same.reduce((a,h)=> !a || +h.price_cur < +a.price_cur ? h : a, null);
+  const diff = last && best && +best.price_cur < +last.price_cur ? Math.round((+last.price_cur - +best.price_cur) / +best.price_cur * 100) : 0;
+  const src = { '1688':'1688', alibaba:'Alibaba', receipt:'приёмка' };
+  return `<details class="cust" ${diff?'open':''}><summary style="cursor:pointer"><b>📈 История закупок (${H.length})</b>${last?` · последняя ${pr(last)} у ${esc(noZh(last.supplier)||'поставщика')}`:''}${diff?` · <span style="color:var(--bad)">дороже лучшей цены на ${diff}%: ${pr(best)} у ${esc(noZh(best.supplier)||'другого поставщика')}, ${dshort(best.at)}</span>`:''}</summary>
+    <div class="scroll" style="margin-top:6px"><table><thead><tr><th>Дата</th><th>Где</th><th>Поставщик</th><th>Вариант</th><th>Цена</th><th>Себест.</th><th>Шт.</th><th></th></tr></thead><tbody>
+    ${H.map(h=>`<tr style="${best&&h===best?'background:var(--soft)':''}"><td class="num">${dshort(h.at)}</td><td>${src[h.source]||esc(h.source||'')}</td><td>${esc(noZh(h.supplier)||'—')}</td><td class="meta">${esc(poSpec({ spec:h.spec })||'')}</td>
+      <td class="num">${pr(h)}${best&&h===best?' <span class="chip ok">лучшая</span>':''}</td><td class="num">${h.kzt!=null?fmt(h.kzt):'—'}</td><td class="num">${h.qty}</td><td>${h.url?`<a href="${esc(h.url)}" target="_blank" rel="noopener">↗</a>`:''}</td></tr>`).join('')}</tbody></table></div></details>`;
 }
 function nmEditorHtml(e, f, cats, inp){
   return `<div class="stack">
@@ -1387,6 +1401,7 @@ function nmEditorHtml(e, f, cats, inp){
      <datalist id="nm-mats">${['Серебро 925','Нержавейка','Мед сплав','Пластик','мельхиор','Жемчуг','Кожа','другой'].map(m=>`<option value="${m}">`).join('')}</datalist>
      <datalist id="nm-colors">${['золото','серебро','цветной','черный'].map(m=>`<option value="${m}">`).join('')}</datalist>
      ${inp('purchase_url','Ссылка на закуп')}
+     ${e.id?nmHistHtml((f.hist||{})[e.id]):''}
      <div class="row" style="justify-content:flex-start;gap:16px"><label title="Под одним штрихкодом продаются разные изделия одной цены — на сайте это много карточек"><input type="checkbox" data-nf="is_group" ${e.is_group?'checked':''}> Общий штрихкод (много разных изделий)</label>
        <label><input type="checkbox" data-nf="archived" ${e.archived?'checked':''}> В архиве</label></div>
      <div class="row"><span>${e.id&&e.barcode?`<button class="btn small" data-labels='${esc(JSON.stringify([{n:e.name,b:e.barcode,p:+e.price,q:1}]))}'>Этикетка</button>`:''}</span>
@@ -1614,6 +1629,9 @@ function wiponUpHtml(kind){
     <div class="scroll" style="margin-top:8px"><table><thead><tr><th>Магазин</th><th>Последняя загрузка</th>${kind==='sales'?'<th>Продажи в Silver по</th>':''}<th>Кто загрузил</th></tr></thead><tbody>
       ${S.allStores.map(x=>{ const l = last(x.id); return `<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td class="num">${l?wuDt(l.at):'—'}</td>${kind==='sales'?`<td class="num">${l&&l.to?wuDt(l.to):'—'}</td>`:''}<td>${l&&l.by?esc(l.by):'<span class="meta">—</span>'}</td></tr>`; }).join('')}</tbody></table></div>
     <div class="stack" style="margin-top:8px">
+      ${kind==='sales'&&S.me.role==='owner'?`<div class="cust stack" style="gap:6px"><b>⚡ Автозагрузка прямо из кабинета Wipon — без Excel</b>
+        <span class="meta">1) Нажмите «Получить закладку» и перетащите появившуюся кнопку на панель закладок Chrome. 2) Откройте console.wipon.kz и нажмите эту закладку. Продажи за вчера и сегодня сразу попадут в Silver, дальше — каждые 15 минут, пока вкладка Wipon открыта. Внизу справа в Wipon будет видно время последней загрузки. Для второго ИП — войдите в его кабинет и нажмите закладку там же.</span>
+        <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">${WU.bm?`<a class="btn small primary" href="${esc(WU.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Wipon</a><span class="meta">← перетащите на панель закладок</span>`:`<button class="btn small" id="wu-bm">Получить закладку</button>`}</div></div>`:''}
       <span class="meta">${kind==='sales'?'Выгрузите продажи магазина из Wipon за любой период и загрузите файл. Дубликатов не будет: Silver проверяет номер каждого чека Wipon и добавляет только те, которых ещё нет. Даже если тот же файл или пересекающийся период загрузят случайно ещё раз — повторные чеки просто пропустятся.':'Выгрузите остатки магазина из Wipon и загрузите файл. Остатки этого магазина в Silver станут такими же, как в файле. Новые штрихкоды добавятся в базу товаров.'}</span>
       <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px">
         <select id="wu-store-${kind}">${kind==='sales'?`<option value="" ${!WU.storeSales?'selected':''}>Магазин определить автоматически</option>`:`<option value="" ${!WU.store?'selected':''}>Магазин определить автоматически</option>`}${S.allStores.map(x=>`<option value="${x.id}" ${x.id===(kind==='sales'?WU.storeSales:WU.store)?'selected':''}>${esc(BRAND[x.brand]+' · '+x.city+', '+x.address)}</option>`).join('')}</select>
@@ -1622,6 +1640,23 @@ function wiponUpHtml(kind){
       <span class="meta">${kind==='sales'?'Магазин Silver определяет сам по продавцу в файле: «Мун А» — MOON Алматы, «Мун» — MOON Астана; если не понял — по уже загруженным чекам.':'Склад Silver берёт из самого файла: «Мун А» — MOON Алматы, «Мун» — MOON Астана, Sunshine — по адресу склада.'} Если не получится, напишет, и тогда выберите магазин вручную и загрузите тот файл ещё раз.</span>
       ${WU.open===kind&&WU.msg?`<div class="cust">${WU.msg}</div>`:''}</div></details>`;
 }
+/* закладка для кабинета Wipon: читает продажи за вчера+сегодня и отправляет в Silver; повтор каждые 15 минут */
+function wiponBookmarklet(key){
+  const code = `(()=>{if(window.__ss){window.__ss.run();return}const K='${key}',F='https://ottuadjdksxipfjytlyv.supabase.co/functions/v1/ingest?action=wipon_sales';`
+  + `const b=document.createElement('div');b.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99999;background:#1d2b4f;color:#fff;padding:8px 12px;border-radius:10px;font:13px sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3)';document.body.appendChild(b);`
+  + `const S=t=>{t=' '+String(t||'').toLowerCase().replace(/ё/g,'е').replace(/[_.,;:()"«»\\-]+/g,' ').replace(/\\s+/g,' ')+' ';const W='(?![а-яa-z])';if(new RegExp('(мун|moon)\\\\s*(а|a)'+W).test(t)||/(мун|moon)\\s*алмат/.test(t))return 6;if(/(мун|moon)\\s*астан/.test(t)||new RegExp('(мун|moon)'+W).test(t))return 7;if(/курмангаз/.test(t))return 1;if(/толе\\s*би/.test(t))return 2;if(/гагарин/.test(t))return 3;if(/республик/.test(t))return 4;if(/достык/.test(t))return 5;return null};`
+  + `const d=x=>new Date(x.getTime()+18e6).toISOString().slice(0,10);`
+  + `async function run(){try{b.textContent='Silver: загружаем продажи…';const v=JSON.parse(localStorage.getItem('vuex')),tk=v.user.token,emp=v.employee.item.id,now=new Date(),fr=d(new Date(now-864e5)),to=d(now);let p=1,all=[];`
+  + `for(;;){const r=await fetch('https://api.wipon.kz/v1/employee/'+emp+'/sale?date_from='+fr+'T00:00:00%2B05:00&date_to='+to+'T23:59:59%2B05:00&page='+p+'&per_page=100',{headers:{Accept:'application/json',Authorization:'Bearer '+tk}});if(!r.ok)throw Error('Wipon '+r.status);const j=await r.json();all.push(...j.data);if(p>=j.meta.last_page)break;p++}`
+  + `const by={};for(const s of all){const st=S(s.stock&&s.stock.name)||S(s.employee_name);if(!st)continue;const pay=(s.payments||[]).map(x=>x.name).join(','),ret=(s.refunds||[]).length>0;for(const it of s.item_sale||[]){const q=+it.quantity||1;(by[st]=by[st]||[]).push({no:String(s.id),emp:s.employee_name,at:s.created_at,pay,name:it.item&&it.item.title,cat:it.item&&it.item.item_category_name,bc:it.item&&it.item.barcode,qty:q,total:Math.round((+it.price||+it.selling_price||0)*q-(+it.discount_amount||0)),ret})}}`
+  + `let n=0;for(const st in by){const r=await fetch(F,{method:'POST',headers:{'content-type':'application/json','x-ingest':K},body:JSON.stringify({store:+st,rows:by[st]})});const j=await r.json();if(j.error)throw Error(j.error);n+=+j.new||0}`
+  + `b.textContent='Silver ✓ '+new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+' · новых чеков: '+n+' · следующая загрузка через 15 мин'}catch(e){b.textContent='Silver: ошибка — '+e.message+' (повторим через 15 мин)'}}`
+  + `window.__ss={run};run();setInterval(run,9e5)})()`;
+  return 'javascript:' + encodeURIComponent(code);
+}
+document.addEventListener('click', async e => { const t = e.target.closest('button'); if(!t || t.id!=='wu-bm') return; t.disabled = true;
+  const { data, error } = await sb.rpc('wipon_sync_key'); t.disabled = false; if(error || !data) return toast(error ? errText(error) : 'Нет доступа');
+  WU.bm = wiponBookmarklet(data); render(); });
 function wuNorm(h){ return String(h==null?'':h).toLowerCase().replace(/\s+/g,' ').trim(); }
 function wuCol(H, tests, not){ for(const t of tests){ const i = H.findIndex(h => (typeof t==='function' ? t(h) : h.includes(t)) && !(not||[]).some(n=>h.includes(n))); if(i>=0) return i; } return -1; }
 function wuDate(v){ if(v instanceof Date){ const p = n => String(n).padStart(2,'0'); return `${v.getFullYear()}-${p(v.getMonth()+1)}-${p(v.getDate())} ${p(v.getHours())}:${p(v.getMinutes())}:${p(v.getSeconds())}`; }
