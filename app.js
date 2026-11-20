@@ -1302,7 +1302,7 @@ async function loadNom(){
   const f = S.nm; f.data = null;
   if(!f.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); f.cats = data || []; }
   sb.rpc('po_incoming').then(({data}) => { S.inc = data || {}; });
-  const { data, error } = await sb.rpc('product_list2', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:50, p_sort:f.sort||null, p_desc:!!f.desc, p_flag:f.flag||null });
+  const { data, error } = await sb.rpc('product_list2', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:f.lim||50, p_sort:f.sort||null, p_desc:!!f.desc, p_flag:f.flag||null });
   if(error){ toast(errText(error)); f.data = { rows:[], total:0 }; } else { f.data = data; S.nmNoPrice = data.noprice; }
 }
 function renderNom(){
@@ -1327,7 +1327,7 @@ function renderNom(){
       <td class="num">${+p.price>0?fmt(p.price):p.is_service?'<span class="meta">сумма при продаже</span>':'<span class="chip warn">нет цены</span>'}</td>
       <td class="num"><span class="nm-st" tabindex="0">${p.stock>0?'<span class="chip ok">есть '+p.stock+'</span>':'<span class="chip zero">нет</span>'}<span class="nm-st-pop">${S.allStores.map(st=>{ const q = +((p.by_store||{})[st.id]||0); return `<span class="row" style="gap:12px;${q?'':'opacity:.5'}"><span>${esc(BRAND[st.brand]+' · '+st.address)}</span><b class="num">${q}</b></span>`; }).join('')}</span></span>${inc&&((inc.ordered||0)+(inc.transit||0))?`<br><span class="meta">заказано ${(inc.ordered||0)+(inc.transit||0)}</span>`:''}</td>
       <td style="white-space:nowrap">${p.is_group?'<span class="meta">не для сайта</span>':L.length?['moon','sunshine'].map(sk=>{ const X = L.filter(x=>x.site===sk); return X.length ? `<a href="${esc(X[0].url)}" target="_blank" rel="noopener">${sk==='moon'?'MOON':'Sunshine'}</a>${X.length>1?` <span class="meta">· ${X.length} карточек</span>`:''}${X.some(x=>x.status==='review')?' <span class="meta">(не проверено)</span>':''}` : ''; }).filter(Boolean).join('<br>'):'<span class="meta">нет на сайте</span>'}</td></tr>`; }).join('') || `<tr><td colspan="${nmCanEdit()?9:8}" class="empty">Ничего не найдено</td></tr>`}</tbody></table></div>
-    ${f.off||D.rows.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-nmpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-nmpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`}`;
+    ${nmPagerHtml(f, D)}`}`;
   nmModalSync(e, f, cats, inp);
 }
 (()=>{ const st = document.createElement('style'); st.textContent = `.nm-st{position:relative;display:inline-block;cursor:default}.nm-st-pop{display:none;position:fixed;z-index:20;min-width:240px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 10px;box-shadow:0 6px 24px rgba(0,0,0,.15);text-align:left;font-size:13px;flex-direction:column;gap:4px;white-space:nowrap}.nm-st:hover .nm-st-pop,.nm-st:focus .nm-st-pop{display:flex}`; document.head.appendChild(st);
@@ -1379,6 +1379,18 @@ function nmHistHtml(H){
     ${H.map(h=>`<tr style="${best&&h===best?'background:var(--soft)':''}"><td class="num">${dshort(h.at)}</td><td>${src[h.source]||esc(h.source||'')}</td><td>${esc(noZh(h.supplier)||'—')}</td><td class="meta">${esc(poSpec({ spec:h.spec })||'')}</td>
       <td class="num">${pr(h)}${best&&h===best?' <span class="chip ok">лучшая</span>':''}</td><td class="num">${h.kzt!=null?fmt(h.kzt):'—'}</td><td class="num">${h.qty}</td><td>${h.url?`<a href="${esc(h.url)}" target="_blank" rel="noopener">↗</a>`:''}</td></tr>`).join('')}</tbody></table></div></details>`;
 }
+/* страницы номенклатуры: 1 2 3 … N и сколько товаров на странице */
+function nmPagerHtml(f, D){
+  const lim = f.lim || 50, pages = Math.max(1, Math.ceil((D.total||0) / lim)), cur = Math.floor(f.off / lim) + 1;
+  const set = new Set([1, pages, cur-2, cur-1, cur, cur+1, cur+2].filter(n => n>=1 && n<=pages)), list = [...set].sort((a,b)=>a-b);
+  let prev = 0, btns = '';
+  for(const n of list){ if(n - prev > 1) btns += '<span class="meta">…</span>'; btns += `<button class="btn small ${n===cur?'primary':''}" data-nmpage="${n}" ${n===cur?'aria-current="page"':''}>${n}</button>`; prev = n; }
+  return `<div class="row" style="margin-top:10px;flex-wrap:wrap;gap:6px;justify-content:flex-start">
+    ${pages>1?`<button class="btn small" data-nmpage="${Math.max(1,cur-1)}" ${cur>1?'':'disabled'}>‹</button>${btns}<button class="btn small" data-nmpage="${Math.min(pages,cur+1)}" ${cur<pages?'':'disabled'}>›</button>`:''}
+    <span class="meta" style="margin-left:auto">Показывать по</span><select id="nm-lim">${[50,100,200].map(n=>`<option value="${n}" ${n===lim?'selected':''}>${n}</option>`).join('')}</select>
+    <span class="meta">${(D.total||0).toLocaleString('ru-RU')} товаров · стр. ${cur} из ${pages}</span></div>`;
+}
+document.addEventListener('change', async e => { if(S.view!=='nom' || e.target.id!=='nm-lim') return; S.nm.lim = +e.target.value; S.nm.off = 0; S.nm.data = null; render(); await loadNom(); render(); });
 function nmEditorHtml(e, f, cats, inp){
   return `<div class="stack">
      <div class="row"><h2 style="margin:0">${e.id?'Карточка товара':'Новый товар'}</h2><button class="btn small" id="nm-close">Закрыть</button></div>
@@ -2432,21 +2444,57 @@ document.addEventListener('click', async e => { if(S.view!=='pay') return; const
 /* ---------- мой день: список дел по роли ---------- */
 const NM_FLAG = { noprice:'без розничной цены', nocost:'без закупочной цены', nourl:'без ссылки на поставщика', nocat:'без категории', nophoto:'без фото' };
 const DAY = { role:null, data:null, sug:null, store:null };
-const DAY_ROLES = [['mgr','Менеджер магазина'],['buy','Закуп'],['sell','Продавец']];
-const dayDefRole = () => ({ purchaser:'buy', consultant:'sell' })[S.me.role] || 'mgr';
+const DAY_ROLES = [['own','Владелец'],['mgr','Менеджер магазина'],['buy','Закуп'],['sell','Продавец']];
+const dayDefRole = () => ({ owner:'own', viewer:'own', purchaser:'buy', consultant:'sell' })[S.me.role] || 'mgr';
 async function loadDay(){
   if(!DAY.role) DAY.role = dayDefRole();
   const { data, error } = await sb.rpc('my_day', { p_store: DAY.store || S.store || null });
   if(error){ toast(errText(error)); DAY.data = { mgr:[], buy:[], sell:[] }; } else DAY.data = data;
   if(DAY.role==='buy') loadDaySug();
   if(S.me.role==='owner') wuLoadLast();
+  if(DAY.role==='own') loadPulse();
 }
+async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; if(S.view==='day') render(); }
+function pulseHtml(P){
+  if(!P) return '<div class="empty">Собираем картину по сети…</div>';
+  const St = P.stores || [], sum = k => St.reduce((a,x)=>a+(+x[k]||0),0), pct = (a,b) => b>0 ? Math.round((a-b)/b*100) : null;
+  const chip = v => v==null ? '<span class="meta">—</span>' : `<span class="chip ${v>=0?'ok':'zero'}">${v>0?'+':''}${v}%</span>`;
+  const T = sum('today'), W = sum('week_ago'), M = sum('mtd'), MP = sum('mtd_prev'), C = sum('chk_today');
+  const fresh = t => { if(!t) return '<span class="chip zero">нет</span>'; const h = (Date.now()-new Date(t))/36e5; return `<span class="chip ${h>3?'warn':'ok'}">${h<1?'<1 ч':Math.round(h)+' ч'} назад</span>`; };
+  const k = P.stuck || {}, stuck = [
+    [k.transit_old, 'Товар в пути не принят дольше 4 дней', 'wh'], [k.transfers_old, 'Перемещения не приняты дольше 3 дней', 'wh'],
+    [k.writeoffs_old, 'Списания ждут решения дольше 2 дней', 'wh'], [k.requests, 'Запросы продавцов на оприходование', 'wh'],
+    [k.po_wait, 'Поставщик не отправил заказ дольше 5 дней', 'po'], [k.negative, 'Отрицательные остатки — проверить пересортицу', 'stock'],
+    [k.noprice, 'Товары в наличии без цены', 'nom'], [k.po_unlinked, 'Позиции заказов из Китая не связаны с базой', 'po'], [k.nophoto, 'Товары в наличии без фото', 'photo'] ].filter(x => +x[0] > 0);
+  const tile = (t, v, sub) => `<div class="card" style="flex:1;min-width:170px;padding:10px 12px"><div class="meta">${t}</div><div style="font-size:22px;font-weight:700" class="num">${v}</div><div class="meta">${sub}</div></div>`;
+  return `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:stretch">
+      ${tile('Выручка сегодня', fmt(T), `${chip(pct(T,W))} к прошлой неделе на это время`)}
+      ${tile('Чеков сегодня', C.toLocaleString('ru-RU'), T&&C?'средний чек '+fmt(Math.round(T/C)):'')}
+      ${tile('С начала месяца', fmt(M), `${chip(pct(M,MP))} к тому же периоду прошлого месяца`)}</div>
+    <h3 style="margin:16px 0 6px">Магазины</h3>
+    <div class="scroll"><table><thead><tr><th>Магазин</th><th>Сегодня</th><th>Неделю назад</th><th></th><th>Месяц</th><th></th><th>Возвраты 2 дня</th><th>Чеки Wipon</th><th>Остатки Wipon</th></tr></thead><tbody>
+      ${St.map(x=>`<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td class="num"><b>${fmt(x.today)}</b></td><td class="num meta">${fmt(x.week_ago)}</td><td>${chip(pct(+x.today,+x.week_ago))}</td>
+        <td class="num">${fmt(x.mtd)}</td><td>${chip(pct(+x.mtd,+x.mtd_prev))}</td><td class="num">${+x.returns_2d?'<span class="chip warn">'+x.returns_2d+'</span>':'0'}</td><td>${fresh(x.sync_sales)}</td><td>${fresh(x.sync_stock)}</td></tr>`).join('')}</tbody></table></div>
+    <h3 style="margin:16px 0 6px">Где застряла работа</h3>
+    ${stuck.length?`<div class="stack" style="gap:6px">${stuck.map(([n,t,v])=>`<div class="card row" style="flex-wrap:wrap;gap:8px;padding:8px 12px"><span style="flex:1;min-width:200px">${t}</span><span class="chip warn">${(+n).toLocaleString('ru-RU')}</span><button class="btn small" data-pulsego="${v}">Открыть →</button></div>`).join('')}</div>`:'<div class="card">✅ Ничего не застряло</div>'}
+    <h3 style="margin:16px 0 6px">Ходовые товары закончились <span class="meta">— продавались за 30 дней, на остатке 0</span></h3>
+    ${(P.hot_out||[]).length?`<div class="scroll"><table><tbody>${P.hot_out.map(p=>`<tr><td>${thumb(p)}</td><td>${esc(p.name)}<br><span class="meta num">${esc(p.barcode||'')}</span></td><td class="num">продано ${p.sold30} шт.</td></tr>`).join('')}</tbody></table></div><button class="btn small" data-pulsego="po:suggest" style="margin-top:6px">Открыть «Что дозаказать» →</button>`:'<div class="card">✅ Все ходовые в наличии</div>'}
+    <h3 style="margin:16px 0 6px">Команда: что сделано за вчера и сегодня</h3>
+    ${(P.team||[]).length?`<div class="scroll"><table><tbody>${P.team.map(m=>`<tr><td><b>${esc(m.name)}</b><br><span class="meta">${esc(ROLE[m.role]||m.role||'')}</span></td><td>${Object.entries(m.acts||{}).map(([a,c])=>`<span class="chip">${esc(a)}: ${c}</span>`).join(' ')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="card meta">За вчера и сегодня действий в Silver не было (приёмки, перемещения, списания, заказы). Продажи идут через Wipon и видны в таблице магазинов выше.</div>'}
+    <p class="meta" style="margin-top:10px">Обновлено ${new Date(P.at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}. Задачи сотрудников — переключите «Посмотреть как» выше.</p>`;
+}
+document.addEventListener('click', async e => { const t = e.target.closest('button[data-pulsego]'); if(!t || S.view!=='day') return; const [v, m] = t.dataset.pulsego.split(':');
+  if(!(S.tabs||[]).some(x=>x[0]===v)) return toast('Нет доступа к этой вкладке'); if(v==='po'){ PO.mode = m || 'orders'; PO.list = null; }
+  S.view = v; (S.lastView ||= {})[groupOf(v)[0]] = v; render(); scrollTo(0,0); await loadView(); });
 async function loadDaySug(){ if(DAY.sug) return; DAY.sug = 'wait';
   const { data, error } = await sb.rpc('po_suggest', { p_days:30 }); if(error){ DAY.sug = null; return toast(errText(error)); }
   const L = (data||[]).filter(p => +p.need > 0); DAY.sug = { n:L.length, units:L.reduce((a,p)=>a+(+p.need||0),0) }; if(S.view==='day') render(); }
 function renderDay(){
   const D = DAY.data, own = S.me.role==='owner', r = DAY.role || dayDefRole(), st = DAY.store || S.store;
   const today = new Date().toLocaleDateString('ru-RU',{timeZone:'Asia/Almaty',weekday:'long',day:'numeric',month:'long'});
+  if(r==='own'){ $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="day-ref">Обновить</button></div>
+    <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><span class="meta">Посмотреть как:</span><div class="seg" style="display:inline-flex">${DAY_ROLES.map(([k,t])=>`<button data-dayrole="${k}" aria-pressed="${k===r}">${t}</button>`).join('')}</div></div>
+    ${pulseHtml(DAY.pulse)}${wiponSyncHtml()}`; DAY.items = []; return; }
   let items = D ? [...(D[r]||[])] : [];
   if(r==='buy'){ const sg = DAY.sug && DAY.sug!=='wait' ? DAY.sug : null;
     items.unshift({ k:'sug', t:'Дозаказать — товар заканчивается', n: sg ? sg.n : 1, wait: !sg, h: sg ? (sg.n ? `Всего ${sg.units.toLocaleString('ru-RU')} шт. Удобно формировать заказ сразу по поставщику.` : '') : 'Считаем…', go:'po', mode:'suggest', lvl:'warn' }); }
@@ -2465,8 +2513,8 @@ function renderDay(){
     ${wiponSyncHtml()}`;
 }
 document.addEventListener('click', async e => { if(S.view!=='day') return; const t = e.target.closest('button'); if(!t) return;
-  if(t.id==='day-ref'){ DAY.data = null; DAY.sug = null; render(); await loadDay(); render(); }
-  else if(t.dataset.dayrole){ DAY.role = t.dataset.dayrole; render(); if(DAY.role==='buy') loadDaySug(); }
+  if(t.id==='day-ref'){ DAY.data = null; DAY.sug = null; DAY.pulse = null; render(); await loadDay(); render(); }
+  else if(t.dataset.dayrole){ DAY.role = t.dataset.dayrole; render(); if(DAY.role==='buy') loadDaySug(); if(DAY.role==='own' && !DAY.pulse) loadPulse(); }
   else if(t.dataset.daygo){ const i = (DAY.items||[]).find(x => x.k===t.dataset.daygo); if(!i) return;
     if(!(S.tabs||[]).some(x => x[0]===i.go)) return toast('У вас нет доступа к этой вкладке');
     if(i.go==='wh' && i.mode) S.wmode = i.mode;
@@ -2583,7 +2631,7 @@ document.addEventListener('click', async e => {
   else if(t.id==='nm-close'){ S.nm.ed=null; render(); }
   else if(t.id==='nm-save'){ t.disabled=true; await nmSave(); }
   else if(d.nmopen){ const p=(S.nm.data&&S.nm.data.rows||[]).find(r=>r.id===d.nmopen); if(p) nmOpen(p); }
-  else if(d.nmpage){ S.nm.off=Math.max(0,S.nm.off+50*(+d.nmpage)); render(); await loadNom(); render(); }
+  else if(d.nmpage){ S.nm.off=Math.max(0,(+d.nmpage-1)*(S.nm.lim||50)); render(); await loadNom(); render(); scrollTo(0,0); }
   else if(d.nmlink||d.nmunlink){ const key=d.nmlink||d.nmunlink, [site,uid]=key.split(':');
     const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product: d.nmlink?S.nm.ed.id:null, p_status: d.nmlink?'confirmed':'rejected' });
     if(error) toast(errText(error)); else { toast(d.nmlink?'Связано с сайтом':'Отвязано'); S.nm.sq=''; S.nm.sfound=[]; await loadNom(); const fr=S.nm.data.rows.find(r=>r.id===S.nm.ed.id); if(fr) nmOpen(fr); else render(); } }
