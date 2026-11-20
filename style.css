@@ -236,3 +236,18 @@ nav.tabs button[aria-selected="true"]{color:var(--accent);box-shadow:inset 0 3px
 input,select,textarea{border-radius:10px}
 :focus-visible{outline-color:var(--sun)}
 h2{color:#4a3230}
+
+/* ---------- бренды: луна (MOON) и солнце (Sunshine) ---------- */
+:root{ --moon:#a99be8; --moon-soft:#efecfb; --sunc:#f5b830; --sun-soft:#fff3d6; }
+body{background:radial-gradient(900px 500px at 105% -10%, rgba(247,194,122,.28), transparent 60%), radial-gradient(800px 500px at -10% 110%, rgba(169,155,232,.16), transparent 60%), var(--bg);background-attachment:fixed}
+.thumb.br-moon{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--moon)}
+.thumb.br-sun{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--sunc)}
+.thumb.br-both{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--sunc),0 0 0 6px var(--moon)}
+header .brand::before{display:inline-block;animation:moonfloat 6s ease-in-out infinite;filter:drop-shadow(0 0 3px rgba(255,255,255,.7))}
+header .brand::after{display:inline-block;animation:sunspin 24s linear infinite;filter:drop-shadow(0 0 4px rgba(255,236,170,.9))}
+@keyframes moonfloat{0%,100%{transform:translateY(0) rotate(-8deg)}50%{transform:translateY(-2px) rotate(6deg)}}
+@keyframes sunspin{to{transform:rotate(360deg)}}
+.card{transition:box-shadow .2s ease, transform .2s ease}
+.btn.primary{transition:background .2s ease, transform .1s ease} .btn.primary:active{transform:scale(.97)}
+.empty::before{content:"☾ ☀";display:block;font-size:20px;letter-spacing:6px;margin-bottom:6px;color:var(--sun);animation:moonfloat 4s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){ header .brand::before, header .brand::after, .empty::before{animation:none} }

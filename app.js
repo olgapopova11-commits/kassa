@@ -84,7 +84,8 @@ function storesDD(ids, attr){
   return `<details class="dd"><summary>${esc(ddSummary(ids))}</summary><div class="dd-panel">${S.allStores.map(st=>`<label><input type="checkbox" ${attr(st.id)} ${ids.includes(st.id)?'checked':''}> ${esc(BRAND[st.brand]+' · '+st.address)}</label>`).join('')}</div></details>`;
 }
 document.addEventListener('click', e => { document.querySelectorAll('details.dd[open]').forEach(d => { if(!d.contains(e.target)) d.removeAttribute('open'); }); });
-const thumb = p => p.photo_url ? `<img class="thumb" referrerpolicy="no-referrer" src="${esc(thumbUrl(p.photo_url))}" data-full="${esc(p.photo_url)}" alt="" loading="lazy" decoding="async" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : '<span class="thumb"></span>';
+const brCls = p => p && p.brand==='moon' ? ' br-moon' : p && p.brand==='sunshine' ? ' br-sun' : p && p.brand==='both' ? ' br-both' : '';
+const thumb = p => p.photo_url ? `<img class="thumb${brCls(p)}" referrerpolicy="no-referrer" src="${esc(thumbUrl(p.photo_url))}" data-full="${esc(p.photo_url)}" alt="" loading="lazy" decoding="async" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : `<span class="thumb${brCls(p)}"></span>`;
 function errText(e){ return (e && (e.message || e.error_description)) || String(e); }
 const isNetErr = e => !navigator.onLine || /Failed to fetch|NetworkError|Load failed|network/i.test(errText(e));
 
@@ -107,22 +108,22 @@ setInterval(flushQueue, 60000);
 
 /* ---------- каталог (кэш на устройстве для быстрого поиска и офлайна) ---------- */
 async function loadCatalog(force){
-  const cached = ls.get('kassa_catalog6', null);
+  const cached = ls.get('kassa_catalog7', null);
   if(cached && !force){ S.catalog = cached.items; S.catalogAt = cached.at; S.alias = cached.alias || {}; }
   if(!navigator.onLine) return;
   if(cached && !force && Date.now() - cached.at < 6*3600e3) return;
   const items = []; let from = 0;
   while(true){
-    const { data, error } = await sb.from('products').select('id,barcode,sku,name,price,archived,photo_url,category_id,is_service').eq('archived', false).order('name').range(from, from+999);
+    const { data, error } = await sb.from('products').select('id,barcode,sku,name,price,archived,photo_url,category_id,is_service,brand').eq('archived', false).order('name').range(from, from+999);
     if(error) { toast('Каталог не загрузился: '+errText(error)); return; }
-    data.forEach(p => items.push([p.id, p.barcode, p.sku||'', p.name, Number(p.price), p.photo_url||'', p.category_id||null, p.is_service?1:0]));
+    data.forEach(p => items.push([p.id, p.barcode, p.sku||'', p.name, Number(p.price), p.photo_url||'', p.category_id||null, p.is_service?1:0, p.brand||'']));
     if(data.length < 1000) break; from += 1000;
   }
   // штрихкоды объединённых дублей (вторая база): пробиваются как основной товар
   const alias = {}; { let f2 = 0; while(true){ const { data } = await sb.from('products').select('barcode,merged_into').not('merged_into','is',null).range(f2, f2+999); (data||[]).forEach(r => { alias[r.barcode] = r.merged_into; }); if(!data || data.length < 1000) break; f2 += 1000; } }
-  S.catalog = items; S.alias = alias; S.catalogAt = Date.now(); ls.set('kassa_catalog6', {at:S.catalogAt, items, alias});
+  S.catalog = items; S.alias = alias; S.catalogAt = Date.now(); ls.set('kassa_catalog7', {at:S.catalogAt, items, alias});
 }
-const prodObj = a => ({ id:a[0], barcode:a[1], sku:a[2], name:a[3], price:a[4], photo_url:a[5]||null, category_id:a[6]||null, svc:!!a[7] });
+const prodObj = a => ({ id:a[0], barcode:a[1], sku:a[2], name:a[3], price:a[4], photo_url:a[5]||null, category_id:a[6]||null, svc:!!a[7], brand:a[8]||'' });
 function searchCatalog(q){
   q = q.trim().toLowerCase(); if(!q) return [];
   let exact = S.catalog.filter(p => p[1] === q || p[2].toLowerCase() === q);
@@ -924,7 +925,7 @@ document.addEventListener('click', async e => {
 function docAdd(p){
   if(S.wmode==='audit') return auditAdd(p);
   const d = S.doc, it = d.items.find(i=>i.pid===p.id);
-  if(it) it.qty++; else d.items.push({ pid:p.id, name:p.name, barcode:p.barcode, price:p.price, photo_url:p.photo_url, qty:1, cost:null });
+  if(it) it.qty++; else d.items.push({ pid:p.id, name:p.name, barcode:p.barcode, price:p.price, photo_url:p.photo_url, brand:p.brand, qty:1, cost:null });
   S.dq=''; S.dfound=[]; render(); $('#dq') && $('#dq').focus();
 }
 /* ревизия сканером: каждый скан сразу +1, звук и вибрация; очередь, чтобы быстрые сканы не терялись */
@@ -1846,7 +1847,7 @@ async function nmSave(){
   if(error) return toast(errText(error));
   toast(e.id ? 'Сохранено' : 'Товар создан, штрихкод '+data.barcode);
   e.id = data.id; e.barcode = data.barcode;
-  const row = [e.id, e.barcode, e.sku||'', e.name, Number(e.price), e.photo_url||'', e.category_id||null];
+  const row = [e.id, e.barcode, e.sku||'', e.name, Number(e.price), e.photo_url||'', e.category_id||null, 0, e.brand||''];
   const i = S.catalog.findIndex(a=>a[0]===e.id); if(i>=0) S.catalog[i]=row; else S.catalog.push(row);
   try{ ls.set('kassa_catalog4', { at:S.catalogAt, items:S.catalog }); }catch(_){}
   await loadNom(); const fresh = S.nm.data.rows.find(r=>r.id===e.id); if(fresh) nmOpen(fresh); else render();
