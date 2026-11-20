@@ -224,6 +224,7 @@ async function boot(){
 function renderShell(){
   const tabs = [['pos','Продажа'],['shifts','Смены'],['cash','Расходы'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты']];
   if(isBoss()) { tabs.splice(1,0,['analytics','Аналитика']); tabs.push(['bonus','Бонусные карты']); tabs.push(['nom','Номенклатура']); tabs.push(['site','Сайт']); tabs.push(['emps','Сотрудники']); }
+  if(S.me.role==='purchaser') tabs.push(['site','Сайт']);  // сайт ведёт закуп
   // настройка владельца: какие вкладки видит каждая роль
   const acc = (S.tabAccess||{})[S.me.role];
   if(S.me.role !== 'owner' && Array.isArray(acc)){ const keep = tabs.filter(([v]) => acc.includes(v)); tabs.splice(0, tabs.length, ...keep); }
@@ -2220,14 +2221,14 @@ function renderAttn(){
   if(A.noprice) add('bad', `Товары в наличии без розничной цены: ${A.noprice}`, 'Касса не продаст товар с ценой 0. Найдите их в «Номенклатуре» и поставьте цену: '+(A.noprice_names||[]).map(esc).join(', '), 'nom', 'Номенклатура', 'buy');
   const W = (A.wipon||[]).filter(w => dayOf(w.sales)!==today);
   if(W.length) add('warn', `Продажи из Wipon сегодня не загружены: ${W.length} маг.`, W.map(w=>esc(storeName(w.store_id))+' — '+ago(w.sales)).join(' · ')+'. Откройте кабинет Wipon и нажмите закладку «Silver ← Wipon».', 'day', 'Мой день');
-  if(A.cons_nophone) add('warn', `Консультанты без телефона: ${A.cons_nophone}`, 'Без телефона консультант не сможет пользоваться ботом смен и зарплаты.', 'cons', 'Вписать телефоны');
-  if(A.cons_notg) add('', `Телефон есть, но бот не подключён: ${A.cons_notg}`, 'Попросите открыть бота и нажать «Поделиться номером».', 'cons', 'Список');
+  if(A.cons_nophone) add('warn', `Консультанты без телефона: ${A.cons_nophone}`, 'Без телефона консультант не сможет пользоваться ботом смен и зарплаты.', 'cons', 'Вписать телефоны', 'mgr');
+  if(A.cons_notg) add('', `Телефон есть, но бот не подключён: ${A.cons_notg}`, 'Попросите открыть бота и нажать «Поделиться номером».', 'cons', 'Список', 'mgr');
   if(A.nophoto) add('', `Товары в наличии без фото: ${A.nophoto.toLocaleString('ru-RU')}`, 'Без фото товар не выложить на сайт и в Instagram. Начните с ходовых — «Путь товара» покажет их первыми.', 'flow', 'Путь товара', 'mgr');
   for(const x of (A.site||[])){ const nm = x.site==='moon'?'MOON':'Sunshine', days = x.loaded ? Math.floor((Date.now()-new Date(x.loaded))/864e5) : null;
-    if(x.review) add('warn', `Сайт ${nm}: связи ждут проверки — ${x.review}`, 'Silver нашёл похожий товар в базе, но не уверен. Подтвердите или исправьте связь.', 'site', 'Проверить');
-    if(x.siteonly) add('', `Сайт ${nm}: карточки без привязки к базе — ${x.siteonly}`, 'На сайте есть, в базе не найден. Привяжите к товару или отметьте общий штрихкод.', 'site', 'Связать');
-    if(x.baseonly) add('', `Сайт ${nm}: товары в наличии, которых нет на сайте — ${x.baseonly.toLocaleString('ru-RU')}`, 'Есть в магазинах, но не выставлены на сайте.', 'site', 'Открыть');
-    if(days!=null && days>=2) add('warn', `Данные сайта ${nm} устарели: обновлялись ${days} дн. назад`, 'Каталог сайта загружен '+new Date(x.loaded).toLocaleString('ru-RU',{timeZone:'Asia/Almaty',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'. Пока каталог сайта подгружается в Silver вручную, автообновление — следующий шаг.', 'site', 'Сайт'); }
+    if(x.review) add('warn', `Сайт ${nm}: связи ждут проверки — ${x.review}`, 'Silver нашёл похожий товар в базе, но не уверен. Подтвердите или исправьте связь.', 'site', 'Проверить', 'buy');
+    if(x.siteonly) add('', `Сайт ${nm}: карточки без привязки к базе — ${x.siteonly}`, 'На сайте есть, в базе не найден. Привяжите к товару или отметьте общий штрихкод.', 'site', 'Связать', 'buy');
+    if(x.baseonly) add('', `Сайт ${nm}: товары в наличии, которых нет на сайте — ${x.baseonly.toLocaleString('ru-RU')}`, 'Есть в магазинах, но не выставлены на сайте.', 'site', 'Открыть', 'buy');
+    if(days!=null && days>=2) add('warn', `Данные сайта ${nm} устарели: обновлялись ${days} дн. назад`, 'Каталог сайта загружен '+new Date(x.loaded).toLocaleString('ru-RU',{timeZone:'Asia/Almaty',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'. Пока каталог сайта подгружается в Silver вручную, автообновление — следующий шаг.', 'site', 'Сайт', 'buy'); }
   const col = { bad:'var(--bad)', warn:'var(--warn,#d90)', '':'var(--line)' };
   $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap"><h2 style="margin:0">Требует внимания</h2><button class="btn small" id="attn-ref">Обновить</button></div>
   <p class="meta" style="margin:4px 0 12px">${own?'Только то, что ждёт именно вас: просрочки команды и вопросы, которых нет ни в чьём списке дел.':'Всё, что ждёт действия, по вашим магазинам.'} Когда пункт закрыт — он исчезает отсюда.</p>
