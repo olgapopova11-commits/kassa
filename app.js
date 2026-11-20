@@ -2123,25 +2123,27 @@ document.addEventListener('change', e => { const t = e.target; if(S.view!=='wh' 
 
 /* ---------- «Требует внимания»: всё, что ждёт действия, на одном экране ---------- */
 async function loadAttn(){ const { data, error } = await sb.rpc('attention'); if(error) toast(errText(error)); S.attn = data || {};
-  if(S.me.role==='owner'){ const b = await sb.rpc('backup_status'); S.attn.backups = b.data || []; } }
+  if(S.me.role==='owner'){ const [b, d] = await Promise.all([ sb.rpc('backup_status'), sb.rpc('my_day', { p_store:null }) ]); S.attn.backups = b.data || []; S.attn.team = d.data || null; } }
 function renderAttn(){
   const A = S.attn; if(!A){ $('#main').innerHTML = '<h2>Требует внимания</h2><div class="empty">Проверяем…</div>'; return; }
   const today = new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'}), dayOf = t => t ? new Date(t).toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'}) : null;
   const ago = t => { if(!t) return 'ни разу'; const d = Math.round((new Date(today) - new Date(dayOf(t)))/864e5); return d<=0 ? 'сегодня '+new Date(t).toLocaleTimeString('ru-RU',{timeZone:'Asia/Almaty',hour:'2-digit',minute:'2-digit'}) : d===1 ? 'вчера' : d+' дн. назад'; };
   const items = [];
-  const add = (lvl, title, text, view, btn) => items.push({ lvl, title, text, view, btn });
+  // владельцу не показываем то, что уже есть в списках дел менеджера и закупа (team) — только просрочки и своё
+  const own = S.me.role==='owner', add = (lvl, title, text, view, btn, team) => { if(!(own && team)) items.push({ lvl, title, text, view, btn }); };
   const hp = (A.hours||[]).reduce((a,h)=>a+h.pending,0), ho = (A.hours||[]).reduce((a,h)=>a+h.open_old,0);
-  if(hp || ho) add('warn', `Часы консультантов: ждут подтверждения ${hp}${ho?`, не отмечен уход ${ho}`:''}`, (A.hours||[]).map(h=>esc(storeName(h.store_id))+': '+(h.pending?h.pending+' ждут':'')+(h.open_old?' · без ухода '+h.open_old:'')).join(' · '), 'pay', 'Открыть табель');
-  if(A.transit) add(A.transit_old?'bad':'warn', `Товар едет в магазин, не принят: ${A.transit}${A.transit_old?` (из них ${A.transit_old} дольше 4 дней)`:''}`, 'Пока приёмку не подтвердили после пересчёта, товар не на остатках и его нельзя продать.', 'wh', 'К приёмкам');
-  if(A.transfers_old) add('bad', `Перемещения в пути дольше 3 дней: ${A.transfers_old}`, 'Отправлены, но не приняты в магазине-получателе.', 'wh', 'К перемещениям');
-  if(A.writeoffs) add('warn', `Списания ждут решения: ${A.writeoffs}`, '', 'wh', 'К списаниям');
-  if(A.requests) add('warn', `Запросы на оприходование: ${A.requests}`, 'Продавцы просят поставить товар на остаток.', 'wh', 'К запросам');
-  if(A.noprice) add('bad', `Товары в наличии без розничной цены: ${A.noprice}`, 'Касса не продаст товар с ценой 0. Найдите их в «Номенклатуре» и поставьте цену: '+(A.noprice_names||[]).map(esc).join(', '), 'nom', 'Номенклатура');
+  if(hp || ho) add('warn', `Часы консультантов: ждут подтверждения ${hp}${ho?`, не отмечен уход ${ho}`:''}`, (A.hours||[]).map(h=>esc(storeName(h.store_id))+': '+(h.pending?h.pending+' ждут':'')+(h.open_old?' · без ухода '+h.open_old:'')).join(' · '), 'pay', 'Открыть табель', 'mgr');
+  if(A.transit) add(A.transit_old?'bad':'warn', `Товар едет в магазин, не принят: ${A.transit}${A.transit_old?` (из них ${A.transit_old} дольше 4 дней)`:''}`, 'Пока приёмку не подтвердили после пересчёта, товар не на остатках и его нельзя продать.', 'wh', 'К приёмкам', 'mgr');
+  if(own && A.transit_old) add('bad', `Просрочено у менеджера: товар в пути не принят дольше 4 дней — ${A.transit_old}`, 'Менеджер видит это в своём списке дел, но не закрыл.', 'wh', 'К приёмкам');
+  if(A.transfers_old) add('bad', `${own?'Просрочено у менеджера: перемещения':'Перемещения'} в пути дольше 3 дней: ${A.transfers_old}`, 'Отправлены, но не приняты в магазине-получателе.', 'wh', 'К перемещениям');
+  if(A.writeoffs) add('warn', `Списания ждут ${own?'вашего ':''}решения: ${A.writeoffs}`, '', 'wh', 'К списаниям');
+  if(A.requests) add('warn', `Запросы на оприходование: ${A.requests}`, 'Продавцы просят поставить товар на остаток.', 'wh', 'К запросам', 'mgr');
+  if(A.noprice) add('bad', `Товары в наличии без розничной цены: ${A.noprice}`, 'Касса не продаст товар с ценой 0. Найдите их в «Номенклатуре» и поставьте цену: '+(A.noprice_names||[]).map(esc).join(', '), 'nom', 'Номенклатура', 'buy');
   const W = (A.wipon||[]).filter(w => dayOf(w.sales)!==today);
   if(W.length) add('warn', `Продажи из Wipon сегодня не загружены: ${W.length} маг.`, W.map(w=>esc(storeName(w.store_id))+' — '+ago(w.sales)).join(' · ')+'. Откройте кабинет Wipon и нажмите закладку «Silver ← Wipon».', 'day', 'Мой день');
   if(A.cons_nophone) add('warn', `Консультанты без телефона: ${A.cons_nophone}`, 'Без телефона консультант не сможет пользоваться ботом смен и зарплаты.', 'cons', 'Вписать телефоны');
   if(A.cons_notg) add('', `Телефон есть, но бот не подключён: ${A.cons_notg}`, 'Попросите открыть бота и нажать «Поделиться номером».', 'cons', 'Список');
-  if(A.nophoto) add('', `Товары в наличии без фото: ${A.nophoto.toLocaleString('ru-RU')}`, 'Без фото товар не выложить на сайт и в Instagram. Начните с ходовых — «Путь товара» покажет их первыми.', 'flow', 'Путь товара');
+  if(A.nophoto) add('', `Товары в наличии без фото: ${A.nophoto.toLocaleString('ru-RU')}`, 'Без фото товар не выложить на сайт и в Instagram. Начните с ходовых — «Путь товара» покажет их первыми.', 'flow', 'Путь товара', 'mgr');
   for(const x of (A.site||[])){ const nm = x.site==='moon'?'MOON':'Sunshine', days = x.loaded ? Math.floor((Date.now()-new Date(x.loaded))/864e5) : null;
     if(x.review) add('warn', `Сайт ${nm}: связи ждут проверки — ${x.review}`, 'Silver нашёл похожий товар в базе, но не уверен. Подтвердите или исправьте связь.', 'site', 'Проверить');
     if(x.siteonly) add('', `Сайт ${nm}: карточки без привязки к базе — ${x.siteonly}`, 'На сайте есть, в базе не найден. Привяжите к товару или отметьте общий штрихкод.', 'site', 'Связать');
@@ -2149,7 +2151,8 @@ function renderAttn(){
     if(days!=null && days>=2) add('warn', `Данные сайта ${nm} устарели: обновлялись ${days} дн. назад`, 'Каталог сайта загружен '+new Date(x.loaded).toLocaleString('ru-RU',{timeZone:'Asia/Almaty',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'. Пока каталог сайта подгружается в Silver вручную, автообновление — следующий шаг.', 'site', 'Сайт'); }
   const col = { bad:'var(--bad)', warn:'var(--warn,#d90)', '':'var(--line)' };
   $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap"><h2 style="margin:0">Требует внимания</h2><button class="btn small" id="attn-ref">Обновить</button></div>
-  <p class="meta" style="margin:4px 0 12px">Всё, что ждёт действия, по вашим магазинам. Когда пункт закрыт — он исчезает отсюда.</p>
+  <p class="meta" style="margin:4px 0 12px">${own?'Только то, что ждёт именно вас: просрочки команды и вопросы, которых нет ни в чьём списке дел.':'Всё, что ждёт действия, по вашим магазинам.'} Когда пункт закрыт — он исчезает отсюда.</p>
+  ${own&&A.team?teamLine(A.team).replace(/data-dayrole=/g,'data-attnteam='):''}
   ${items.length ? `<div class="stack" style="gap:8px">${items.sort((a,b)=>({bad:0,warn:1,'':2}[a.lvl]-{bad:0,warn:1,'':2}[b.lvl])).map(i=>`<div class="card row" style="flex-wrap:wrap;gap:10px;border-left:4px solid ${col[i.lvl]}"><div style="flex:1;min-width:220px"><b>${i.title}</b>${i.text?`<br><span class="meta">${i.text}</span>`:''}</div><button class="btn small" data-attngo="${i.view}">${i.btn} →</button></div>`).join('')}</div>`
     : '<div class="card" style="text-align:center;padding:24px">✅ Всё в порядке — ничего не ждёт</div>'}
   ${(A.site||[]).length?`<div class="card" style="margin-top:14px"><b>Сайты</b><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Сайт</th><th>Каталог обновлён</th><th>Проверить связи</th><th>Без привязки</th><th>Нет на сайте</th></tr></thead><tbody>
@@ -2159,6 +2162,8 @@ function renderAttn(){
   <div class="card" style="margin-top:14px"><b>Загрузки из Wipon</b><div class="scroll"><table style="margin-top:6px"><thead><tr><th>Магазин</th><th>Продажи</th><th>Остатки</th></tr></thead><tbody>
     ${(A.wipon||[]).map(w=>`<tr><td>${esc(storeName(w.store_id))}</td><td style="color:${dayOf(w.sales)===today?'var(--ok)':'inherit'}">${ago(w.sales)}</td><td>${ago(w.stock)}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
+document.addEventListener('click', async e => { if(S.view!=='attn') return; const t = e.target.closest('button[data-attnteam]'); if(!t) return;
+  DAY.role = t.dataset.attnteam; S.view = 'day'; (S.lastView ||= {})[groupOf('day')[0]] = 'day'; render(); scrollTo(0,0); await loadView(); });
 document.addEventListener('click', async e => { if(S.view!=='attn') return; const t = e.target.closest('button'); if(!t) return;
   if(t.id==='attn-ref'){ S.attn = null; render(); await loadAttn(); render(); }
   else if(t.dataset.bkday){ const day = t.dataset.bkday; const { data:files } = await sb.storage.from('backups').list(day, { limit:500 }); const paths = (files||[]).filter(f=>/\.\d{3}\.ndjson\.gz$/.test(f.name)).map(f=>day+'/'+f.name);
@@ -2617,7 +2622,21 @@ async function loadDay(){
   if(S.me.role==='owner') wuLoadLast();
   if(DAY.role==='own') loadPulse();
 }
-async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; if(S.view==='day') render(); }
+async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; if(S.view==='day') render(); if(!data.ai) loadAiSpend(); }
+/* расход на Grok (AI): сегодня и с начала месяца — из таблицы ai_usage */
+async function loadAiSpend(){
+  const now = new Date(), day = now.toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'}), m0 = day.slice(0,8)+'01';
+  const [{ data }, { data:rt }] = await Promise.all([ sb.from('ai_usage').select('at,cost_usd').gte('at', m0+'T00:00:00+05:00').limit(10000),
+    sb.from('settings').select('value').eq('key','usd_kzt').maybeSingle() ]);
+  const R = data || [], sum = L => L.reduce((a,x)=>a+(+x.cost_usd||0),0), td = R.filter(x => new Date(x.at).toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'})===day);
+  DAY.ai = { today:sum(td), month:sum(R), n_today:td.length, n_month:R.length, rate:+(rt&&rt.value)||520 }; if(S.view==='day') render(); }
+function aiTile(P){ const A = P.ai ? { rate:520, ...(DAY.ai||{}), ...P.ai } : DAY.ai; if(!A) return '';
+  const usd = v => '$'+(+v||0).toFixed((+v||0)<10?2:0), kzt = v => fmt(Math.round((+v||0)*(A.rate||520)));
+  return `<div class="card" style="flex:1;min-width:170px;padding:10px 12px" title="Генерация AI-фото и распознавание отчётов смен через Grok (xAI)"><div class="meta">Расход Grok (AI)</div><div style="font-size:22px;font-weight:700" class="num">${usd(A.today)} <span class="meta" style="font-size:13px;font-weight:400">≈ ${kzt(A.today)} сегодня</span></div><div class="meta">с начала месяца ${usd(A.month)} ≈ ${kzt(A.month)} · ${(+(A.n_month||0)).toLocaleString('ru-RU')} запросов</div></div>`; }
+/* у команды в работе: дела менеджера и закупа (их не дублируем владельцу) */
+function teamLine(D){ if(!D) return ''; const c = L => (L||[]).filter(i => +i.n > 0).length, m = c(D.mgr), b = c(D.buy);
+  return `<div class="card row" style="flex-wrap:wrap;gap:8px;padding:8px 12px;margin-top:10px"><span style="flex:1;min-width:200px">У команды в работе: менеджер — <b>${m}</b>, закуп — <b>${b}</b> <span class="meta">· эти дела в их списках, вам за ними следить не нужно</span></span>
+    <button class="btn small" data-dayrole="mgr">Дела менеджера →</button><button class="btn small" data-dayrole="buy">Дела закупа →</button></div>`; }
 /* точка безубыточности магазина: постоянные расходы месяца ÷ доля, что остаётся с продажи после себестоимости и налога */
 function beCell(x){
   const m = +x.be_margin, fx = (+x.be_fixed||0) + (+x.be_opex||0); if(!(m>0) || !fx) return '<span class="meta">нет расходов</span>';
@@ -2632,22 +2651,21 @@ function pulseHtml(P){
   const chip = v => v==null ? '<span class="meta">—</span>' : `<span class="chip ${v>=0?'ok':'zero'}">${v>0?'+':''}${v}%</span>`;
   const T = sum('today'), W = sum('week_ago'), M = sum('mtd'), MP = sum('mtd_prev'), C = sum('chk_today');
   const fresh = t => { if(!t) return '<span class="chip zero">нет</span>'; const h = (Date.now()-new Date(t))/36e5; return `<span class="chip ${h>3?'warn':'ok'}">${h<1?'<1 ч':Math.round(h)+' ч'} назад</span>`; };
+  // владельцу — только просрочки и то, что не входит ни в чей список; обычные дела менеджера и закупа не дублируем
   const k = P.stuck || {}, stuck = [
-    [k.transit_old, 'Товар в пути не принят дольше 4 дней', 'wh'], [k.transfers_old, 'Перемещения не приняты дольше 3 дней', 'wh'],
-    [k.writeoffs_old, 'Списания ждут решения дольше 2 дней', 'wh'], [k.requests, 'Запросы продавцов на оприходование', 'wh'],
-    [k.po_wait, 'Поставщик не отправил заказ дольше 5 дней', 'po'], [k.negative, 'Отрицательные остатки — проверить пересортицу', 'stock'],
-    [k.noprice, 'Товары в наличии без цены', 'nom'], [k.po_unlinked, 'Позиции заказов из Китая не связаны с базой', 'po'], [k.nophoto, 'Товары в наличии без фото', 'photo'] ].filter(x => +x[0] > 0);
+    [k.transit_old, 'Просрочено у менеджера: товар в пути не принят дольше 4 дней', 'wh'], [k.transfers_old, 'Просрочено у менеджера: перемещения не приняты дольше 3 дней', 'wh'],
+    [k.writeoffs_old, 'Ваше решение: списания ждут дольше 2 дней', 'wh'], [k.negative, 'Отрицательные остатки — проверить пересортицу (ни в чьём списке)', 'stock'] ].filter(x => +x[0] > 0);
   const tile = (t, v, sub) => `<div class="card" style="flex:1;min-width:170px;padding:10px 12px"><div class="meta">${t}</div><div style="font-size:22px;font-weight:700" class="num">${v}</div><div class="meta">${sub}</div></div>`;
   return `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:stretch">
       ${tile('Выручка сегодня', fmt(T), `${chip(pct(T,W))} к прошлой неделе на это время`)}
       ${tile('Чеков сегодня', C.toLocaleString('ru-RU'), T&&C?'средний чек '+fmt(Math.round(T/C)):'')}
-      ${tile('С начала месяца', fmt(M), `${chip(pct(M,MP))} к тому же периоду прошлого месяца`)}</div>
+      ${tile('С начала месяца', fmt(M), `${chip(pct(M,MP))} к тому же периоду прошлого месяца`)}${aiTile(P)}</div>
     <h3 style="margin:16px 0 6px">Магазины</h3>
     <div class="scroll"><table><thead><tr><th>Магазин</th><th>Сегодня</th><th>Неделю назад</th><th></th><th>Месяц</th><th></th><th title="Сколько нужно продать за месяц, чтобы покрыть аренду, коммуналку и расходы магазина">Безубыточность в месяц</th><th>Возвраты 2 дня</th><th>Чеки Wipon</th><th>Остатки Wipon</th></tr></thead><tbody>
       ${St.map(x=>`<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td class="num"><b>${fmt(x.today)}</b></td><td class="num meta">${fmt(x.week_ago)}</td><td>${chip(pct(+x.today,+x.week_ago))}</td>
         <td class="num">${fmt(x.mtd)}</td><td>${chip(pct(+x.mtd,+x.mtd_prev))}</td><td>${beCell(x)}</td><td class="num">${+x.returns_2d?'<span class="chip warn">'+x.returns_2d+'</span>':'0'}</td><td>${fresh(x.sync_sales)}</td><td>${fresh(x.sync_stock)}</td></tr>`).join('')}</tbody></table></div>
     <p class="meta" style="margin:6px 0 0">Безубыточность = (аренда, коммуналка и другие расходы из «Рентабельности» + хозрасходы магазина из журнала «Расходы магазинов», в среднем за 3 мес.) ÷ доля, что остаётся с продажи после себестоимости и налога (по продажам за 90 дней). Зарплаты пока не учтены — впишите их в расходы магазина, и точка станет точной.</p>
-    <h3 style="margin:16px 0 6px">Где застряла работа</h3>
+    <h3 style="margin:16px 0 6px">Где застряла работа <span class="meta">— только просрочки и то, что не в списках команды</span></h3>
     ${stuck.length?`<div class="stack" style="gap:6px">${stuck.map(([n,t,v])=>`<div class="card row" style="flex-wrap:wrap;gap:8px;padding:8px 12px"><span style="flex:1;min-width:200px">${t}</span><span class="chip warn">${(+n).toLocaleString('ru-RU')}</span><button class="btn small" data-pulsego="${v}">Открыть →</button></div>`).join('')}</div>`:'<div class="card">✅ Ничего не застряло</div>'}
     <h3 style="margin:16px 0 6px">Ходовые товары закончились <span class="meta">— продавались за 30 дней, на остатке 0</span></h3>
     ${(P.hot_out||[]).length?`<div class="scroll"><table><tbody>${P.hot_out.map(p=>`<tr><td>${thumb(p)}</td><td>${esc(p.name)}<br><span class="meta num">${esc(p.barcode||'')}</span></td><td class="num">продано ${p.sold30} шт.</td></tr>`).join('')}</tbody></table></div><button class="btn small" data-pulsego="po:suggest" style="margin-top:6px">Открыть «Что дозаказать» →</button>`:'<div class="card">✅ Все ходовые в наличии</div>'}
@@ -2666,7 +2684,7 @@ function renderDay(){
   const today = new Date().toLocaleDateString('ru-RU',{timeZone:'Asia/Almaty',weekday:'long',day:'numeric',month:'long'});
   if(r==='own'){ $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="day-ref">Обновить</button></div>
     <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><span class="meta">Посмотреть как:</span><div class="seg" style="display:inline-flex">${DAY_ROLES.map(([k,t])=>`<button data-dayrole="${k}" aria-pressed="${k===r}">${t}</button>`).join('')}</div></div>
-    ${pulseHtml(DAY.pulse)}${wiponSyncHtml()}`; DAY.items = []; return; }
+    ${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${wiponSyncHtml()}`; DAY.items = []; return; }
   let items = D ? [...(D[r]||[])] : [];
   if(r==='buy'){ const sg = DAY.sug && DAY.sug!=='wait' ? DAY.sug : null;
     items.unshift({ k:'sug', t:'Дозаказать — товар заканчивается', n: sg ? sg.n : 1, wait: !sg, h: sg ? (sg.n ? `Всего ${sg.units.toLocaleString('ru-RU')} шт. Удобно формировать заказ сразу по поставщику.` : '') : 'Считаем…', go:'po', mode:'suggest', lvl:'warn' }); }
@@ -2685,7 +2703,7 @@ function renderDay(){
     ${wiponSyncHtml()}`;
 }
 document.addEventListener('click', async e => { if(S.view!=='day') return; const t = e.target.closest('button'); if(!t) return;
-  if(t.id==='day-ref'){ DAY.data = null; DAY.sug = null; DAY.pulse = null; render(); await loadDay(); render(); }
+  if(t.id==='day-ref'){ DAY.data = null; DAY.sug = null; DAY.pulse = null; DAY.ai = null; render(); await loadDay(); render(); }
   else if(t.dataset.dayrole){ DAY.role = t.dataset.dayrole; render(); if(DAY.role==='buy') loadDaySug(); if(DAY.role==='own' && !DAY.pulse) loadPulse(); }
   else if(t.dataset.daygo){ const i = (DAY.items||[]).find(x => x.k===t.dataset.daygo); if(!i) return;
     if(!(S.tabs||[]).some(x => x[0]===i.go)) return toast('У вас нет доступа к этой вкладке');
