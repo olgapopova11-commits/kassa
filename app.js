@@ -214,7 +214,7 @@ async function boot(){
   }
   S.store = ls.get('kassa_store', null) || (me.store_ids||[])[0] || (S.stores[0]||{}).id;
   if(!S.stores.some(s=>s.id===S.store)) S.store = (S.stores[0]||{}).id;
-  { const [a, e] = await Promise.all([sb.rpc('get_tab_access'), sb.rpc('get_tab_edit')]); S.tabAccess = a.data || {}; S.tabEdit = e.data || {}; }
+  { const [a, e, pe] = await Promise.all([sb.rpc('get_tab_access'), sb.rpc('get_tab_edit'), sb.from('settings').select('value').eq('key','pos_enabled').maybeSingle()]); S.tabAccess = a.data || {}; S.tabEdit = e.data || {}; S.posOn = !!(pe && pe.data && pe.data.value==='true'); }
   const ph1688 = location.hash.startsWith('#ph=') ? location.hash.slice(4) : null; if(ph1688) try{ history.replaceState(null,'','#po'); }catch(_){}
   const sup1688 = location.hash.startsWith('#sup=') ? location.hash.slice(5) : null; if(sup1688) try{ history.replaceState(null,'','#po'); }catch(_){}
   renderShell(); await loadPosShift(); if(S.view!=='pos') render(); if(ph1688) importPhotos1688(ph1688); if(sup1688) importSuppliers(sup1688); await loadCatalog(); loadPromos().then(()=>{ if(S.view==='pos') render(); }); render(); flushQueue(); subscribeReqs(); if(S.view!=='pos') loadView();
@@ -231,9 +231,11 @@ function renderShell(){
   // остальные вкладки: владельцу все, остальным — по настройке «Какие вкладки видит каждая роль» (или по умолчанию)
   for(const [v,t] of EXTRA_TABS){ if(S.me.role==='owner' || v==='day' || (Array.isArray(acc) ? acc.includes(v) : (EXTRA_DEF[v]||[]).includes(S.me.role))) tabs.push([v, v==='pay' && !isBoss() ? 'Моя зарплата' : t]); }
   if(S.me.role==='owner') tabs.push(['adm','Административный штат']);
+  // касса Silver (продажа, смены, расходы) пока не используется — чеки пробиваются в Wipon; включается настройкой pos_enabled
+  if(!S.posOn){ const off = ['pos','shifts','cash']; tabs.splice(0, tabs.length, ...tabs.filter(([v]) => !off.includes(v))); }
   if(isViewer()){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pos' && (v!=='emps' || S.me.role==='accountant'))); if(!S.view || S.view==='pos' || (S.view==='emps' && S.me.role!=='accountant')) S.view = 'analytics'; }
   if(!S._land){ S._land = 1; if(!INIT_HASH && ['owner','manager','purchaser'].includes(S.me.role)) S.view = 'day'; }
-  if(tabs.length && !tabs.some(([v]) => v===S.view)) S.view = tabs[0][0];
+  if(tabs.length && !tabs.some(([v]) => v===S.view)) S.view = (tabs.find(t => t[0]==='day') || tabs[0])[0];
 
   S.tabs = tabs;
   $('#app').innerHTML = `<header id="hdr"></header><nav class="subtabs" id="subnav" role="tablist"></nav><main id="main"></main>
@@ -241,14 +243,19 @@ function renderShell(){
   renderHeader();
 }
 // вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
-const GROUPS = [['home','✅','Мой день',['day','attn']],['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['flow','stock','wh','po','nom','photo','site']],
-  ['clients','💳','Клиенты',['promo','content','bonus','certs']],['analytics','📈','Аналитика',['analytics','profit']],['team','👥','Сотрудники',['me','emps','cons','pay','adm']]];
+const GROUPS = [['home','✅','Мой день',['day','attn']],['goods','📦','Товары',['flow','stock','wh','po','nom','photo','site']],['analytics','📈','Аналитика',['analytics','profit']],
+  ['team','👥','Команда',['me','emps','cons','pay','adm']],['kassa','🧾','Чеки',['pos','shifts','cash','sales']],['clients','💳','Клиенты',['promo','content','bonus','certs']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 function renderNav(){
   const tabs = S.tabs || [], has = v => tabs.some(t => t[0]===v), title = v => (tabs.find(t=>t[0]===v)||[])[1];
   const cur = groupOf(S.view); (S.lastView ||= {})[cur[0]] = S.view;
   const rq = S.reqCount ? ` (${S.reqCount})` : '';
-  const mn = $('#mainnav'); if(mn) mn.innerHTML = GROUPS.filter(g => g[3].some(has)).map(g => `<button role="tab" data-group="${g[0]}" aria-selected="${g===cur}"><span class="ico">${g[1]}</span>${g[2]}${g[0]==='goods'?rq:''}</button>`).join('');
+  // внизу не больше 5 разделов: 4 первых + «Ещё» (остальные открываются листом)
+  const GA = GROUPS.filter(g => g[3].some(has)), main = GA.length > 5 ? GA.slice(0, 4) : GA, more = GA.length > 5 ? GA.slice(4) : [];
+  const gbtn = g => `<button role="tab" data-group="${g[0]}" aria-selected="${g===cur}"><span class="ico">${g[1]}</span>${g[2]}${g[0]==='goods'?rq:''}</button>`;
+  const mn = $('#mainnav'); if(mn) mn.innerHTML = main.map(gbtn).join('')
+    + (more.length ? `<button role="tab" data-more="1" aria-selected="${more.includes(cur)}"><span class="ico">☰</span>${more.includes(cur)?esc(cur[2]):'Ещё'}</button>` : '')
+    + (more.length && S.moreOpen ? `<div class="more-bg" data-moreclose="1"></div><div class="more-sheet" id="more-sheet">${more.map(gbtn).join('')}</div>` : '');
   const av = cur[3].filter(has), sn = $('#subnav');
   // магазин выбирают только в разделе «Касса»: чек, смена и расходы относятся к конкретной кассе
   const kassa = cur[0]==='kassa';
@@ -486,13 +493,13 @@ function renderSales(){
       ${F.from||F.to||F.kind||S.salesQ?'<button class="btn small" id="sf-reset">Сбросить</button>':''}</div>`; })()}
     <div class="filters"><input id="sq" style="flex:1" placeholder="Товар (название или штрихкод), номер чека или телефон клиента" value="${esc(S.salesQ)}"><button class="btn" id="sq-go">Найти</button></div>
     ${S.salesTotal!=null?`<p class="meta">Найдено чеков: <b>${(S.salesTotal||0).toLocaleString('ru-RU')}</b> · сумма продаж минус возвраты: <b>${fmt(S.salesSum||0)}</b>${S.salesTotal>S.sales.length?` · показаны последние ${S.sales.length}`:''}</p>`:''}
-    ${S.sales.length?`<div class="scroll"><table><thead><tr><th>№</th><th>Когда</th>${isBoss()?'<th>Магазин</th>':''}<th>Товары</th><th>Сумма</th><th>Оплата</th><th>Клиент</th><th></th></tr></thead><tbody>
-    ${S.sales.map(s=>`<tr><td class="num">${s.number}${s.kind==='return'?' <span class="chip zero">возврат</span>':''}${s.has_return?' <span class="chip warn">был возврат</span>':''}${s.wipon_id?'<br><span class="meta">Wipon '+esc(String(s.wipon_id).replace('-R',''))+'</span>':''}</td>
-      <td class="num">${new Date(s.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}<br><span class="meta">${esc(s.employees&&s.employees.full_name||'')}</span></td>${isBoss()?`<td>${esc(storeName(s.store_id))}</td>`:''}
-      <td>${s.is_certificate_sale?esc(s.note):s.sale_items.map(i=>esc(i.products?i.products.name:'')+' × '+i.qty).join('<br>')}</td>
-      <td class="num">${fmt(s.total)}</td><td>${s.sale_payments.map(p=>PAY[p.method]+(p.certificate_code?' '+esc(p.certificate_code):'')).join(', ')}</td>
-      <td>${s.customers?esc(s.customers.phone):'—'}</td>
-      <td>${s.kind==='sale'&&!s.is_certificate_sale?`<button class="btn small" data-ret="${s.id}">Возврат</button>`:''}</td></tr>`).join('')}</tbody></table></div>${S.salesTotal>S.sales.length?`<button class="btn" id="sf-more" style="width:100%;margin-top:8px">Показать ещё</button>`:''}`
+    ${S.sales.length?`<div class="scroll"><table class="mc"><thead><tr><th>№</th><th>Когда</th>${isBoss()?'<th>Магазин</th>':''}<th>Товары</th><th>Сумма</th><th>Оплата</th><th>Клиент</th><th></th></tr></thead><tbody>
+    ${S.sales.map(s=>`<tr><td class="num mc-t">${s.number}${s.kind==='return'?' <span class="chip zero">возврат</span>':''}${s.has_return?' <span class="chip warn">был возврат</span>':''}${s.wipon_id?'<br><span class="meta">Wipon '+esc(String(s.wipon_id).replace('-R',''))+'</span>':''}</td>
+      <td class="num" data-l="Когда">${new Date(s.created_at).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'})}<br><span class="meta">${esc(s.employees&&s.employees.full_name||'')}</span></td>${isBoss()?`<td data-l="Магазин">${esc(storeName(s.store_id))}</td>`:''}
+      <td data-l="Товары">${s.is_certificate_sale?esc(s.note):s.sale_items.map(i=>esc(i.products?i.products.name:'')+' × '+i.qty).join('<br>')}</td>
+      <td class="num" data-l="Сумма">${fmt(s.total)}</td><td data-l="Оплата">${s.sale_payments.map(p=>PAY[p.method]+(p.certificate_code?' '+esc(p.certificate_code):'')).join(', ')}</td>
+      <td data-l="Клиент">${s.customers?esc(s.customers.phone):'—'}</td>
+      <td class="mc-a">${s.kind==='sale'&&!s.is_certificate_sale?`<button class="btn small" data-ret="${s.id}">Возврат</button>`:''}</td></tr>`).join('')}</tbody></table></div>${S.salesTotal>S.sales.length?`<button class="btn" id="sf-more" style="width:100%;margin-top:8px">Показать ещё</button>`:''}`
     : '<div class="empty">Чеков по этим условиям нет</div>'}`;
 }
 function openReturn(id){
@@ -543,10 +550,10 @@ function renderStock(){
         return sel('category','Все категории',(o.categories||[]).map(c=>[c.id,c.name])) + sel('material','Все материалы',(o.materials||[]).map(m=>[m,m])) + sel('color','Все цвета',(o.colors||[]).map(m=>[m,m]))
           + (Object.values(f).some(Boolean)?'<button class="btn small" id="stf-clear">Сбросить фильтры</button>':''); })()}</div>
     <p class="meta">${S.stockQ.trim()||Object.values(S.stockF||{}).some(Boolean)?'Найдено '+S.stockRows.length+(S.stockRows.length===300?' (показаны первые 300)':''):'300 товаров'}: ${S.stockSort==='name'?'по названию':(S.stockDir==='asc'?'от меньшего остатка к большему':'от большего остатка к меньшему')+' '+(sortCol?'в магазине '+esc(storeName(sortCol)):'по всей сети')}. Нажмите на заголовок столбца, чтобы сортировать по нему; повторное нажатие — в обратную сторону.${S.stockDir==='asc'&&S.stockSort!=='name'?' Товары с нулевым остатком не показываются.':''}</p>
-    ${S.stockRows.length?`<div class="scroll"><table><thead><tr>${th('name','Товар')}${S.allStores.map(st=>th(st.id, esc(BRAND[st.brand])+'<br>'+esc(st.address))).join('')}${th('total','Всего')}<th></th></tr></thead><tbody>
+    ${S.stockRows.length?`<div class="scroll"><table class="mc"><thead><tr>${th('name','Товар')}${S.allStores.map(st=>th(st.id, esc(BRAND[st.brand])+'<br>'+esc(st.address))).join('')}${th('total','Всего')}<th></th></tr></thead><tbody>
     ${S.stockRows.map(p=>{ const st=S.stock[p.id]||{}; const qs=S.allStores.map(x=>st[x.id]||0);
-      return `<tr><td><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)} · ${fmt(p.price)}</span></td>${qs.map((n,i)=>`<td class="num" style="${n?'':'color:var(--muted)'};${S.allStores[i].id===sortCol?'background:var(--soft)':''}">${n}</td>`).join('')}
-      <td class="num" style="${sortCol?'':'background:var(--soft)'}"><b>${qs.reduce((a,b)=>a+b,0)}</b></td><td><button class="btn small" data-hist="${p.id}">История</button></td></tr>`}).join('')}</tbody></table></div>`
+      return `<tr><td class="mc-t"><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)} · ${fmt(p.price)}</span></td>${qs.map((n,i)=>`<td class="num" data-l="${esc(BRAND[S.allStores[i].brand]+' '+S.allStores[i].address)}" style="${n?'':'color:var(--muted)'};${S.allStores[i].id===sortCol?'background:var(--soft)':''}">${n}</td>`).join('')}
+      <td class="num" data-l="Всего" style="${sortCol?'':'background:var(--soft)'}"><b>${qs.reduce((a,b)=>a+b,0)}</b></td><td class="mc-a"><button class="btn small" data-hist="${p.id}">История</button></td></tr>`}).join('')}</tbody></table></div>`
     : '<div class="empty">Загружаем остатки…</div>'}`;
 }
 async function openHistory(pid){
@@ -1318,16 +1325,16 @@ function renderNom(){
     ${nmCanEdit()&&Object.keys(f.sel||{}).length?`<div class="cust row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;margin-bottom:8px"><b>Выбрано: ${Object.keys(f.sel).length}</b>
       <select id="nm-bulkcat"><option value="">Назначить категорию…</option>${cats.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
       <button class="btn small primary" id="nm-bulk-go">Применить</button><button class="btn small" id="nm-bulk-grp" title="Под каждым из этих штрихкодов много разных изделий одной цены">Отметить как общий штрихкод</button><button class="btn small" id="nm-bulk-arch" data-arch="1">🗄 В архив</button>${(f.data&&f.data.rows||[]).some(p=>f.sel[p.id]&&p.archived)?'<button class="btn small" id="nm-bulk-unarch" data-arch="0">Вернуть из архива</button>':''}<button class="btn small" id="nm-bulk-clear">Снять выбор</button></div>`:''}
-    <div class="scroll"><table class="nm-table"><thead><tr>${nmCanEdit()?`<th style="width:28px;padding-right:0"><input type="checkbox" id="nm-selall" title="Выбрать все на странице" ${D.rows.length&&D.rows.every(p=>(f.sel||{})[p.id])?'checked':''}></th>`:''}<th style="white-space:nowrap"><label class="meta" style="display:inline-flex;gap:4px;align-items:center;cursor:pointer;font-weight:400" title="Показать только товары с фото"><input type="checkbox" id="nm-withphoto" ${f.flag==='photo'?'checked':''}>с фото</label></th>${[['name','Название'],['category','Категория'],['barcode','Штрихкод'],['cost','Закуп'],['price','Цена'],['stock','Остаток'],['site','Сайт']].map(([k,v])=>`<th><button data-nmsort="${k}" style="border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;white-space:nowrap" title="Сортировать">${v} ${f.sort===k?(f.desc?'▼':'▲'):'<span class="meta">↕</span>'}</button></th>`).join('')}</tr></thead><tbody>
+    <div class="scroll"><table class="nm-table mc"><thead><tr>${nmCanEdit()?`<th style="width:28px;padding-right:0"><input type="checkbox" id="nm-selall" title="Выбрать все на странице" ${D.rows.length&&D.rows.every(p=>(f.sel||{})[p.id])?'checked':''}></th>`:''}<th style="white-space:nowrap"><label class="meta" style="display:inline-flex;gap:4px;align-items:center;cursor:pointer;font-weight:400" title="Показать только товары с фото"><input type="checkbox" id="nm-withphoto" ${f.flag==='photo'?'checked':''}>с фото</label></th>${[['name','Название'],['category','Категория'],['barcode','Штрихкод'],['cost','Закуп'],['price','Цена'],['stock','Остаток'],['site','Сайт']].map(([k,v])=>`<th><button data-nmsort="${k}" style="border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;white-space:nowrap" title="Сортировать">${v} ${f.sort===k?(f.desc?'▼':'▲'):'<span class="meta">↕</span>'}</button></th>`).join('')}</tr></thead><tbody>
     ${D.rows.map(p=>{ const inc = (S.inc||{})[p.id], L = (p.sites||[]).filter(x=>x.url);
-      return `<tr style="${e&&e.id===p.id?'background:var(--soft)':p.archived?'background:rgba(128,128,128,.18);color:var(--muted,#888)':''}">${nmCanEdit()?`<td style="width:28px;padding-right:0;vertical-align:middle"><input type="checkbox" data-nmsel="${p.id}" ${(f.sel||{})[p.id]?'checked':''}></td>`:''}<td>${thumb(p)}</td>
-      <td style="min-width:200px"><button class="linkbtn" data-nmopen="${p.id}" style="border:0;background:none;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit"><b>${esc(p.name)}</b></button>${p.archived?' <span class="chip zero">архив</span>':''}${p.is_group?' <span class="chip">общий штрихкод</span>':''}${p.is_service?' <span class="chip">услуга</span>':''}<br><span class="meta">${esc([{moon:'MOON',sunshine:'Sunshine',both:'MOON и Sunshine'}[p.brand]||'', p.color, p.material].filter(Boolean).join(' · '))}</span></td>
-      <td>${nmCanEdit()?`<select data-nmcat="${p.id}" style="max-width:170px;${p.category_id?'':'border-color:var(--warn,#d90)'}"><option value="">— без категории —</option>${cats.map(c=>`<option value="${c.id}" ${p.category_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`:esc(p.category||'—')}</td>
-      <td class="num">${esc(p.barcode)}${p.sku?'<br><span class="meta">арт. '+esc(p.sku)+'</span>':''}</td>
-      <td class="num">${p.cost!=null&&p.cost!==''?fmt(p.cost):'<span class="meta">—</span>'}</td>
-      <td class="num">${+p.price>0?fmt(p.price):p.is_service?'<span class="meta">сумма при продаже</span>':'<span class="chip warn">нет цены</span>'}</td>
-      <td class="num"><span class="nm-st" tabindex="0">${p.stock>0?'<span class="chip ok">есть '+p.stock+'</span>':'<span class="chip zero">нет</span>'}<span class="nm-st-pop">${S.allStores.map(st=>{ const q = +((p.by_store||{})[st.id]||0); return `<span class="row" style="gap:12px;${q?'':'opacity:.5'}"><span>${esc(BRAND[st.brand]+' · '+st.address)}</span><b class="num">${q}</b></span>`; }).join('')}</span></span>${inc&&((inc.ordered||0)+(inc.transit||0))?`<br><span class="meta">заказано ${(inc.ordered||0)+(inc.transit||0)}</span>`:''}</td>
-      <td style="white-space:nowrap">${p.is_group?'<span class="meta">не для сайта</span>':L.length?['moon','sunshine'].map(sk=>{ const X = L.filter(x=>x.site===sk); return X.length ? `<a href="${esc(X[0].url)}" target="_blank" rel="noopener">${sk==='moon'?'MOON':'Sunshine'}</a>${X.length>1?` <span class="meta">· ${X.length} карточек</span>`:''}${X.some(x=>x.status==='review')?' <span class="meta">(не проверено)</span>':''}` : ''; }).filter(Boolean).join('<br>'):'<span class="meta">нет на сайте</span>'}</td></tr>`; }).join('') || `<tr><td colspan="${nmCanEdit()?9:8}" class="empty">Ничего не найдено</td></tr>`}</tbody></table></div>
+      return `<tr style="${e&&e.id===p.id?'background:var(--soft)':p.archived?'background:rgba(128,128,128,.18);color:var(--muted,#888)':''}">${nmCanEdit()?`<td class="mc-x" style="width:28px;padding-right:0;vertical-align:middle"><input type="checkbox" data-nmsel="${p.id}" ${(f.sel||{})[p.id]?'checked':''}></td>`:''}<td data-l="">${thumb(p)}</td>
+      <td class="mc-t" style="min-width:200px"><button class="linkbtn" data-nmopen="${p.id}" style="border:0;background:none;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit"><b>${esc(p.name)}</b></button>${p.archived?' <span class="chip zero">архив</span>':''}${p.is_group?' <span class="chip">общий штрихкод</span>':''}${p.is_service?' <span class="chip">услуга</span>':''}<br><span class="meta">${esc([{moon:'MOON',sunshine:'Sunshine',both:'MOON и Sunshine'}[p.brand]||'', p.color, p.material].filter(Boolean).join(' · '))}</span></td>
+      <td data-l="Категория">${nmCanEdit()?`<select data-nmcat="${p.id}" style="max-width:170px;${p.category_id?'':'border-color:var(--warn,#d90)'}"><option value="">— без категории —</option>${cats.map(c=>`<option value="${c.id}" ${p.category_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>`:esc(p.category||'—')}</td>
+      <td class="num" data-l="Штрихкод">${esc(p.barcode)}${p.sku?'<br><span class="meta">арт. '+esc(p.sku)+'</span>':''}</td>
+      <td class="num" data-l="Закуп">${p.cost!=null&&p.cost!==''?fmt(p.cost):'<span class="meta">—</span>'}</td>
+      <td class="num" data-l="Цена">${+p.price>0?fmt(p.price):p.is_service?'<span class="meta">сумма при продаже</span>':'<span class="chip warn">нет цены</span>'}</td>
+      <td class="num" data-l="Остаток"><span class="nm-st" tabindex="0">${p.stock>0?'<span class="chip ok">есть '+p.stock+'</span>':'<span class="chip zero">нет</span>'}<span class="nm-st-pop">${S.allStores.map(st=>{ const q = +((p.by_store||{})[st.id]||0); return `<span class="row" style="gap:12px;${q?'':'opacity:.5'}"><span>${esc(BRAND[st.brand]+' · '+st.address)}</span><b class="num">${q}</b></span>`; }).join('')}</span></span>${inc&&((inc.ordered||0)+(inc.transit||0))?`<br><span class="meta">заказано ${(inc.ordered||0)+(inc.transit||0)}</span>`:''}</td>
+      <td data-l="Сайт" style="white-space:nowrap">${p.is_group?'<span class="meta">не для сайта</span>':L.length?['moon','sunshine'].map(sk=>{ const X = L.filter(x=>x.site===sk); return X.length ? `<a href="${esc(X[0].url)}" target="_blank" rel="noopener">${sk==='moon'?'MOON':'Sunshine'}</a>${X.length>1?` <span class="meta">· ${X.length} карточек</span>`:''}${X.some(x=>x.status==='review')?' <span class="meta">(не проверено)</span>':''}` : ''; }).filter(Boolean).join('<br>'):'<span class="meta">нет на сайте</span>'}</td></tr>`; }).join('') || `<tr><td colspan="${nmCanEdit()?9:8}" class="empty">Ничего не найдено</td></tr>`}</tbody></table></div>
     ${nmPagerHtml(f, D)}`}`;
   nmModalSync(e, f, cats, inp);
 }
@@ -1749,12 +1756,12 @@ const stSortTh = (f, k, v) => `<button data-stsort="${k}" style="border:0;backgr
 function siteBaseOnlyHtml(f){
   const L = f.base || [];
   return `<p class="meta">Товары из базы, у которых нет карточки на сайте ${esc(SITE_NAME[f.site]||f.site)}. Сверху — те, что есть в наличии. Если карточка на сайте всё-таки есть — нажмите «Найти на сайте» и свяжите.</p>
-  ${!f.data?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Здесь пусто</div>':`<div class="scroll"><table><thead><tr><th></th>${[['name','Товар'],['category','Категория'],['barcode','Штрихкод'],['price','Цена'],['stock','Остаток']].map(([k,v])=>`<th>${stSortTh(f,k,v)}</th>`).join('')}<th></th></tr></thead><tbody>
-  ${L.map(p=>`<tr><td>${thumb(p)}</td><td><b>${esc(p.name)}</b>${p.is_group?' <span class="chip">общий штрихкод</span>':''}</td><td>${esc(p.category||'—')}</td><td class="num">${esc(p.barcode)}</td><td class="num">${fmt(p.price)}</td>
-    <td class="num">${p.stock>0?'<span class="chip ok">'+p.stock+'</span>':'<span class="meta">0</span>'}</td>
-    <td style="white-space:nowrap">${wiponOk()&&!isViewer()?`<button class="btn small" data-stbfind="${p.id}">${f.bfind===p.id?'Скрыть':'Найти на сайте'}</button>
+  ${!f.data?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Здесь пусто</div>':`<div class="scroll"><table class="mc"><thead><tr><th></th>${[['name','Товар'],['category','Категория'],['barcode','Штрихкод'],['price','Цена'],['stock','Остаток']].map(([k,v])=>`<th>${stSortTh(f,k,v)}</th>`).join('')}<th></th></tr></thead><tbody>
+  ${L.map(p=>`<tr><td data-l="">${thumb(p)}</td><td class="mc-t"><b>${esc(p.name)}</b>${p.is_group?' <span class="chip">общий штрихкод</span>':''}</td><td data-l="Категория">${esc(p.category||'—')}</td><td class="num" data-l="Штрихкод">${esc(p.barcode)}</td><td class="num" data-l="Цена">${fmt(p.price)}</td>
+    <td class="num" data-l="Остаток">${p.stock>0?'<span class="chip ok">'+p.stock+'</span>':'<span class="meta">0</span>'}</td>
+    <td class="mc-a" style="white-space:nowrap">${wiponOk()&&!isViewer()?`<button class="btn small" data-stbfind="${p.id}">${f.bfind===p.id?'Скрыть':'Найти на сайте'}</button>
       ${p.is_group?`<button class="btn small" data-stbgrp="${p.id}" data-on="0" title="Снять отметку">✓ общий штрихкод</button>`:`<button class="btn small" data-stbgrp="${p.id}" data-on="1" title="Под этим штрихкодом много разных изделий одной цены">Отметить как общий штрихкод</button>`}`:''}</td></tr>
-    ${f.bfind===p.id?`<tr><td></td><td colspan="6"><div class="cust stack" style="gap:4px"><input id="st-bq" placeholder="Название карточки на сайте" value="${esc(f.bq||'')}" autocomplete="off">
+    ${f.bfind===p.id?`<tr><td data-l=""></td><td class="mc-t" colspan="6"><div class="cust stack" style="gap:4px"><input id="st-bq" placeholder="Название карточки на сайте" value="${esc(f.bq||'')}" autocomplete="off">
       ${(f.bfound||[]).filter(x=>x.site===f.site).map(x=>`<button class="prod" data-stblink="${x.site}:${x.uid}" data-pid="${p.id}">${thumb({photo_url:x.photo})}<span><b>${esc(x.title)}</b><br><span class="meta">${x.linked_to?'сейчас связан с: '+esc(x.linked_to):'не связан'}</span></span><span class="price num">${fmt(x.price)}</span></button>`).join('')}</div></td></tr>`:''}`).join('')}</tbody></table></div>
   ${f.off||L.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-stpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+L.length} из ${f.baseTotal}</span><button class="btn" data-stpage="1" ${L.length===50?'':'disabled'}>Дальше</button></div>`:''}`}`;
 }
@@ -2456,7 +2463,7 @@ function renderPo(){
         <div class="meta">${dshort(o.created_at)}${o.source==='1688'?' · Китай №'+esc(o.ext_no):o.source==='alibaba'?' · Alibaba №'+esc(o.ext_no):''}${o.track?' · трек '+esc(o.track):''}${o.eta?' · ждём к '+dshort(o.eta):''}${o.received_at?' · получен '+dshort(o.received_at):''}${noZh(o.note)&&!/Китай №/.test(o.note)?' · '+esc(o.note):''}</div>
         <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px;justify-content:flex-start"><button class="btn small" data-poopen="${o.id}" style="border:0;background:none;padding:0;font-weight:600">${open?'▾':'▸'} ${(o.items||[]).length} поз. · ${units} шт. · ${fmt(goods)}</button>
           ${nl?`<span class="chip zero">не связано: ${nl}</span>`:''}${!open?`<span style="display:flex;gap:3px">${(o.items||[]).slice(0,10).map(i=>thumb(i)).join('')}${(o.items||[]).length>10?`<span class="meta">+${(o.items||[]).length-10}</span>`:''}</span>`:''}</div>
-        ${open?`<div class="scroll" style="margin-top:6px"><table><tbody>${(o.items||[]).map(i=>poItemRow(o,i)).join('')}</tbody></table></div>`:''}
+        ${open?`<div class="scroll" style="margin-top:6px"><table class="mc"><tbody>${(o.items||[]).map(i=>poItemRow(o,i)).join('')}</tbody></table></div>`:''}
         ${PO.rcv&&PO.rcv.id===o.id?poRcvHtml(o):''}
         <div class="row" style="flex-wrap:wrap;margin-top:6px"><span class="meta">${open?`${o.currency&&o.currency!=='KZT'?'курс '+o.currency+' '+(+o.rate).toFixed(2)+' · ':''}${+o.cargo?'доставка по Китаю '+(+o.cargo).toLocaleString('ru-RU')+' '+(CUR[o.currency]||'₸')+' · ':''}+${o.delivery_pct??10}% до Казахстана`:''}</span>
           <span>${poEdit()&&o.status==='ordered'?`<button class="btn small" data-postatus="${o.id}:transit">Отправлен — в пути</button>`:''}
@@ -2494,9 +2501,9 @@ function renderPo(){
     const bySup = PO.sgrp==='sup', gk = p => bySup ? (p.sup||'') : p.cat;
     const groups = L ? [...L.reduce((m,p)=>{ (m.get(gk(p)) || m.set(gk(p), []).get(gk(p))).push(p); return m; }, new Map())].sort((a,b)=> bySup ? ((!a[0])-(!b[0]) || b[1].reduce((s,p)=>s+(+p.need||0),0)-a[1].reduce((s,p)=>s+(+p.need||0),0)) : b[1].length-a[1].length) : [];
     const gTitle = (k, ps) => !bySup ? esc(k) : !k ? 'Поставщик не известен' : esc(ps[0].sup_ru && !/[\u4e00-\u9fff]/.test(ps[0].sup_ru) ? ps[0].sup_ru : 'Поставщик из Китая');
-    const row = p => `<tr><td>${thumb(p)}</td><td>${esc(p.name)}<br><span class="meta num">${esc(p.barcode)}${p.cost?' · закуп '+fmt(p.cost):''}</span>${p.purchase_url?` · <a href="${esc(p.purchase_url)}" target="_blank" rel="noopener" class="meta">у поставщика ↗</a>`:''}</td>
-        <td class="num">${p.sold30}</td><td class="num" ${p.stock<=0?'style="color:var(--bad)"':''}>${p.stock}${p.days_left!=null?`<br><span class="meta">на ${p.days_left} дн.</span>`:''}</td><td class="num">${p.incoming||'—'}</td><td class="num"><b>${p.need}</b></td>
-        <td>${poEdit()?`<button class="btn small" data-posug="${p.id}" data-need="${p.need}" data-cost="${p.cost??''}">В заказ</button>`:''}</td></tr>`;
+    const row = p => `<tr><td data-l="">${thumb(p)}</td><td class="mc-t">${esc(p.name)}<br><span class="meta num">${esc(p.barcode)}${p.cost?' · закуп '+fmt(p.cost):''}</span>${p.purchase_url?` · <a href="${esc(p.purchase_url)}" target="_blank" rel="noopener" class="meta">у поставщика ↗</a>`:''}</td>
+        <td class="num" data-l="Продано 30 дн.">${p.sold30}</td><td class="num" data-l="Остаток" ${p.stock<=0?'style="color:var(--bad)"':''}>${p.stock}${p.days_left!=null?`<br><span class="meta">на ${p.days_left} дн.</span>`:''}</td><td class="num" data-l="Едет">${p.incoming||'—'}</td><td class="num" data-l="Дозаказать"><b>${p.need}</b></td>
+        <td class="mc-a">${poEdit()?`<button class="btn small" data-posug="${p.id}" data-need="${p.need}" data-cost="${p.cost??''}">В заказ</button>`:''}</td></tr>`;
     body = `<p class="meta" style="margin:0 0 8px">Товары, которые продавались за 30 дней и которых не хватит на следующие 30 дней (с учётом того, что уже едет). Выберите категорию или найдите по слову — например «краб», «кольцо», «жемчуг».</p>
     <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:8px"><input id="po-sq" type="search" placeholder="🔍 Слово из названия или штрихкод" value="${esc(PO.sq||'')}" style="flex:1;min-width:220px" autocomplete="off">
       <span class="meta">Группировать:</span><div class="seg"><button data-posgrpby="cat" aria-pressed="${!bySup}">по категориям</button><button data-posgrpby="sup" aria-pressed="${bySup}">по поставщикам</button></div></div>
@@ -2504,7 +2511,7 @@ function renderPo(){
     ${!A?'<div class="empty">Считаем…</div>':!L.length?'<div class="empty">Ничего не найдено</div>':groups.map(([c,ps])=>`<details class="card" style="margin-bottom:8px;padding:8px 12px" ${groups.length===1||(PO.sopen||{})[(bySup?'s:':'')+c]?'open':''} data-posgrp="${esc((bySup?'s:':'')+c)}"><summary style="cursor:pointer;font-weight:600">${gTitle(c, ps)} <span class="meta">· ${ps.length} поз. · дозаказать ${ps.reduce((a,p)=>a+(+p.need||0),0)} шт.</span></summary>
       ${bySup&&c?`<div class="row" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px">${ps[0].sup_url?`<a class="btn small" href="${esc(ps[0].sup_url)}" target="_blank" rel="noopener">Магазин ↗</a>`:''}${poEdit()?`<button class="btn small primary" data-posupall="${esc(c)}">Сформировать заказ у этого поставщика (${ps.length} поз.)</button>`:''}</div>`:''}
       ${bySup&&!c?'<div class="meta" style="margin-top:6px">У этих товаров нет связи с заказами из Китая — поставщик не определён. Ссылка «у поставщика ↗» ведёт на товар.</div>':''}
-      <div class="scroll" style="margin-top:6px"><table><thead><tr><th></th><th>Товар</th><th>Продано 30 дн.</th><th>Остаток</th><th>Едет</th><th>Дозаказать</th><th></th></tr></thead><tbody>${ps.map(row).join('')}</tbody></table></div></details>`).join('')}`;
+      <div class="scroll" style="margin-top:6px"><table class="mc"><thead><tr><th></th><th>Товар</th><th>Продано 30 дн.</th><th>Остаток</th><th>Едет</th><th>Дозаказать</th><th></th></tr></thead><tbody>${ps.map(row).join('')}</tbody></table></div></details>`).join('')}`;
   }
   if(PO.mode==='sup'){
     const A = PO.sups, q = (PO.supq||'').trim().toLowerCase();
@@ -2512,10 +2519,10 @@ function renderPo(){
     const L = A && A.filter(s => !q || [s.name, s.ru, s.alias, s.login, s.contact, s.notes].filter(Boolean).join(' ').toLowerCase().includes(q));
     body = `<p class="meta" style="margin:0 0 8px">Все поставщики из заказов. Нажмите ✎, чтобы дать понятное название, записать контакт и заметки. «Магазин ↗» открывает магазин поставщика.</p>
     <div class="row" style="margin-bottom:8px"><input id="po-supq" type="search" placeholder="🔍 Поиск поставщика" value="${esc(PO.supq||'')}" style="flex:1" autocomplete="off"></div>
-    ${!A?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Не найдено</div>':`<div class="scroll"><table><thead><tr><th>Поставщик</th><th>Заказов</th><th>Последний</th><th>Сумма</th><th></th></tr></thead><tbody>
-      ${L.slice(0, PO.supLim||100).map(s=>`<tr><td><b>${esc(nm(s))}</b>${s.alias&&noZh(s.ru)?`<br><span class="meta">${esc(s.ru)}</span>`:''}${nm(s)===s.name?' <span class="meta">(перевода ещё нет)</span>':''}${s.contact?`<br><span class="meta">📞 ${esc(s.contact)}</span>`:''}${s.notes?`<br><span class="meta">${esc(s.notes)}</span>`:''}</td>
-        <td class="num">${s.orders}${s.open?`<br><span class="meta">в пути ${s.open}</span>`:''}</td><td class="num">${dshort(s.last)}</td><td class="num">${fmt(s.goods)}</td>
-        <td style="white-space:nowrap">${s.shop_url||s.url?`<a class="btn small" href="${esc(s.shop_url||s.url)}" target="_blank" rel="noopener">Магазин ↗</a> `:''}<button class="btn small" data-supoq="${esc(s.name)}" title="Заказы этого поставщика">Заказы</button> ${poEdit()?`<button class="btn small" data-supedit="${esc(s.name)}">✎</button>`:''}</td></tr>`).join('')}</tbody></table></div>
+    ${!A?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Не найдено</div>':`<div class="scroll"><table class="mc"><thead><tr><th>Поставщик</th><th>Заказов</th><th>Последний</th><th>Сумма</th><th></th></tr></thead><tbody>
+      ${L.slice(0, PO.supLim||100).map(s=>`<tr><td class="mc-t"><b>${esc(nm(s))}</b>${s.alias&&noZh(s.ru)?`<br><span class="meta">${esc(s.ru)}</span>`:''}${nm(s)===s.name?' <span class="meta">(перевода ещё нет)</span>':''}${s.contact?`<br><span class="meta">📞 ${esc(s.contact)}</span>`:''}${s.notes?`<br><span class="meta">${esc(s.notes)}</span>`:''}</td>
+        <td class="num" data-l="Заказов">${s.orders}${s.open?`<br><span class="meta">в пути ${s.open}</span>`:''}</td><td class="num" data-l="Последний">${dshort(s.last)}</td><td class="num" data-l="Сумма">${fmt(s.goods)}</td>
+        <td class="mc-a" style="white-space:nowrap">${s.shop_url||s.url?`<a class="btn small" href="${esc(s.shop_url||s.url)}" target="_blank" rel="noopener">Магазин ↗</a> `:''}<button class="btn small" data-supoq="${esc(s.name)}" title="Заказы этого поставщика">Заказы</button> ${poEdit()?`<button class="btn small" data-supedit="${esc(s.name)}">✎</button>`:''}</td></tr>`).join('')}</tbody></table></div>
       ${L.length>(PO.supLim||100)?`<button class="btn" id="po-supmore" style="width:100%;margin-top:6px">Показать ещё (${L.length-(PO.supLim||100)})</button>`:''}`}`;
   }
   if(PO.mode==='an'){
@@ -2747,12 +2754,20 @@ function pulseHtml(P){
       ${tile('Чеков сегодня', C.toLocaleString('ru-RU'), T&&C?'средний чек '+fmt(Math.round(T/C)):'')}
       ${tile('С начала месяца', fmt(M), `${chip(pct(M,MP))} к тому же периоду прошлого месяца`)}${aiTile(P)}</div>
     <h3 style="margin:16px 0 6px">Магазины</h3>
-    <div class="scroll"><table><thead><tr><th>Магазин</th><th>Сегодня</th><th>Неделю назад</th><th></th><th>Месяц</th><th></th><th title="Сколько нужно продать за месяц, чтобы покрыть аренду, коммуналку и расходы магазина">Безубыточность в месяц</th><th title="Остаток по последней странице тетради + наличные продажи Wipon после неё − расходы, внесённые в Silver">Наличные в кассе</th><th>Возвраты 2 дня</th><th>Чеки Wipon</th><th>Остатки Wipon</th></tr></thead><tbody>
+    ${isPhone()?`<div class="pc-list">${St.map(x=>`<div class="pc"><div class="pc-h">${esc(BRAND[x.brand]+' · '+x.address)}</div><div class="pc-g">
+      <div><span class="pc-l">Сегодня</span><b class="num">${fmt(x.today)}</b>${chip(pct(+x.today,+x.week_ago))}</div>
+      <div><span class="pc-l">Месяц</span><b class="num">${fmt(x.mtd)}</b>${chip(pct(+x.mtd,+x.mtd_prev))}</div>
+      <div><span class="pc-l">Наличные в кассе</span><b class="num">${(()=>{ const c = (DAY.cash||{})[x.id]; return !c?'…':c.est_kzt==null?'нет данных':fmt(c.est_kzt)+(+c.snap_usd?' · $'+(+c.snap_usd).toLocaleString('ru-RU'):''); })()}</b></div>
+      <div><span class="pc-l">Безубыточность</span><b>${beCell(x)}</b></div>
+      <div><span class="pc-l">Возвраты 2 дня</span><b class="num">${+x.returns_2d?'<span class="chip warn">'+x.returns_2d+'</span>':'0'}</b></div>
+      <div><span class="pc-l">Wipon чеки · остатки</span><b>${fresh(x.sync_sales)} ${fresh(x.sync_stock)}</b></div></div></div>`).join('')}</div>`:`<div class="scroll"><table><thead><tr><th>Магазин</th><th>Сегодня</th><th>Неделю назад</th><th></th><th>Месяц</th><th></th><th title="Сколько нужно продать за месяц, чтобы покрыть аренду, коммуналку и расходы магазина">Безубыточность в месяц</th><th title="Остаток по последней странице тетради + наличные продажи Wipon после неё − расходы, внесённые в Silver">Наличные в кассе</th><th>Возвраты 2 дня</th><th>Чеки Wipon</th><th>Остатки Wipon</th></tr></thead><tbody>
       ${St.map(x=>`<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td class="num"><b>${fmt(x.today)}</b></td><td class="num meta">${fmt(x.week_ago)}</td><td>${chip(pct(+x.today,+x.week_ago))}</td>
-        <td class="num">${fmt(x.mtd)}</td><td>${chip(pct(+x.mtd,+x.mtd_prev))}</td><td>${beCell(x)}</td><td style="min-width:150px">${cashCell(x)}</td><td class="num">${+x.returns_2d?'<span class="chip warn">'+x.returns_2d+'</span>':'0'}</td><td>${fresh(x.sync_sales)}</td><td>${fresh(x.sync_stock)}</td></tr>`).join('')}</tbody></table></div>
+        <td class="num">${fmt(x.mtd)}</td><td>${chip(pct(+x.mtd,+x.mtd_prev))}</td><td>${beCell(x)}</td><td style="min-width:150px">${cashCell(x)}</td><td class="num">${+x.returns_2d?'<span class="chip warn">'+x.returns_2d+'</span>':'0'}</td><td>${fresh(x.sync_sales)}</td><td>${fresh(x.sync_stock)}</td></tr>`).join('')}</tbody></table></div>`}
     ${(()=>{ const C = Object.values(DAY.cash||{}).filter(c=>c.est_kzt!=null); if(!C.length) return ''; const k = C.reduce((a,c)=>a+(+c.est_kzt||0),0), u = C.reduce((a,c)=>a+(+c.snap_usd||0),0);
-      return `<p style="margin:8px 0 0"><b>Наличных по сети ≈ ${fmt(k)}${u?' и $'+u.toLocaleString('ru-RU'):''}</b> <span class="meta">— остаток по тетрадям + наличные продажи Wipon после них; расходы учтены, только если внесены в Silver</span></p>`; })()}
-    <p class="meta" style="margin:6px 0 0">Безубыточность = (аренда, коммуналка и другие расходы из «Рентабельности» + хозрасходы магазина из журнала «Расходы магазинов», в среднем за 3 мес.) ÷ доля, что остаётся с продажи после себестоимости и налога (по продажам за 90 дней). Зарплаты пока не учтены — впишите их в расходы магазина, и точка станет точной.</p>
+      return `<p style="margin:8px 0 0"><b>Наличных по сети ≈ ${fmt(k)}${u?' и $'+u.toLocaleString('ru-RU'):''}</b></p>`; })()}
+    <details style="margin:6px 0 0"><summary class="meta" style="cursor:pointer">Как считается?</summary>
+    <p class="meta" style="margin:6px 0 0">Наличные в кассе = остаток по последней странице тетради + наличные продажи Wipon после неё − расходы и сдача денег, внесённые в Silver. Расходы учтены, только если внесены в Silver, — реальная сумма может быть меньше.</p>
+    <p class="meta" style="margin:6px 0 0">Безубыточность = (аренда, коммуналка и другие расходы из «Рентабельности» + хозрасходы магазина из журнала «Расходы магазинов», в среднем за 3 мес.) ÷ доля, что остаётся с продажи после себестоимости и налога (по продажам за 90 дней). Зарплаты пока не учтены — впишите их в расходы магазина, и точка станет точной.</p></details>
     <h3 style="margin:16px 0 6px">Где застряла работа <span class="meta">— только просрочки и то, что не в списках команды</span></h3>
     ${stuck.length?`<div class="stack" style="gap:6px">${stuck.map(([n,t,v])=>`<div class="card row" style="flex-wrap:wrap;gap:8px;padding:8px 12px"><span style="flex:1;min-width:200px">${t}</span><span class="chip warn">${(+n).toLocaleString('ru-RU')}</span><button class="btn small" data-pulsego="${v}">Открыть →</button></div>`).join('')}</div>`:'<div class="card">✅ Ничего не застряло</div>'}
     <h3 style="margin:16px 0 6px">Ходовые товары закончились <span class="meta">— продавались за 30 дней, на остатке 0</span></h3>
@@ -3141,7 +3156,10 @@ document.addEventListener('keydown', e => {
 });
 // при переключении вкладок подгружаем данные
 document.addEventListener('click', async e => {
+  if(e.target.closest('[data-moreclose]')){ S.moreOpen = false; renderNav(); return; }
   const b = e.target.closest('nav.tabs button, nav.subtabs button'); if(!b) return;
+  if(b.dataset.more){ S.moreOpen = !S.moreOpen; renderNav(); return; }
+  S.moreOpen = false;
   if(b.dataset.group){ const g = GROUPS.find(x=>x[0]===b.dataset.group), av = g[3].filter(v => (S.tabs||[]).some(t=>t[0]===v)); const last = (S.lastView||{})[g[0]]; S.view = av.includes(last) ? last : av[0]; }
   else S.view = b.dataset.view;
   render(); scrollTo(0,0); await loadView();
@@ -3439,7 +3457,7 @@ function poItemRow(o, i){
   const cur = CUR[o.currency||'KZT'] || '₸', open = ['ordered','transit'].includes(o.status), canLink = open && (poEdit() || (isBoss() && !isViewer()));
   const lnk = PO.lnk && PO.lnk.item===i.item_id;
   const cands = !i.product_id && canLink ? (i.candidates||[]) : [];
-  return `<tr><td>${thumb(i)}</td><td>${i.product_id?`<b>${esc(i.name)}</b><br><span class="meta num">${esc(i.barcode||'')}</span>`:`<span class="chip zero">не связан</span> <b>${esc(noZh(i.title_ru)||'товар из Китая')}</b>`}
+  return `<tr><td data-l="">${thumb(i)}</td><td class="mc-t">${i.product_id?`<b>${esc(i.name)}</b><br><span class="meta num">${esc(i.barcode||'')}</span>`:`<span class="chip zero">не связан</span> <b>${esc(noZh(i.title_ru)||'товар из Китая')}</b>`}
       ${cands.length?`<div class="meta" style="margin-top:4px">По этой же ссылке в базе ${cands.length===1?'есть товар':'есть товары'} — выберите нужный вариант:</div><div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:4px">${cands.map(p=>`<button class="btn small" data-polink="${i.item_id}:${p.id}" style="display:flex;gap:6px;align-items:center">${thumb(p)}<span style="text-align:left">${esc(p.name)}<br><span class="meta num">${esc(p.barcode)}</span></span></button>`).join('')}</div>`:''}
       ${poSpec(i)?`<br><span class="meta">${esc(poSpec(i))}</span>`:''}${i.purchase_url?` · <a href="${esc(i.purchase_url)}" target="_blank" rel="noopener" class="meta">у поставщика</a>`:''}
       ${canLink&&!i.product_id&&i.suggest?`<br><button class="btn small primary" data-polink="${i.item_id}:${i.suggest.id}">Связать с «${esc(i.suggest.name)}»</button>`:''}
@@ -3447,9 +3465,9 @@ function poItemRow(o, i){
       ${PO.mk&&PO.mk.item===i.item_id?poCreateHtml(o,i):''}
       ${lnk?`<div class="stack" style="gap:4px;margin-top:6px"><input id="po-lnk-q" placeholder="Штрихкод, артикул или название в нашей базе" value="${esc(PO.lnk.q)}" autocomplete="off">
         ${PO.lnk.found.slice(0,8).map(p=>`<button class="prod" data-polink="${i.item_id}:${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}</span></span><span class="price num">${fmt(p.price)}</span></button>`).join('')}</div>`:''}</td>
-    <td class="num">${i.qty} шт.${i.received_qty!=null&&i.received_qty!==i.qty?'<br><span class="meta">получено '+i.received_qty+'</span>':''}</td>
-    <td class="num">${i.price_cur!=null?(+i.price_cur).toLocaleString('ru-RU')+' '+cur:'—'}${i.unit_cost!=null&&o.currency!=='KZT'?'<br><span class="meta">≈ '+fmt(i.unit_cost)+'</span>':''}</td>
-    <td class="num">${i.landed_cost!=null?'<b>'+fmt(i.landed_cost)+'</b><br><span class="meta">себестоимость</span>':''}</td></tr>`;
+    <td class="num" data-l="Кол-во">${i.qty} шт.${i.received_qty!=null&&i.received_qty!==i.qty?'<br><span class="meta">получено '+i.received_qty+'</span>':''}</td>
+    <td class="num" data-l="Цена">${i.price_cur!=null?(+i.price_cur).toLocaleString('ru-RU')+' '+cur:'—'}${i.unit_cost!=null&&o.currency!=='KZT'?'<br><span class="meta">≈ '+fmt(i.unit_cost)+'</span>':''}</td>
+    <td class="num" data-l="Себест.">${i.landed_cost!=null?'<b>'+fmt(i.landed_cost)+'</b><br><span class="meta">себестоимость</span>':''}</td></tr>`;
 }
 function poRcvHtml(o){
   const r = PO.rcv, isK = (o.currency||'KZT')==='KZT', rt = isK ? 1 : (+r.rate||0), main = +(r.store||o.store||S.store);

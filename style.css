@@ -149,3 +149,60 @@ details.dd .dd-panel label:hover{background:var(--bg)}
 .fl-num{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
 .fl-bar{height:6px;border-radius:3px;background:var(--soft);overflow:hidden}.fl-bar span{display:block;height:100%;background:var(--ok)}
 .fl-idea{display:flex;flex-direction:column;gap:6px;border-left:4px solid #e2a400}.fl-idea.bad{border-left-color:var(--bad)}
+
+/* ===== телефон (≤760px): таблицы-карточки, карточки магазинов, меню «Ещё», окна во весь экран ===== */
+.pc-list{display:grid;gap:8px}
+.pc{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.pc-h{font-weight:700;font-size:15px;margin-bottom:6px}
+.pc-g{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px}
+.pc-l{display:block;font-size:11px;color:var(--muted)}
+.more-bg{position:fixed;inset:0;z-index:7;background:rgba(0,0,0,.35)}
+.more-sheet{position:fixed;left:8px;right:8px;bottom:calc(64px + env(safe-area-inset-bottom));z-index:8;background:var(--surface);border-radius:14px;padding:8px;
+  display:grid;grid-template-columns:1fr 1fr;gap:6px;box-shadow:0 10px 30px rgba(0,0,0,.2)}
+.more-sheet button{min-height:48px;border:1px solid var(--line);background:var(--bg);border-radius:10px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px}
+.dialog-foot{position:sticky;bottom:0;background:var(--surface);padding:10px;border-top:1px solid var(--line);margin:0 -16px -16px}
+
+@media (max-width:760px){
+  /* шапка компактнее */
+  header{padding:6px max(10px,env(safe-area-inset-right)) 6px max(10px,env(safe-area-inset-left));padding-top:calc(6px + env(safe-area-inset-top));gap:4px 8px}
+  header .who{font-size:12px;gap:6px}
+  header .who > span:not(.net):not(.chip){max-width:38vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  main{padding:10px max(10px,env(safe-area-inset-right)) 90px max(10px,env(safe-area-inset-left))}
+
+  /* нижнее меню: до 5 пунктов, без прокрутки */
+  nav.tabs{overflow:hidden}
+  nav.tabs button{flex:1 1 0;min-width:0;padding:7px 2px 9px;font-size:11px;min-height:48px}
+  nav.tabs button span:not(.ico){max-width:100%;overflow:hidden;text-overflow:ellipsis}
+
+  /* подвкладки: затухание по краям */
+  nav.subtabs{padding:8px max(10px,env(safe-area-inset-right)) 0 max(10px,env(safe-area-inset-left));
+    -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 14px,#000 calc(100% - 22px),transparent);mask-image:linear-gradient(90deg,transparent 0,#000 14px,#000 calc(100% - 22px),transparent)}
+  nav.subtabs button{min-height:38px}
+
+  /* пальцем попадать легче; 16px — без зума на iPhone */
+  .btn{min-height:42px}
+  .btn.small,.seg button{min-height:38px;padding:8px 12px}
+  input,select,textarea{font-size:16px}
+  .qty button{width:38px;height:38px}
+
+  /* таблицы .mc → карточки */
+  .scroll:has(> table.mc){overflow:visible;background:none;border:0;border-radius:0}
+  table.mc,table.mc tbody{display:block}
+  table.mc thead{display:none}
+  table.mc tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:2px 10px;padding:10px 12px;margin-bottom:8px;
+    background:var(--surface);border:1px solid var(--line);border-radius:12px;position:relative}
+  table.mc td{display:block;border:0;padding:0;min-width:0;overflow-wrap:anywhere}
+  table.mc td[data-l]::before{content:attr(data-l);display:block;font-size:12px;color:var(--muted);text-transform:none;letter-spacing:0}
+  table.mc td[data-l=""]::before{display:none}
+  table.mc td.mc-t{grid-column:1/-1;font-weight:700;font-size:15px;padding-right:34px}
+  table.mc td.mc-x{position:absolute;top:10px;right:12px}
+  table.mc td.mc-a{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  table.mc td:empty{display:none}
+
+  /* окна — во весь экран, кнопки внизу всегда видны */
+  .overlay{padding:0;place-items:stretch}
+  .dialog,.overlay .dialog[style]{max-width:none!important;width:100%;max-height:none;height:100dvh;border-radius:0;padding:14px 14px 0;padding-top:calc(14px + env(safe-area-inset-top))}
+  .dialog > :last-child{padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+  .dialog-foot{margin:0 -14px;padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+  #nm-modal .row:has(> span > #nm-save){position:sticky;bottom:0;z-index:2;background:var(--surface);margin:0 -14px;padding:10px 14px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
+}
