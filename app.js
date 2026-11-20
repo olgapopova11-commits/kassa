@@ -1630,7 +1630,7 @@ function wiponUpHtml(kind){
       ${S.allStores.map(x=>{ const l = last(x.id); return `<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td class="num">${l?wuDt(l.at):'—'}</td>${kind==='sales'?`<td class="num">${l&&l.to?wuDt(l.to):'—'}</td>`:''}<td>${l&&l.by?esc(l.by):'<span class="meta">—</span>'}</td></tr>`; }).join('')}</tbody></table></div>
     <div class="stack" style="margin-top:8px">
       ${kind==='sales'&&S.me.role==='owner'?`<div class="cust stack" style="gap:6px"><b>⚡ Автозагрузка прямо из кабинета Wipon — без Excel</b>
-        <span class="meta">1) Нажмите «Получить закладку» и перетащите появившуюся кнопку на панель закладок Chrome. 2) Откройте console.wipon.kz и нажмите эту закладку. Продажи за вчера и сегодня сразу попадут в Silver, дальше — каждые 15 минут, пока вкладка Wipon открыта. Внизу справа в Wipon будет видно время последней загрузки. Для второго ИП — войдите в его кабинет и нажмите закладку там же.</span>
+        <span class="meta">1) Нажмите «Получить закладку» и перетащите появившуюся кнопку на панель закладок Chrome. 2) Откройте console.wipon.kz и нажмите эту закладку. Чеки и возвраты за последние 3 дня сразу попадут в Silver, дальше — каждые 15 минут, а остатки по всем складам — раз в час, пока вкладка Wipon открыта. Внизу справа в Wipon видно время последней загрузки. Переключитесь в кабинете на второе ИП (внизу) хотя бы раз, пока работает закладка, — дальше оба ИП обновляются вместе. Если закладку обновили — перезагрузите страницу Wipon и нажмите её снова.</span>
         <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">${WU.bm?`<a class="btn small primary" href="${esc(WU.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Wipon</a><span class="meta">← перетащите на панель закладок</span>`:`<button class="btn small" id="wu-bm">Получить закладку</button>`}</div></div>`:''}
       <span class="meta">${kind==='sales'?'Выгрузите продажи магазина из Wipon за любой период и загрузите файл. Дубликатов не будет: Silver проверяет номер каждого чека Wipon и добавляет только те, которых ещё нет. Даже если тот же файл или пересекающийся период загрузят случайно ещё раз — повторные чеки просто пропустятся.':'Выгрузите остатки магазина из Wipon и загрузите файл. Остатки этого магазина в Silver станут такими же, как в файле. Новые штрихкоды добавятся в базу товаров.'}</span>
       <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px">
@@ -1640,20 +1640,58 @@ function wiponUpHtml(kind){
       <span class="meta">${kind==='sales'?'Магазин Silver определяет сам по продавцу в файле: «Мун А» — MOON Алматы, «Мун» — MOON Астана; если не понял — по уже загруженным чекам.':'Склад Silver берёт из самого файла: «Мун А» — MOON Алматы, «Мун» — MOON Астана, Sunshine — по адресу склада.'} Если не получится, напишет, и тогда выберите магазин вручную и загрузите тот файл ещё раз.</span>
       ${WU.open===kind&&WU.msg?`<div class="cust">${WU.msg}</div>`:''}</div></details>`;
 }
-/* закладка для кабинета Wipon: читает продажи за вчера+сегодня и отправляет в Silver; повтор каждые 15 минут */
-function wiponBookmarklet(key){
-  const code = `(()=>{if(window.__ss){window.__ss.run();return}const K='${key}',F='https://ottuadjdksxipfjytlyv.supabase.co/functions/v1/ingest?action=wipon_sales';`
-  + `const b=document.createElement('div');b.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99999;background:#1d2b4f;color:#fff;padding:8px 12px;border-radius:10px;font:13px sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3)';document.body.appendChild(b);`
-  + `const S=t=>{t=' '+String(t||'').toLowerCase().replace(/ё/g,'е').replace(/[_.,;:()"«»\\-]+/g,' ').replace(/\\s+/g,' ')+' ';const W='(?![а-яa-z])';if(new RegExp('(мун|moon)\\\\s*(а|a)'+W).test(t)||/(мун|moon)\\s*алмат/.test(t))return 6;if(/(мун|moon)\\s*астан/.test(t)||new RegExp('(мун|moon)'+W).test(t))return 7;if(/курмангаз/.test(t))return 1;if(/толе\\s*би/.test(t))return 2;if(/гагарин/.test(t))return 3;if(/республик/.test(t))return 4;if(/достык/.test(t))return 5;return null};`
-  + `const d=x=>new Date(x.getTime()+18e6).toISOString().slice(0,10);`
-  + `async function run(){try{b.textContent='Silver: загружаем продажи…';const v=JSON.parse(localStorage.getItem('vuex')),tk=v.user.token,emp=v.employee.item.id,now=new Date(),fr=d(new Date(now-864e5)),to=d(now);let p=1,all=[];`
-  + `for(;;){const r=await fetch('https://api.wipon.kz/v1/employee/'+emp+'/sale?date_from='+fr+'T00:00:00%2B05:00&date_to='+to+'T23:59:59%2B05:00&page='+p+'&per_page=100',{headers:{Accept:'application/json',Authorization:'Bearer '+tk}});if(!r.ok)throw Error('Wipon '+r.status);const j=await r.json();all.push(...j.data);if(p>=j.meta.last_page)break;p++}`
-  + `const by={};for(const s of all){const st=S(s.stock&&s.stock.name)||S(s.employee_name);if(!st)continue;const pay=(s.payments||[]).map(x=>x.name).join(','),ret=(s.refunds||[]).length>0;for(const it of s.item_sale||[]){const q=+it.quantity||1;(by[st]=by[st]||[]).push({no:String(s.id),emp:s.employee_name,at:s.created_at,pay,name:it.item&&it.item.title,cat:it.item&&it.item.item_category_name,bc:it.item&&it.item.barcode,qty:q,total:Math.round((+it.price||+it.selling_price||0)*q-(+it.discount_amount||0)),ret})}}`
-  + `let n=0;for(const st in by){const r=await fetch(F,{method:'POST',headers:{'content-type':'application/json','x-ingest':K},body:JSON.stringify({store:+st,rows:by[st]})});const j=await r.json();if(j.error)throw Error(j.error);n+=+j.new||0}`
-  + `b.textContent='Silver ✓ '+new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+' · новых чеков: '+n+' · следующая загрузка через 15 мин'}catch(e){b.textContent='Silver: ошибка — '+e.message+' (повторим через 15 мин)'}}`
-  + `window.__ss={run};run();setInterval(run,9e5)})()`;
-  return 'javascript:' + encodeURIComponent(code);
+/* закладка «Silver ← Wipon»: работает внутри кабинета console.wipon.kz. Каждые 15 минут: чеки и возвраты за 3 дня; раз в час — остатки по складам.
+   Все ИП, которые хоть раз были открыты в кабинете при работающей закладке, обновляются вместе. */
+function silverWiponSync(K){
+  if(window.__ss){ window.__ss.run(); return; }
+  const F = 'https://ottuadjdksxipfjytlyv.supabase.co/functions/v1/ingest?action=';
+  const b = document.createElement('div');
+  b.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:99999;background:#1d2b4f;color:#fff;padding:8px 12px;border-radius:10px;font:13px sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:420px';
+  document.body.appendChild(b);
+  const S = t => { t = ' ' + String(t || '').toLowerCase().replace(/ё/g, 'е').replace(/[_.,;:()"«»\-]+/g, ' ').replace(/\s+/g, ' ') + ' '; const W = '(?![а-яa-z])';
+    if(new RegExp('(мун|moon)\\s*(а|a)' + W).test(t) || /(мун|moon)\s*алмат/.test(t)) return 6;
+    if(/(мун|moon)\s*астан/.test(t) || new RegExp('(мун|moon)' + W).test(t)) return 7;
+    if(/курмангаз/.test(t)) return 1; if(/толе\s*би/.test(t)) return 2; if(/гагарин/.test(t)) return 3; if(/республик/.test(t)) return 4; if(/достык/.test(t)) return 5; return null; };
+  const day = x => new Date(x.getTime() + 18e6).toISOString().slice(0, 10);
+  const L = k => { try{ return JSON.parse(localStorage.getItem(k) || 'null'); }catch(_){ return null; } }, P = (k, v) => { try{ localStorage.setItem(k, JSON.stringify(v)); }catch(_){} };
+  const api = async p => { const tk = JSON.parse(localStorage.getItem('vuex')).user.token; const r = await fetch('https://api.wipon.kz' + p, { headers:{ Accept:'application/json', Authorization:'Bearer ' + tk } }); if(!r.ok) throw Error('Wipon ' + r.status); return r.json(); };
+  const all = async p => { const out = []; let pg = 1, total = null; for(;;){ const j = await api(p + '&page=' + pg); out.push(...(j.data || [])); total = j.meta ? j.meta.total : null; if(!j.meta || pg >= j.meta.last_page) break; pg++; } return { rows:out, total }; };
+  const post = async (a, st, rows) => { const r = await fetch(F + a, { method:'POST', headers:{ 'content-type':'application/json', 'x-ingest':K }, body:JSON.stringify({ store:+st, rows }) }); const j = await r.json(); if(j.error) throw Error(j.error); return j; };
+  async function one(emp){
+    const now = new Date(), rng = 'date_from=' + day(new Date(now - 2 * 864e5)) + 'T00:00:00%2B05:00&date_to=' + day(now) + 'T23:59:59%2B05:00&per_page=100';
+    let ns = 0, nr = 0, nst = 0;
+    const sales = (await all('/v1/employee/' + emp + '/sale?' + rng)).rows, by = {};
+    for(const s of sales){ const st = S(s.stock && s.stock.name) || S(s.employee_name); if(!st) continue; const pay = (s.payments || []).map(x => x.name).join(',');
+      for(const it of s.item_sale || []){ const q = +it.quantity || 1; (by[st] = by[st] || []).push({ no:String(s.id), emp:s.employee_name, at:s.created_at, pay, name:it.item && it.item.title, cat:it.item && it.item.item_category_name, bc:it.item && it.item.barcode, qty:q, total:Math.round((+it.price || +it.selling_price || 0) * q - (+it.discount_amount || 0)), ret:false }); } }
+    for(const st in by) ns += +(await post('wipon_sales', st, by[st])).new || 0;
+    const refs = (await all('/v1/employee/' + emp + '/refund?' + rng)).rows, rb = {};
+    for(const r of refs){ const st = S(typeof r.stock === 'string' ? r.stock : r.stock && r.stock.name) || S(r.employee_name); if(!st) continue;
+      (rb[st] = rb[st] || []).push({ id:r.id, at:r.created_at, emp:r.employee_name, pay:r.payment_name || '', amount:+r.amount, items:(r.item_refund || []).map(i => ({ bc:i.item && i.item.barcode, name:i.item && i.item.title, qty:+i.quantity, total:+i.sum })) }); }
+    for(const st in rb) nr += +(await post('wipon_refunds', st, rb[st])).new || 0;
+    const lk = 'silver_stock_at_' + emp;
+    if(Date.now() - (L(lk) || 0) > 36e5){
+      const stocks = (await api('/v2/employee/' + emp + '/stock')).data || [];
+      for(const k of stocks){ const st = S(k.name); if(!st) continue;
+        const x = await all('/v2/employee/' + emp + '/item?type=0&stock_id=' + k.id + '&per_page=250&positive_balance=1&is_weighted=0&trashed=0&only_parents=1');
+        if(x.total != null && x.rows.length < x.total) continue; // загрузилось не всё — остатки не трогаем
+        const rows = x.rows.filter(i => i.barcode).map(i => ({ bc:i.barcode, name:i.title, qty:+i.quantity, cost:+i.previous_purchase_price || null, price:+i.selling_price || null, cat:i.item_category_name }));
+        if(rows.length){ await post('wipon_stock', st, rows); nst++; } }
+      P(lk, Date.now()); }
+    return [ns, nr, nst];
+  }
+  async function run(){
+    try{
+      b.textContent = 'Silver: обновляем данные из Wipon…';
+      const cur = JSON.parse(localStorage.getItem('vuex')).employee.item.id, E = L('silver_wipon_emps') || [];
+      if(!E.includes(cur)){ E.push(cur); P('silver_wipon_emps', E); }
+      let t = [0, 0, 0]; const bad = [];
+      for(const e of E){ try{ const r = await one(e); t = t.map((x, i) => x + r[i]); }catch(err){ bad.push(err.message); } }
+      b.textContent = 'Silver ✓ ' + new Date().toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit' }) + ' · новых чеков: ' + t[0] + ' · возвратов: ' + t[1] + (t[2] ? ' · остатки обновлены (' + t[2] + ' скл.)' : '') + ' · кабинетов ИП: ' + E.length + (bad.length ? ' · ошибка: ' + bad[0] : '') + ' · следующая через 15 мин';
+    }catch(e){ b.textContent = 'Silver: ошибка — ' + e.message + ' (повторим через 15 мин)'; }
+  }
+  window.__ss = { run }; run(); setInterval(run, 9e5);
 }
+function wiponBookmarklet(key){ return 'javascript:' + encodeURIComponent('(' + silverWiponSync.toString() + ')(' + JSON.stringify(key) + ')'); }
 document.addEventListener('click', async e => { const t = e.target.closest('button'); if(!t || t.id!=='wu-bm') return; t.disabled = true;
   const { data, error } = await sb.rpc('wipon_sync_key'); t.disabled = false; if(error || !data) return toast(error ? errText(error) : 'Нет доступа');
   WU.bm = wiponBookmarklet(data); render(); });
