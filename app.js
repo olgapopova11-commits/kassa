@@ -607,7 +607,7 @@ async function loadWhSide(){
 setInterval(async () => {
   if(document.hidden || S.view!=='wh' || S.wmode!=='audit' || !S.audit) return;
   const ae = document.activeElement; if(ae && ae.tagName==='INPUT' && ae.id!=='dq') return;
-  if(ae && ae.id==='dq' && ae.value) return;
+  if((ae && ae.id==='dq' && ae.value) || AU_Q.length || auBusy) return;
   const had = ae && ae.id==='dq'; await loadAudit(); if(S.view==='wh' && S.wmode==='audit'){ render(); if(had && $('#dq')) $('#dq').focus(); }
 }, 10000);
 async function loadAudit(){
@@ -623,7 +623,7 @@ async function loadAudit(){
   }
 }
 function docSearchHtml(ph){
-  return `<div class="row"><input id="dq" style="flex:1" placeholder="${ph||'Скан штрихкода или название'}" value="${esc(S.dq)}" autocomplete="off"><button class="btn" id="dq-add">Добавить</button></div>
+  return `<div class="row"><input id="dq" style="flex:1" placeholder="${ph||'Скан штрихкода или название'}" value="${esc(S.dq)}" autocomplete="off" ${S.view==='wh'&&S.wmode==='audit'&&auScanMode()?'inputmode="none"':''}><button class="btn" id="dq-add">Добавить</button></div>
     ${S.dfound.length?`<div class="list">${S.dfound.slice(0,10).map(p=>`<button class="prod" data-dadd="${p.id}">${thumb(p)}<span><b>${esc(p.name)}</b><br><span class="meta num">${esc(p.barcode)}</span></span><span class="price num">${fmt(p.price)}</span></button>`).join('')}</div>`:''}`;
 }
 const WH_ICO = { requests:'📨', receipt:'📥', capitalize:'➕', writeoff:'🗑', transfer:'🔁', audit:'📋' };
@@ -720,6 +720,8 @@ function auSheetHtml(A){
   if(!A.sheet) return `<p class="meta" style="margin:0">У каждого, кто сканирует, свой лист: видно, что именно он посчитал, и он сам может быстро исправить ошибку. Все листы складываются в общую сверку. На этом компьютере лист запомнится.</p>${pick}`;
   return `${pick}
     ${docSearchHtml('Сканируйте товар — каждый скан +1 в ваш лист')}
+    <label class="meta" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="au-scanmode" ${auScanMode()?'checked':''}> 📟 Сканер подключён к телефону — не показывать экранную клавиатуру</label>
+    <div id="au-last">${auLastHtml()}</div>
     <div class="meta">В вашем листе: ${items.length} поз. · ${units} шт.</div>
     <div class="scroll"><table><thead><tr><th>Товар</th><th>Посчитано в листе</th><th></th></tr></thead><tbody>
     ${items.map(i=>`<tr><td>${esc(i.name)}<br><span class="meta num">${esc(i.barcode)}</span></td>
@@ -796,6 +798,31 @@ function docAdd(p){
   if(it) it.qty++; else d.items.push({ pid:p.id, name:p.name, barcode:p.barcode, price:p.price, photo_url:p.photo_url, qty:1, cost:null });
   S.dq=''; S.dfound=[]; render(); $('#dq') && $('#dq').focus();
 }
+/* ревизия сканером: каждый скан сразу +1, звук и вибрация; очередь, чтобы быстрые сканы не терялись */
+const AU_Q = []; let auBusy = false, auReload = null;
+const auScanMode = () => { try{ return localStorage.getItem('au_scanmode')==='1'; }catch(_){ return false; } };
+function auBeep(ok){ try{ const c = auBeep.c || (auBeep.c = new (window.AudioContext||window.webkitAudioContext)()); const o = c.createOscillator(), g = c.createGain();
+  o.frequency.value = ok ? 1400 : 300; g.gain.value = 0.15; o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + (ok ? 0.08 : 0.35)); }catch(_){}
+  try{ navigator.vibrate && navigator.vibrate(ok ? 40 : [120,60,120]); }catch(_){} }
+function auLastHtml(){ const L = (S.au||{}).last; if(!L) return ''; return `<div class="card" style="margin:6px 0;padding:12px 14px;border-left:6px solid ${L.ok?'var(--ok,#2a8a4a)':'var(--bad)'};font-size:17px">
+  ${L.ok?`✓ <b>${esc(L.name)}</b> +1 <span class="meta">· в листе ${L.n} шт.</span>`:`✕ Штрихкод <b class="num">${esc(L.bc)}</b> не найден в базе — отложите товар отдельно`}</div>`; }
+function auScan(inp){
+  const v = (inp.value||'').trim(); if(!/^\d{6,14}$/.test(v)) return false;
+  const A = S.au || {}; if(!A.sheet){ toast('Сначала выберите или создайте свой лист'); return true; }
+  inp.value = ''; S.dq = ''; S.dfound = [];
+  const a = S.catalog.find(x => x[1]===v) || (S.alias && S.alias[v] && S.catalog.find(x => x[0]===S.alias[v]));
+  if(!a){ A.last = { ok:false, bc:v }; auBeep(false); } else {
+    const it = (A.items||[]).find(i => i.product_id===a[0]); if(it) it.qty++; else (A.items ||= []).unshift({ product_id:a[0], name:a[3], barcode:a[1], qty:1 });
+    A.last = { ok:true, name:a[3], n: it ? it.qty : 1 }; auBeep(true); AU_Q.push({ sheet:A.sheet, pid:a[0] }); auFlush(); }
+  const el = $('#au-last'); if(el) el.innerHTML = auLastHtml();
+  return true;
+}
+async function auFlush(){ if(auBusy) return; auBusy = true;
+  while(AU_Q.length){ const q = AU_Q[0]; const { error } = await sb.rpc('audit_sheet_count', { p_sheet:q.sheet, p_product:q.pid, p_delta:1, p_set:null });
+    if(error){ toast('Скан не сохранён: '+errText(error)+' — повторим'); await new Promise(r=>setTimeout(r,3000)); continue; } AU_Q.shift(); }
+  auBusy = false; clearTimeout(auReload);
+  auReload = setTimeout(async () => { const ae = document.activeElement; if(AU_Q.length || (ae && ae.id==='dq' && ae.value)) return; await loadAudit(); if(S.view==='wh' && S.wmode==='audit'){ render(); $('#dq') && $('#dq').focus(); } }, 1500); }
+document.addEventListener('change', e => { if(e.target.id==='au-scanmode'){ try{ localStorage.setItem('au_scanmode', e.target.checked?'1':'0'); }catch(_){} render(); $('#dq') && $('#dq').focus(); } });
 async function auditAdd(p){
   const A = S.au || {}; if(!A.sheet){ S.dq=''; S.dfound=[]; render(); return toast('Сначала выберите или создайте свой лист'); }
   const { error } = await sb.rpc('audit_sheet_count', { p_sheet:A.sheet, p_product:p.id, p_delta:1, p_set:null });
@@ -2691,7 +2718,7 @@ document.addEventListener('input', e => {
 document.addEventListener('keydown', e => {
   if(e.key!=='Enter') return;
   if(e.target.id==='q'){ e.preventDefault(); $('#q-add').click(); }
-  if(e.target.id==='dq'){ e.preventDefault(); $('#dq-add').click(); }
+  if(e.target.id==='dq'){ e.preventDefault(); if(S.view==='wh' && S.wmode==='audit' && auScan(e.target)) return; $('#dq-add').click(); }
   if(e.target.id==='phone'){ e.preventDefault(); lookupCustomer(); }
   if(e.target.id==='sq'){ e.preventDefault(); $('#sq-go').click(); }
   if(e.target.id==='cc'){ e.preventDefault(); $('#cc-go').click(); }
