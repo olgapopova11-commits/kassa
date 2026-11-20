@@ -1,5 +1,6 @@
 /* Silver — касса и учёт MOON и Sunshine. Данные: Supabase. */
 'use strict';
+const INIT_HASH = location.hash;
 const SB_URL = 'https://ottuadjdksxipfjytlyv.supabase.co';
 const SB_KEY = 'sb_publishable_OyN1810CuHrR9Ys0VTSExA_XY-nO7zo';
 const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
@@ -224,9 +225,10 @@ function renderShell(){
   const acc = (S.tabAccess||{})[S.me.role];
   if(S.me.role !== 'owner' && Array.isArray(acc)){ const keep = tabs.filter(([v]) => acc.includes(v)); tabs.splice(0, tabs.length, ...keep); }
   // остальные вкладки: владельцу все, остальным — по настройке «Какие вкладки видит каждая роль» (или по умолчанию)
-  for(const [v,t] of EXTRA_TABS){ if(S.me.role==='owner' || (Array.isArray(acc) ? acc.includes(v) : (EXTRA_DEF[v]||[]).includes(S.me.role))) tabs.push([v, v==='pay' && !isBoss() ? 'Моя зарплата' : t]); }
+  for(const [v,t] of EXTRA_TABS){ if(S.me.role==='owner' || v==='day' || (Array.isArray(acc) ? acc.includes(v) : (EXTRA_DEF[v]||[]).includes(S.me.role))) tabs.push([v, v==='pay' && !isBoss() ? 'Моя зарплата' : t]); }
   if(S.me.role==='owner') tabs.push(['adm','Административный штат']);
   if(isViewer()){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pos' && (v!=='emps' || S.me.role==='accountant'))); if(!S.view || S.view==='pos' || (S.view==='emps' && S.me.role!=='accountant')) S.view = 'analytics'; }
+  if(!S._land){ S._land = 1; if(!INIT_HASH && ['owner','manager','purchaser'].includes(S.me.role)) S.view = 'day'; }
   if(tabs.length && !tabs.some(([v]) => v===S.view)) S.view = tabs[0][0];
 
   S.tabs = tabs;
@@ -235,7 +237,7 @@ function renderShell(){
   renderHeader();
 }
 // вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
-const GROUPS = [['home','🔔','Внимание',['attn']],['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['flow','stock','wh','po','nom','photo','site']],
+const GROUPS = [['home','✅','Мой день',['day','attn']],['kassa','🧾','Касса',['pos','shifts','cash','sales']],['goods','📦','Товары',['flow','stock','wh','po','nom','photo','site']],
   ['clients','💳','Клиенты',['promo','content','bonus','certs']],['analytics','📈','Аналитика',['analytics','profit']],['team','👥','Сотрудники',['me','emps','cons','pay','adm']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 function renderNav(){
@@ -268,7 +270,7 @@ function render(){
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
-  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, attn:renderAttn, photo:renderPhoto })[S.view]();
+  ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, attn:renderAttn, photo:renderPhoto, day:renderDay })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
 
@@ -1256,7 +1258,7 @@ async function loadNom(){
   const f = S.nm; f.data = null;
   if(!f.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); f.cats = data || []; }
   sb.rpc('po_incoming').then(({data}) => { S.inc = data || {}; });
-  const { data, error } = await sb.rpc('product_list2', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:50, p_sort:f.sort||null, p_desc:!!f.desc });
+  const { data, error } = await sb.rpc('product_list2', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:50, p_sort:f.sort||null, p_desc:!!f.desc, p_flag:f.flag||null });
   if(error){ toast(errText(error)); f.data = { rows:[], total:0 }; } else { f.data = data; S.nmNoPrice = data.noprice; }
 }
 function renderNom(){
@@ -1266,10 +1268,11 @@ function renderNom(){
     <div class="filters"><input id="nm-q" placeholder="Штрихкод, артикул или название" value="${esc(f.q)}" style="flex:1;min-width:180px">
       <select id="nm-cat"><option value="">Все категории</option><option value="-1" ${String(f.cat)==='-1'?'selected':''}>⚠ Без категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
       <label class="meta" style="align-self:center"><input type="checkbox" id="nm-arch" ${f.arch?'checked':''}> показать и архивные</label></div>
+    ${f.flag?`<div class="row" style="justify-content:flex-start;gap:8px;margin:8px 0"><span class="chip warn">Показаны только товары в наличии: ${NM_FLAG[f.flag]||f.flag}</span><button class="btn small" id="nm-flag-x">✕ Снять фильтр</button></div>`:''}
     ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}. Нажмите на название, чтобы открыть карточку. Категорию можно менять прямо в таблице.</p>
     ${nmCanEdit()&&Object.keys(f.sel||{}).length?`<div class="cust row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;margin-bottom:8px"><b>Выбрано: ${Object.keys(f.sel).length}</b>
       <select id="nm-bulkcat"><option value="">Назначить категорию…</option>${cats.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
-      <button class="btn small primary" id="nm-bulk-go">Применить</button><button class="btn small" id="nm-bulk-grp" title="Под каждым из этих штрихкодов много разных изделий одной цены">Отметить как общий штрихкод</button><button class="btn small" id="nm-bulk-clear">Снять выбор</button></div>`:''}
+      <button class="btn small primary" id="nm-bulk-go">Применить</button><button class="btn small" id="nm-bulk-grp" title="Под каждым из этих штрихкодов много разных изделий одной цены">Отметить как общий штрихкод</button><button class="btn small" id="nm-bulk-arch" data-arch="1">🗄 В архив</button>${(f.data&&f.data.rows||[]).some(p=>f.sel[p.id]&&p.archived)?'<button class="btn small" id="nm-bulk-unarch" data-arch="0">Вернуть из архива</button>':''}<button class="btn small" id="nm-bulk-clear">Снять выбор</button></div>`:''}
     <div class="scroll"><table class="nm-table"><thead><tr>${nmCanEdit()?`<th style="width:28px;padding-right:0"><input type="checkbox" id="nm-selall" title="Выбрать все на странице" ${D.rows.length&&D.rows.every(p=>(f.sel||{})[p.id])?'checked':''}></th>`:''}<th></th>${[['name','Название'],['category','Категория'],['barcode','Штрихкод'],['cost','Закуп'],['price','Цена'],['stock','Остаток'],['site','Сайт']].map(([k,v])=>`<th><button data-nmsort="${k}" style="border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;white-space:nowrap" title="Сортировать">${v} ${f.sort===k?(f.desc?'▼':'▲'):'<span class="meta">↕</span>'}</button></th>`).join('')}</tr></thead><tbody>
     ${D.rows.map(p=>{ const inc = (S.inc||{})[p.id], L = (p.sites||[]).filter(x=>x.url);
       return `<tr style="${e&&e.id===p.id?'background:var(--soft)':p.archived?'background:rgba(128,128,128,.18);color:var(--muted,#888)':''}">${nmCanEdit()?`<td style="width:28px;padding-right:0;vertical-align:middle"><input type="checkbox" data-nmsel="${p.id}" ${(f.sel||{})[p.id]?'checked':''}></td>`:''}<td>${thumb(p)}</td>
@@ -1297,7 +1300,11 @@ document.addEventListener('change', async e => { if(S.view!=='nom') return; cons
   else if(t.id==='nm-selall'){ f.sel = f.sel || {}; (f.data&&f.data.rows||[]).forEach(p=>{ if(t.checked) f.sel[p.id] = 1; else delete f.sel[p.id]; }); render(); }
 });
 document.addEventListener('click', async e => { if(S.view!=='nom') return; const t = e.target.closest('button'); if(!t) return; const f = S.nm;
+  if(t.id==='nm-flag-x'){ f.flag = null; f.off = 0; f.data = null; render(); await loadNom(); render(); return; }
   if(t.id==='nm-bulk-clear'){ f.sel = {}; render(); }
+  else if(t.id==='nm-bulk-arch' || t.id==='nm-bulk-unarch'){ const ids = Object.keys(f.sel||{}), on = t.dataset.arch==='1'; t.disabled = true;
+    const r = await sb.rpc('products_set_archived', { p_ids:ids, p_arch:on }); t.disabled = false; if(r.error) return toast(errText(r.error));
+    const d = r.data||{}; toast(on ? `В архив: ${d.changed}${d.with_stock?` (у ${d.with_stock} ещё есть остаток в магазинах)`:''}` : `Возвращено из архива: ${d.changed}`); f.sel = {}; await loadNom(); render(); }
   else if(t.id==='nm-bulk-grp'){ const ids = Object.keys(f.sel||{}); t.disabled = true; let linked = 0;
     for(const id of ids){ const r = await sb.rpc('product_mark_group', { p_id:id, p_on:true }); if(r.error){ t.disabled = false; return toast(errText(r.error)); } linked += +(r.data||{}).linked||0; }
     toast(`Отмечено как общий штрихкод: ${ids.length}${linked?`, сразу связано с карточками сайта той же цены: ${linked}`:''}`); f.sel = {}; await loadNom(); render(); }
@@ -2285,10 +2292,55 @@ document.addEventListener('click', async e => { if(S.view!=='pay') return; const
   else if(t.dataset.pyday){ PY.day = t.dataset.pyday; await loadPay(); render(); }
 });
 
+/* ---------- мой день: список дел по роли ---------- */
+const NM_FLAG = { noprice:'без розничной цены', nocost:'без закупочной цены', nourl:'без ссылки на поставщика', nocat:'без категории', nophoto:'без фото' };
+const DAY = { role:null, data:null, sug:null, store:null };
+const DAY_ROLES = [['mgr','Менеджер магазина'],['buy','Закуп'],['sell','Продавец']];
+const dayDefRole = () => ({ purchaser:'buy', consultant:'sell' })[S.me.role] || 'mgr';
+async function loadDay(){
+  if(!DAY.role) DAY.role = dayDefRole();
+  const { data, error } = await sb.rpc('my_day', { p_store: DAY.store || S.store || null });
+  if(error){ toast(errText(error)); DAY.data = { mgr:[], buy:[], sell:[] }; } else DAY.data = data;
+  if(DAY.role==='buy') loadDaySug();
+}
+async function loadDaySug(){ if(DAY.sug) return; DAY.sug = 'wait';
+  const { data, error } = await sb.rpc('po_suggest', { p_days:30 }); if(error){ DAY.sug = null; return toast(errText(error)); }
+  const L = (data||[]).filter(p => +p.need > 0); DAY.sug = { n:L.length, units:L.reduce((a,p)=>a+(+p.need||0),0) }; if(S.view==='day') render(); }
+function renderDay(){
+  const D = DAY.data, own = S.me.role==='owner', r = DAY.role || dayDefRole(), st = DAY.store || S.store;
+  const today = new Date().toLocaleDateString('ru-RU',{timeZone:'Asia/Almaty',weekday:'long',day:'numeric',month:'long'});
+  let items = D ? [...(D[r]||[])] : [];
+  if(r==='buy'){ const sg = DAY.sug && DAY.sug!=='wait' ? DAY.sug : null;
+    items.unshift({ k:'sug', t:'Дозаказать — товар заканчивается', n: sg ? sg.n : 1, wait: !sg, h: sg ? (sg.n ? `Всего ${sg.units.toLocaleString('ru-RU')} шт. Удобно формировать заказ сразу по поставщику.` : '') : 'Считаем…', go:'po', mode:'suggest', lvl:'warn' }); }
+  const has = v => (S.tabs||[]).some(t => t[0]===v);
+  items = items.filter(i => own || has(i.go));
+  const ord = { bad:0, warn:1, '':2 }, col = { bad:'var(--bad)', warn:'var(--warn,#d90)', '':'var(--accent)' };
+  const todo = items.filter(i => i.wait || +i.n > 0).sort((a,b) => ord[a.lvl] - ord[b.lvl]), done = items.filter(i => !i.wait && !(+i.n > 0));
+  DAY.items = items;
+  $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="day-ref">Обновить</button></div>
+    ${own?`<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><span class="meta">Посмотреть как:</span><div class="seg" style="display:inline-flex">${DAY_ROLES.map(([k,t])=>`<button data-dayrole="${k}" aria-pressed="${k===r}">${t}</button>`).join('')}</div>
+      ${r==='sell'?`<select id="day-store" aria-label="Магазин">${(S.stores||[]).map(s=>`<option value="${s.id}" ${s.id===st?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select>`:''}</div>`:''}
+    <p class="meta" style="margin:4px 0 12px">${r==='sell'?'Дела по магазину '+esc(storeName(st)):r==='buy'?'Дела по закупу, по всем магазинам':'Дела по вашим магазинам'}. Нажмите «Открыть» — попадёте сразу туда, где это делается. Сделанное уходит вниз само.</p>
+    ${!D?'<div class="empty">Собираем дела…</div>':`${todo.length?`<div class="stack" style="gap:8px">${todo.map(i=>`<div class="card row" style="flex-wrap:wrap;gap:10px;border-left:4px solid ${col[i.lvl]||col['']}"><div style="flex:1;min-width:220px"><b>${esc(i.t)}</b>${i.wait||i.k==='open'||i.k==='close'?'':` <span class="chip ${i.lvl==='bad'?'zero':'warn'}">${(+i.n).toLocaleString('ru-RU')}</span>`}${i.h?`<br><span class="meta">${esc(i.h)}</span>`:''}</div><button class="btn small primary" data-daygo="${esc(i.k)}" ${i.wait?'disabled':''}>Открыть →</button></div>`).join('')}</div>`
+      :'<div class="card" style="text-align:center;padding:24px">✅ На сегодня всё сделано</div>'}
+    ${done.length?`<details style="margin-top:14px"><summary class="meta" style="cursor:pointer">Сделано: ${done.length}</summary><div class="stack" style="gap:4px;margin-top:6px">${done.map(i=>`<div class="meta">✓ ${esc(i.t)}</div>`).join('')}</div></details>`:''}`}`;
+}
+document.addEventListener('click', async e => { if(S.view!=='day') return; const t = e.target.closest('button'); if(!t) return;
+  if(t.id==='day-ref'){ DAY.data = null; DAY.sug = null; render(); await loadDay(); render(); }
+  else if(t.dataset.dayrole){ DAY.role = t.dataset.dayrole; render(); if(DAY.role==='buy') loadDaySug(); }
+  else if(t.dataset.daygo){ const i = (DAY.items||[]).find(x => x.k===t.dataset.daygo); if(!i) return;
+    if(!(S.tabs||[]).some(x => x[0]===i.go)) return toast('У вас нет доступа к этой вкладке');
+    if(i.go==='wh' && i.mode) S.wmode = i.mode;
+    if(i.go==='po'){ PO.mode = i.mode || 'orders'; if(!i.mode) PO.filter = 'open'; PO.list = null; }
+    if(i.go==='nom'){ Object.assign(S.nm, { flag:i.flag||null, off:0, q:'', cat:'', data:null }); }
+    S.view = i.go; (S.lastView ||= {})[groupOf(S.view)[0]] = S.view; render(); scrollTo(0,0); await loadView(); }
+});
+document.addEventListener('change', async e => { if(S.view==='day' && e.target.id==='day-store'){ DAY.store = +e.target.value; DAY.data = null; render(); await loadDay(); render(); } });
+
 /* ---------- доступ к вкладкам по ролям ---------- */
 const ALL_TABS = [['pos','Продажа'],['analytics','Аналитика'],['shifts','Смены'],['cash','Расходы'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты'],['bonus','Бонусные карты'],['nom','Номенклатура'],['site','Сайт'],['emps','Сотрудники']];
-const EXTRA_TABS = [['attn','Требует внимания'],['photo','Фотосессия'],['pay','Зарплата'],['cons','Консультанты'],['po','Закуп'],['promo','Акции'],['content','Контент'],['flow','Путь товара'],['profit','Рентабельность']];
-const EXTRA_DEF = { attn:['manager','purchaser','viewer','accountant'], photo:['manager','purchaser'], pay:['manager','purchaser','viewer','accountant'], cons:['manager'], po:['manager','purchaser','viewer','accountant'], promo:['manager','purchaser','viewer','accountant'], content:['manager','purchaser','viewer'], flow:['manager','viewer','accountant'], profit:['viewer'] };
+const EXTRA_TABS = [['day','Мой день'],['attn','Требует внимания'],['photo','Фотосессия'],['pay','Зарплата'],['cons','Консультанты'],['po','Закуп'],['promo','Акции'],['content','Контент'],['flow','Путь товара'],['profit','Рентабельность']];
+const EXTRA_DEF = { day:['manager','purchaser','consultant','viewer','accountant'], attn:['manager','purchaser','viewer','accountant'], photo:['manager','purchaser'], pay:['manager','purchaser','viewer','accountant'], cons:['manager'], po:['manager','purchaser','viewer','accountant'], promo:['manager','purchaser','viewer','accountant'], content:['manager','purchaser','viewer'], flow:['manager','viewer','accountant'], profit:['viewer'] };
 ALL_TABS.push(...EXTRA_TABS);
 const BOSS_ONLY = ['analytics','bonus','nom','site','emps'];
 function defaultTabs(role){ const boss = ['manager','viewer','accountant'].includes(role);
@@ -2636,6 +2688,7 @@ async function loadView(){
   if(S.view==='emps'){ await loadEmps(); render(); }
   if(S.view==='cons'){ render(); await loadEmps(); render(); }
   if(S.view==='attn'){ render(); await loadAttn(); render(); }
+  if(S.view==='day'){ render(); await loadDay(); render(); }
   if(S.view==='photo'){ render(); await loadPhoto(); render(); }
   if(S.view==='pay'){ render(); await loadPay(); render(); }
   if(S.view==='profit'){ render(); await loadProfit(); render(); }
