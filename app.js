@@ -1282,7 +1282,7 @@ function renderNom(){
       <td class="num">${p.cost!=null&&p.cost!==''?fmt(p.cost):'<span class="meta">—</span>'}</td>
       <td class="num">${+p.price>0?fmt(p.price):'<span class="chip warn">нет цены</span>'}</td>
       <td class="num"><span class="nm-st" tabindex="0">${p.stock>0?'<span class="chip ok">есть '+p.stock+'</span>':'<span class="chip zero">нет</span>'}<span class="nm-st-pop">${S.allStores.map(st=>{ const q = +((p.by_store||{})[st.id]||0); return `<span class="row" style="gap:12px;${q?'':'opacity:.5'}"><span>${esc(BRAND[st.brand]+' · '+st.address)}</span><b class="num">${q}</b></span>`; }).join('')}</span></span>${inc&&((inc.ordered||0)+(inc.transit||0))?`<br><span class="meta">заказано ${(inc.ordered||0)+(inc.transit||0)}</span>`:''}</td>
-      <td style="white-space:nowrap">${L.length?['moon','sunshine'].map(sk=>{ const X = L.filter(x=>x.site===sk); return X.length ? `<a href="${esc(X[0].url)}" target="_blank" rel="noopener">${sk==='moon'?'MOON':'Sunshine'}</a>${X.length>1?` <span class="meta">· ${X.length} карточек</span>`:''}${X.some(x=>x.status==='review')?' <span class="meta">(не проверено)</span>':''}` : ''; }).filter(Boolean).join('<br>'):'<span class="meta">нет на сайте</span>'}</td></tr>`; }).join('') || `<tr><td colspan="${nmCanEdit()?9:8}" class="empty">Ничего не найдено</td></tr>`}</tbody></table></div>
+      <td style="white-space:nowrap">${p.is_group?'<span class="meta">не для сайта</span>':L.length?['moon','sunshine'].map(sk=>{ const X = L.filter(x=>x.site===sk); return X.length ? `<a href="${esc(X[0].url)}" target="_blank" rel="noopener">${sk==='moon'?'MOON':'Sunshine'}</a>${X.length>1?` <span class="meta">· ${X.length} карточек</span>`:''}${X.some(x=>x.status==='review')?' <span class="meta">(не проверено)</span>':''}` : ''; }).filter(Boolean).join('<br>'):'<span class="meta">нет на сайте</span>'}</td></tr>`; }).join('') || `<tr><td colspan="${nmCanEdit()?9:8}" class="empty">Ничего не найдено</td></tr>`}</tbody></table></div>
     ${f.off||D.rows.length===50?`<div class="row" style="margin-top:8px"><button class="btn" data-nmpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-nmpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`}`;
   nmModalSync(e, f, cats, inp);
 }
@@ -1307,7 +1307,7 @@ document.addEventListener('click', async e => { if(S.view!=='nom') return; const
     const d = r.data||{}; toast(on ? `В архив: ${d.changed}${d.with_stock?` (у ${d.with_stock} ещё есть остаток в магазинах)`:''}` : `Возвращено из архива: ${d.changed}`); f.sel = {}; await loadNom(); render(); }
   else if(t.id==='nm-bulk-grp'){ const ids = Object.keys(f.sel||{}); t.disabled = true; let linked = 0;
     for(const id of ids){ const r = await sb.rpc('product_mark_group', { p_id:id, p_on:true }); if(r.error){ t.disabled = false; return toast(errText(r.error)); } linked += +(r.data||{}).linked||0; }
-    toast(`Отмечено как общий штрихкод: ${ids.length}${linked?`, сразу связано с карточками сайта той же цены: ${linked}`:''}`); f.sel = {}; await loadNom(); render(); }
+    toast(`Отмечено как общий штрихкод: ${ids.length}. Такие товары на сайт не выводятся.`); f.sel = {}; await loadNom(); render(); }
   else if(t.id==='nm-bulk-go'){ const c = $('#nm-bulkcat').value; if(!c) return toast('Выберите категорию'); t.disabled = true;
     const r = await sb.rpc('products_set_category', { p_ids:Object.keys(f.sel), p_cat:+c }); if(r.error){ t.disabled = false; return toast(errText(r.error)); }
     toast('Категория назначена: '+r.data+' товарам'); f.sel = {}; await loadNom(); render(); }
@@ -1405,7 +1405,7 @@ function renderSite(){
   const cnt = k => k==='siteonly' ? c0('none')+c0('rejected') : k==='baseonly' ? (f.baseTotal||0) : c0(k);
   $('#main').innerHTML = `<h2>Сайт ↔ база товаров</h2>
     <p class="meta">Слева карточка с сайта, справа товар из базы, с которым она связана. Через эту связь на сайт пойдут остатки, а в кассу — фото. Несколько карточек сайта можно связать с одним товаром базы — например, все разные серьги за 3 500 ₸ с общим штрихкодом «Серьги 3500».</p>
-    ${isBoss()&&!isViewer()?`<div class="row" style="justify-content:flex-start;margin-bottom:8px"><button class="btn small" id="st-grp">🔗 Связать несвязанные с общими штрихкодами (по типу и цене)</button></div>`:''}
+
     <div class="filters">${Object.entries(SITE_NAME).map(([k,v])=>`<button class="btn small ${f.site===k?'primary':''}" data-stsite="${k}">${v}</button>`).join('')}</div>
     <div class="filters">${SITE_ST.map(([k,v])=>`<button class="btn small ${f.status===k?'primary':''}" data-ststatus="${k}">${v} · ${cnt(k)}</button>`).join('')}
       <input id="st-q" placeholder="Поиск: название или штрихкод" value="${esc(f.q)}" style="flex:1;min-width:200px"></div>
@@ -1423,7 +1423,7 @@ function renderSite(){
       <div class="row" style="justify-content:flex-end;flex-wrap:wrap;margin-top:8px">
         ${r.product_id&&r.status!=='confirmed'?`<button class="btn small primary" data-stok="${key}" data-pid="${r.product_id}">Верно</button>`:''}
         <button class="btn small" data-stopen="${key}">${open?'Скрыть':'Выбрать другой товар'}</button>
-        ${!r.product_id&&isBoss()&&!isViewer()?`<button class="btn small" data-stgrp="${key}" title="Связать с общим штрихкодом того же типа и цены, например «Серьги 3500»">Общий штрихкод</button>`:''}
+
       </div>
       ${open?`<div class="cust stack" style="margin-top:8px">
         <span class="label">Похожие товары в базе</span>
@@ -1456,7 +1456,7 @@ document.addEventListener('click', async e => {
     if(G.length===1){ const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product:G[0].product_id, p_status:'confirmed' }); if(error) return toast(errText(error)); toast('Связано с «'+G[0].name+'»'); await loadSite(); render(); }
     else { f.open = d.stgrp; f.cands = data||[]; f.cq = ''; f.cfound = []; render(); toast(G.length ? 'Подходит несколько общих штрихкодов — выберите нужный' : 'Общего штрихкода с такой ценой нет — выберите товар вручную'); } }
   else if(d.stbgrp){ t.disabled = true; const on = d.on==='1'; const { data, error } = await sb.rpc('product_mark_group', { p_id:d.stbgrp, p_on:on }); if(error){ t.disabled = false; return toast(errText(error)); }
-    toast(on ? (data.linked ? `Отмечен как общий штрихкод и сразу связан с ${data.linked} карточками сайта той же цены` : 'Отмечен как общий штрихкод. Карточек сайта с такой же ценой и типом пока не нашлось') : 'Отметка снята'); await loadSite(); render(); }
+    toast(on ? 'Отмечен как общий штрихкод — такой товар на сайт не выводится' : 'Отметка снята'); await loadSite(); render(); }
   else if(d.stblink){ const [site, uid] = d.stblink.split(':'); const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product:d.pid, p_status:'confirmed' });
     if(error) return toast(errText(error)); toast('Связано с карточкой сайта'); f.bfind = null; await loadSite(); render(); }
 });
