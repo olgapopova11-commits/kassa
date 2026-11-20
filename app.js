@@ -2087,7 +2087,7 @@ async function loadPo(){
 }
 function renderPo(){
   const modes = [['orders','Заказы'],['new','Новый заказ'],['suggest','Что дозаказать'],['sup','Поставщики'],['an','Аналитика закупа']].filter(([k])=>poEdit() || k!=='new');
-  const head = `<div class="row" style="flex-wrap:wrap"><h2>Закуп</h2><span class="row" style="gap:6px">${(PO.list||[]).some(o=>(o.supplier&&/[\u4e00-\u9fff]/.test(o.supplier)&&!o.supplier_ru)||(o.items||[]).some(i=>i.supplier_title&&!i.title_ru))?`<button class="btn small" id="po-tr">🌐 Перевести названия на русский</button>`:''}${poEdit()?`<label class="btn small" style="cursor:pointer">⬆ Загрузить заказы из Китая (Excel)<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label>`:''}</span></div>
+  const head = `<div class="row" style="flex-wrap:wrap"><h2>Закуп</h2><span class="row" style="gap:6px">${(PO.list||[]).some(o=>(o.supplier&&/[\u4e00-\u9fff]/.test(o.supplier)&&!o.supplier_ru)||(o.items||[]).some(i=>i.supplier_title&&!i.title_ru))?`<button class="btn small" id="po-tr">🌐 Перевести названия на русский</button>`:''}${poEdit()?`<label class="btn small" style="cursor:pointer">⬆ Загрузить заказы: 1688 или Alibaba (Excel)<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label>`:''}</span></div>
   ${PO.imp?`<div class="card meta" style="margin-bottom:8px">${esc(PO.imp)}</div>`:''}
   <div class="seg" style="display:inline-flex;margin-bottom:10px">${modes.map(([k,v])=>`<button data-pomode="${k}" aria-pressed="${PO.mode===k}">${v}</button>`).join('')}</div>`;
   let body = '';
@@ -2108,7 +2108,7 @@ function renderPo(){
     ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Заказов нет</div>':L.map(o=>{ const goods=(o.items||[]).reduce((a,i)=>a+i.qty*(+i.unit_cost||0),0), units=(o.items||[]).reduce((a,i)=>a+i.qty,0);
       const nl = (o.items||[]).filter(i=>!i.product_id).length, open = (PO.openO||{})[o.id] || (PO.rcv&&PO.rcv.id===o.id);
       return `<div class="card" style="margin-bottom:8px;padding:10px 12px"><div class="row" style="flex-wrap:wrap;gap:6px"><b>${poBulkOk()&&['ordered','transit'].includes(o.status)?`<input type="checkbox" data-posel="${o.id}" ${(PO.sel||{})[o.id]?'checked':''} style="margin-right:6px" aria-label="Выбрать заказ">`:''}№${o.number} · ${esc(poSupplier(o))} → ${o.store?esc(storeName(o.store)):'<span class="meta">магазин при приёмке</span>'}</b><span class="chip ${PO_ST[o.status][0]}">${PO_ST[o.status][1]}${o.status==='received'&&!o.receipt_id&&o.source==='1688'?' · история':''}</span></div>
-        <div class="meta">${dshort(o.created_at)}${o.source==='1688'?' · Китай №'+esc(o.ext_no):''}${o.track?' · трек '+esc(o.track):''}${o.eta?' · ждём к '+dshort(o.eta):''}${o.received_at?' · получен '+dshort(o.received_at):''}${noZh(o.note)&&!/Китай №/.test(o.note)?' · '+esc(o.note):''}</div>
+        <div class="meta">${dshort(o.created_at)}${o.source==='1688'?' · Китай №'+esc(o.ext_no):o.source==='alibaba'?' · Alibaba №'+esc(o.ext_no):''}${o.track?' · трек '+esc(o.track):''}${o.eta?' · ждём к '+dshort(o.eta):''}${o.received_at?' · получен '+dshort(o.received_at):''}${noZh(o.note)&&!/Китай №/.test(o.note)?' · '+esc(o.note):''}</div>
         <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:6px;justify-content:flex-start"><button class="btn small" data-poopen="${o.id}" style="border:0;background:none;padding:0;font-weight:600">${open?'▾':'▸'} ${(o.items||[]).length} поз. · ${units} шт. · ${fmt(goods)}</button>
           ${nl?`<span class="chip zero">не связано: ${nl}</span>`:''}${!open?`<span style="display:flex;gap:3px">${(o.items||[]).slice(0,10).map(i=>thumb(i)).join('')}${(o.items||[]).length>10?`<span class="meta">+${(o.items||[]).length-10}</span>`:''}</span>`:''}</div>
         ${open?`<div class="scroll" style="margin-top:6px"><table><tbody>${(o.items||[]).map(i=>poItemRow(o,i)).join('')}</tbody></table></div>`:''}
@@ -3021,7 +3021,7 @@ document.addEventListener('click', async e => {
 /* ---------- закуп: позиции, привязка к базе, приёмка с пересчётом себестоимости ---------- */
 const noZh = t => t && !/[\u4e00-\u9fff]/.test(t) ? t : '';
 const poSpec = i => { const sp = i.spec||''; if(!sp) return ''; if(!/[\u4e00-\u9fff]/.test(sp)) return sp; const c = colorRu(sp), n = (sp.match(/\d+(\.\d+)?\s*(号|cm|mm|码)?/)||[])[0]; return [c, n&&n.replace('号',' размер').replace('码',' размер')].filter(Boolean).join(', '); };
-const poSupplier = o => noZh(o.supplier_ru) || noZh(o.supplier) || (o.source==='1688' ? 'Китай' : 'поставщик не указан');
+const poSupplier = o => noZh(o.supplier_ru) || noZh(o.supplier) || (o.source==='1688' ? 'Китай' : o.source==='alibaba' ? 'Alibaba' : 'поставщик не указан');
 function poItemRow(o, i){
   const cur = CUR[o.currency||'KZT'] || '₸', open = ['ordered','transit'].includes(o.status), canLink = open && (poEdit() || (isBoss() && !isViewer()));
   const lnk = PO.lnk && PO.lnk.item===i.item_id;
@@ -3074,6 +3074,7 @@ async function import1688(file){
     const wb = XLSX.read(await file.arrayBuffer(), { type:'array' });
     const A = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, raw:false, defval:null });
     const h = (A[0]||[]).map(x=>String(x||'').trim()), c = name => h.indexOf(name);
+    if(h.includes('Order No') && h.includes('Product')) return await importAlibaba(A, h);
     const K = { no:c('订单编号'), seller:c('卖家公司名'), login:c('卖家会员名'), ship:c('运费(元)'), adj:c('涨价或折扣(元)'), status:c('订单状态'), created:c('订单创建时间'), track:c('运单号'),
       title:c('货品标题'), price:c('单价(元)'), qty:c('数量'), unit:c('单位'), art:c('货号'), offer:c('Offer ID'), sku:c('SKU ID'), skuArt:c('单品货号') };
     if(K.no<0 || K.title<0 || K.price<0) throw new Error('Это не файл заказов из Китая: нет колонок 订单编号 / 货品标题 / 单价');
@@ -3094,6 +3095,21 @@ async function import1688(file){
     PO.mode = 'orders'; PO.filter = 'open'; PO.list = null; await loadPo(); render();
     if('Translator' in self) translate1688();   // сразу переводим новые названия на русский
   }catch(e){ PO.imp = 'Не загрузилось: '+errText(e); render(); }
+}
+/* ---------- заказы Alibaba.com: файл-выгрузка (Order No, Supplier, Product, Variant, Unit price USD, Qty …) ---------- */
+async function importAlibaba(A, h){
+  const c = name => h.indexOf(name), num = v => +String(v??'').replace(/[^\d.\-]/g,'') || 0, str = v => v==null ? null : String(v).trim() || null;
+  const K = { no:c('Order No'), seller:c('Supplier'), created:c('Order date'), status:c('Status'), track:c('Tracking'), ship:c('Shipping USD'), fee:c('Fee USD'), discount:c('Discount USD'),
+    title:c('Product'), spec:c('Variant'), price:c('Unit price USD'), qty:c('Qty'), unit:c('Unit'), offer:c('Product ID'), sku:c('SKU ID'), photo:c('Photo') };
+  const orders = []; let cur = null;
+  for(const r of A.slice(1)){ const no = str(r[K.no]); if(!no) continue;
+    if(!cur || cur.no !== no){ cur = { no, seller:str(r[K.seller]), created:str(r[K.created]), status:str(r[K.status]), track:str(r[K.track]), ship:num(r[K.ship]), fee:num(r[K.fee]), discount:num(r[K.discount]), items:[] }; orders.push(cur); }
+    if(str(r[K.title])) cur.items.push({ title:str(r[K.title]), spec:str(r[K.spec]), price:num(r[K.price]), qty:num(r[K.qty]), unit:str(r[K.unit]), offer:str(r[K.offer]), sku:str(r[K.sku]), photo:str(r[K.photo]) }); }
+  const tot = { new:0, updated:0, items:0, linked:0 };
+  for(let i=0; i<orders.length; i+=10){ PO.imp = `Загружаем заказы Alibaba: ${i} из ${orders.length}…`; render();
+    const { data, error } = await sb.rpc('po_import_alibaba', { p: orders.slice(i, i+10) }); if(error) throw error; for(const k in tot) tot[k] += +(data||{})[k]||0; }
+  PO.imp = `Alibaba: новых заказов ${tot.new}, обновлено ${tot.updated}. Позиций ${tot.items}, сразу связано с базой ${tot.linked}. Остальные свяжите при приёмке — Silver запомнит связь.`;
+  PO.mode = 'orders'; PO.filter = 'open'; PO.list = null; await loadPo(); render();
 }
 // перевод китайских названий на русский — встроенным переводчиком Chrome (бесплатно, прямо на компьютере)
 async function translate1688(){
