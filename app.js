@@ -1395,8 +1395,8 @@ async function loadSite(){
   if(!f.parts || f.partsKey!==pk){ const r = await sb.rpc('site_parts2', { p_site:f.site, p_status: f.status==='baseonly' ? null : f.status }); f.parts = (r.data || []).sort((a,b) => (!a.name)-(!b.name) || b.n-a.n); f.partsKey = pk; if(!f.parts.some(x=>x.part===f.part)) f.part = null; }
   const bo = f.status==='baseonly';
   const [{ data, error }, b] = await Promise.all([
-    sb.rpc('site_list', { p_site:f.site, p_status:bo?'review':f.status, p_q:f.q.trim(), p_offset:f.off, p_limit:bo?0:50, p_part:f.part||null }),
-    sb.rpc('site_base_only', { p_site:f.site, p_q:f.q.trim(), p_offset:f.off, p_limit:bo?50:0 }) ]);
+    sb.rpc('site_list2', { p_site:f.site, p_status:bo?'review':f.status, p_q:f.q.trim(), p_offset:f.off, p_limit:bo?0:50, p_part:f.part||null, p_sort:f.sort||null, p_desc:!!f.desc }),
+    sb.rpc('site_base_only2', { p_site:f.site, p_q:f.q.trim(), p_offset:f.off, p_limit:bo?50:0, p_sort:f.sort||null, p_desc:!!f.desc }) ]);
   if(error){ toast(errText(error)); f.data = { rows:[], counts:{} }; } else f.data = data;
   f.baseTotal = b.data ? b.data.total : 0; f.base = bo && b.data ? b.data.rows : [];
 }
@@ -1412,13 +1412,14 @@ function renderSite(){
       <input id="st-q" placeholder="Поиск: название или штрихкод" value="${esc(f.q)}" style="flex:1;min-width:200px"></div>
     ${f.status==='baseonly'?'':`<div class="filters"><select id="st-part" aria-label="Раздел сайта"><option value="">Все разделы сайта${(f.parts||[]).length?' ('+(f.parts||[]).length+')':''}</option>${(f.parts||[]).map(x=>`<option value="${esc(x.part)}" ${f.part===x.part?'selected':''}>${esc(x.name || 'Без названия: '+(x.sample||[]).slice(0,2).join(', '))} · ${x.n}</option>`).join('')}</select>
       ${f.part?(()=>{ const P = (f.parts||[]).find(x=>x.part===f.part); return P && /^\d+$/.test(P.part) ? `<input id="st-part-name" placeholder="Назовите раздел, например «Авторская работа»" value="${esc(P.name||'')}" style="min-width:240px"><button class="btn small" id="st-part-save">Сохранить название</button>` : ''; })():''}</div>`}
+    <div class="row" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin:0 0 10px"><span class="meta">Сортировка:</span>${[['name','Товар'],['category','Категория'],['barcode','Штрихкод'],['price','Цена'],['stock','Остаток']].map(([k,v])=>`<button class="btn small ${f.sort===k?'primary':''}" data-stsort="${k}">${v} ${f.sort===k?(f.desc?'▼':'▲'):''}</button>`).join('')}${f.sort?'<button class="btn small" data-stsort="">✕</button>':''}</div>
     ${f.status==='baseonly' ? siteBaseOnlyHtml(f) : !D?'<div class="empty">Загружаем…</div>':!D.rows.length?'<div class="empty">Здесь пусто</div>':D.rows.map(r=>{ const key=r.site+':'+r.uid, open=f.open===key;
       return `<div class="card" style="margin-bottom:8px">
       <div class="grid2" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:center">
         <div class="row" style="justify-content:flex-start;align-items:flex-start">${siteImg(r.photo)}<div><b>${esc(r.title)}</b><br><span class="meta">${esc(r.part||'')}</span><br><span class="num">${fmt(r.price)}</span>
           ${r.url?` · <a href="${esc(r.url)}" target="_blank" rel="noopener">на сайте</a>`:''}</div></div>
         <div class="row" style="justify-content:flex-start;align-items:flex-start">${r.product_id?`${siteImg(r.p_photo)}<div><b>${esc(r.p_name)}</b><br><span class="meta num">${esc(r.p_barcode)}</span><br>
-          <span class="num" style="${+r.p_price!==+r.price?'color:var(--bad)':''}">${fmt(r.p_price)}${+r.p_price!==+r.price?' — цена отличается':''}</span>${r.score!=null&&r.status!=='confirmed'?` <span class="chip">сходство ${Math.round(r.score*100)}%</span>`:''}</div>`
+          <span class="num" style="${+r.p_price!==+r.price?'color:var(--bad)':''}">${fmt(r.p_price)}${+r.p_price!==+r.price?' — цена отличается':''}</span>${r.score!=null&&r.status!=='confirmed'?` <span class="chip">сходство ${Math.round(r.score*100)}%</span>`:''}<br><span class="meta">${r.p_cat?esc(r.p_cat)+' · ':''}остаток </span>${+r.stock>0?'<span class="chip ok">'+r.stock+'</span>':'<span class="meta">0</span>'}</div>`
           :'<div class="meta">Не связан с базой</div>'}</div>
       </div>
       <div class="row" style="justify-content:flex-end;flex-wrap:wrap;margin-top:8px">
@@ -2561,6 +2562,7 @@ document.addEventListener('click', async e => {
   else if(t.id==='st-grp-go'){ t.disabled = true; const { data, error } = await sb.rpc('site_group_match', { p_site:S.st.site, p_apply:true }); closeModal(); if(error) return toast(errText(error)); toast('Связано: '+data.n); S.st.off=0; await loadSite(); render(); }
   else if(t.id==='st-part-save'){ const r = await sb.rpc('site_part_name_set', { p_part:S.st.part, p_name:$('#st-part-name').value }); if(r.error) return toast(errText(r.error)); toast('Название раздела сохранено'); S.st.parts=null; await loadSite(); render(); }
   else if(d.stsite){ S.st.site=d.stsite; S.st.off=0; S.st.open=null; render(); await loadSite(); render(); }
+  else if('stsort' in d){ const k = d.stsort; if(!k){ S.st.sort = null; S.st.desc = false; } else if(S.st.sort===k) S.st.desc = !S.st.desc; else { S.st.sort = k; S.st.desc = ['price','stock'].includes(k); } S.st.off = 0; render(); await loadSite(); render(); }
   else if(d.ststatus){ S.st.status=d.ststatus; S.st.off=0; S.st.open=null; render(); await loadSite(); render(); }
   else if(d.stpage){ S.st.off=Math.max(0,S.st.off+50*(+d.stpage)); S.st.open=null; render(); await loadSite(); render(); window.scrollTo(0,0); }
   else if(d.stok){ await siteSet(d.stok, d.pid, 'confirmed'); }
