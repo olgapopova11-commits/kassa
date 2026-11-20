@@ -1391,7 +1391,8 @@ const SITE_ST = [['review','Проверить'],['auto','Связано авт�
 const SITE_NAME = { moon:'mooncollection.kz', sunshine:'sunshinejewelry.kz' };
 async function loadSite(){
   const f = S.st; f.data = null;
-  if(!f.parts || f.partsSite!==f.site){ const r = await sb.rpc('site_parts', { p_site:f.site }); f.parts = r.data || []; f.partsSite = f.site; if(!f.parts.some(x=>x.part===f.part)) f.part = null; }
+  const pk = f.site+':'+f.status;
+  if(!f.parts || f.partsKey!==pk){ const r = await sb.rpc('site_parts2', { p_site:f.site, p_status: f.status==='baseonly' ? null : f.status }); f.parts = (r.data || []).sort((a,b) => (!a.name)-(!b.name) || b.n-a.n); f.partsKey = pk; if(!f.parts.some(x=>x.part===f.part)) f.part = null; }
   const bo = f.status==='baseonly';
   const [{ data, error }, b] = await Promise.all([
     sb.rpc('site_list', { p_site:f.site, p_status:bo?'review':f.status, p_q:f.q.trim(), p_offset:f.off, p_limit:bo?0:50, p_part:f.part||null }),
@@ -1404,13 +1405,13 @@ function renderSite(){
   const f = S.st, D = f.data, c0 = k => (D && D.counts && D.counts[f.site+':'+k]) || 0;
   const cnt = k => k==='siteonly' ? c0('none')+c0('rejected') : k==='baseonly' ? (f.baseTotal||0) : c0(k);
   $('#main').innerHTML = `<h2>Сайт ↔ база товаров</h2>
-    <p class="meta">Слева карточка с сайта, справа товар из базы, с которым она связана. Через эту связь на сайт пойдут остатки, а в кассу — фото. Несколько карточек сайта можно связать с одним товаром базы — например, все разные серьги за 3 500 ₸ с общим штрихкодом «Серьги 3500».</p>
+    <p class="meta">Слева карточка с сайта, справа товар из базы, с которым она связана. Через эту связь на сайт пойдут остатки, а в кассу — фото. Товары с общим штрихкодом (например «Серьги 3500») на сайт не выводятся и с карточками не связываются.</p>
 
     <div class="filters">${Object.entries(SITE_NAME).map(([k,v])=>`<button class="btn small ${f.site===k?'primary':''}" data-stsite="${k}">${v}</button>`).join('')}</div>
     <div class="filters">${SITE_ST.map(([k,v])=>`<button class="btn small ${f.status===k?'primary':''}" data-ststatus="${k}">${v} · ${cnt(k)}</button>`).join('')}
       <input id="st-q" placeholder="Поиск: название или штрихкод" value="${esc(f.q)}" style="flex:1;min-width:200px"></div>
-    <div class="filters"><select id="st-part" aria-label="Категория на сайте"><option value="">Все категории сайта</option>${(f.parts||[]).map(x=>`<option value="${esc(x.part)}" ${f.part===x.part?'selected':''}>${esc(x.name || 'Без названия: '+(x.sample||[]).slice(0,2).join(', '))} · ${x.n}</option>`).join('')}</select>
-      ${f.part?(()=>{ const P = (f.parts||[]).find(x=>x.part===f.part); return P && /^\d+$/.test(P.part) ? `<input id="st-part-name" placeholder="Назовите раздел, например «Авторская работа»" value="${esc(P.name||'')}" style="min-width:240px"><button class="btn small" id="st-part-save">Сохранить название</button>` : ''; })():''}</div>
+    ${f.status==='baseonly'?'':`<div class="filters"><select id="st-part" aria-label="Раздел сайта"><option value="">Все разделы сайта${(f.parts||[]).length?' ('+(f.parts||[]).length+')':''}</option>${(f.parts||[]).map(x=>`<option value="${esc(x.part)}" ${f.part===x.part?'selected':''}>${esc(x.name || 'Без названия: '+(x.sample||[]).slice(0,2).join(', '))} · ${x.n}</option>`).join('')}</select>
+      ${f.part?(()=>{ const P = (f.parts||[]).find(x=>x.part===f.part); return P && /^\d+$/.test(P.part) ? `<input id="st-part-name" placeholder="Назовите раздел, например «Авторская работа»" value="${esc(P.name||'')}" style="min-width:240px"><button class="btn small" id="st-part-save">Сохранить название</button>` : ''; })():''}</div>`}
     ${f.status==='baseonly' ? siteBaseOnlyHtml(f) : !D?'<div class="empty">Загружаем…</div>':!D.rows.length?'<div class="empty">Здесь пусто</div>':D.rows.map(r=>{ const key=r.site+':'+r.uid, open=f.open===key;
       return `<div class="card" style="margin-bottom:8px">
       <div class="grid2" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:center">
