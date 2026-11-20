@@ -1359,6 +1359,7 @@ document.addEventListener('click', async e => { if(S.view!=='nom') return; const
 function nmModalSync(e, f, cats, inp){
   const M = $('#modal'), has = !!M.querySelector('#nm-modal');
   if(!e){ if(has) M.innerHTML = ''; return; }
+  if(e.id && !(f.gal ||= {})[e.id]) nmGalLoad(e.id);
   if(e.id && !(f.hist ||= {})[e.id] && nmCanEdit()){ f.hist[e.id] = 'wait'; sb.rpc('product_price_history', { p_id:e.id }).then(({ data }) => { f.hist[e.id] = data || []; if(S.view==='nom' && f.ed && f.ed.id===e.id) render(); }); }
   const ae = document.activeElement, keep = ae && M.contains(ae) && ae.id ? { id:ae.id, s:ae.selectionStart, e:ae.selectionEnd } : null;
   const sc = has ? M.querySelector('.dialog').scrollTop : 0;
@@ -1368,14 +1369,14 @@ function nmModalSync(e, f, cats, inp){
   if(keep){ const el = document.getElementById(keep.id); if(el){ el.focus(); try{ el.setSelectionRange(keep.s, keep.e); }catch(_){} } }
 }
 /* история закупочных цен товара: где, у кого и почём брали */
-function nmHistHtml(H){
+function nmHistHtml(H, op){
   if(!H) return ''; if(H==='wait') return '<div class="meta">История закупок: загружаем…</div>';
   if(!H.length) return '<div class="cust meta">📈 История закупок: этот товар ещё не связан ни с одним заказом. Связь появляется при приёмке заказа из Китая или Alibaba.</div>';
   const CUR = { CNY:'¥', USD:'$', KZT:'₸' }, pr = h => h.price_cur!=null ? (CUR[h.currency]||'')+(+h.price_cur).toLocaleString('ru-RU',{maximumFractionDigits:2}) : '—';
   const same = H.filter(h => h.price_cur!=null && h.currency===H[0].currency), last = same[0], best = same.reduce((a,h)=> !a || +h.price_cur < +a.price_cur ? h : a, null);
   const diff = last && best && +best.price_cur < +last.price_cur ? Math.round((+last.price_cur - +best.price_cur) / +best.price_cur * 100) : 0;
   const src = { '1688':'1688', alibaba:'Alibaba', receipt:'приёмка' };
-  return `<details class="cust" ${diff?'open':''}><summary style="cursor:pointer"><b>📈 История закупок (${H.length})</b>${last?` · последняя ${pr(last)} у ${esc(noZh(last.supplier)||'поставщика')}`:''}${diff?` · <span style="color:var(--bad)">дороже лучшей цены на ${diff}%: ${pr(best)} у ${esc(noZh(best.supplier)||'другого поставщика')}, ${dshort(best.at)}</span>`:''}</summary>
+  return `<details class="cust" data-nmdet="hist" ${(op ?? diff)?'open':''}><summary style="cursor:pointer"><b>📈 История закупок (${H.length})</b>${last?` · последняя ${pr(last)} у ${esc(noZh(last.supplier)||'поставщика')}`:''}${diff?` · <span style="color:var(--bad)">дороже лучшей цены на ${diff}%: ${pr(best)} у ${esc(noZh(best.supplier)||'другого поставщика')}, ${dshort(best.at)}</span>`:''}</summary>
     <div class="scroll" style="margin-top:6px"><table><thead><tr><th>Дата</th><th>Где</th><th>Поставщик</th><th>Вариант</th><th>Цена</th><th>Себест.</th><th>Шт.</th><th></th></tr></thead><tbody>
     ${H.map(h=>`<tr style="${best&&h===best?'background:var(--soft)':''}"><td class="num">${dshort(h.at)}</td><td>${src[h.source]||esc(h.source||'')}</td><td>${esc(noZh(h.supplier)||'—')}</td><td class="meta">${esc(poSpec({ spec:h.spec })||'')}</td>
       <td class="num">${pr(h)}${best&&h===best?' <span class="chip ok">лучшая</span>':''}</td><td class="num">${h.kzt!=null?fmt(h.kzt):'—'}</td><td class="num">${h.qty}</td><td>${h.url?`<a href="${esc(h.url)}" target="_blank" rel="noopener">↗</a>`:''}</td></tr>`).join('')}</tbody></table></div></details>`;
@@ -1394,14 +1395,14 @@ async function aiLoad(pid){
 /* готовые фото товара, которые можно взять как исходник: главное, сгенерированные, с сайта, от поставщика */
 function aiSrcList(e){
   const out = [], seen = new Set(), add = (u, t) => { if(u && !seen.has(u)){ seen.add(u); out.push([u, t]); } };
-  add(e.photo_url, 'главное'); (AI.list||[]).forEach(x => add(x.url, 'AI')); (AI.srcs||[]).forEach(([u,t]) => add(u, t));
-  return out.slice(0, 16);
+  add(e.photo_url, 'главное'); const G = (S.nm.gal||{})[e.id]; if(Array.isArray(G)) G.forEach(x => add(x.url, 'галерея')); (AI.list||[]).forEach(x => add(x.url, 'AI')); (AI.srcs||[]).forEach(([u,t]) => add(u, t));
+  return out.slice(0, 20);
 }
 function aiPhotoHtml(e){
   if(AI.pid !== e.id){ aiReset(e.id); aiLoad(e.id); }
   const sizeTxt = AI.len ? `${AI.len}${AI.wid?' × '+AI.wid:''} мм` : (e.size_mm || '');
   const step = { wb:'Нажмите на белую (или серую) карточку на фото', r1:'Линейка: нажмите на отметку 0', r2:'Линейка: нажмите на отметку 1 см (10 мм)', l1:'Изделие: нажмите на один край (длина)', l2:'Изделие: нажмите на противоположный край', w1:'Ширина: нажмите на один край', w2:'Ширина: нажмите на другой край' }[AI.mode];
-  return `<details class="cust" ${AI.cv||AI.busy?'open':''} id="ai-box"><summary style="cursor:pointer"><b>✨ AI-фото для сайта (Grok)</b> <span class="meta">— белый фон или на модели из фото из магазина</span></summary>
+  return `<details class="cust" data-nmdet="ai" ${AI.cv||AI.busy||(S.nm.open||{}).ai?'open':''} id="ai-box"><summary style="cursor:pointer"><b>✨ AI-фото для сайта (Grok)</b> <span class="meta">— белый фон или на модели из фото из магазина</span></summary>
     ${AI.st && !AI.st.has_key ? (AI.st.owner ? `<div class="stack" style="gap:6px;margin-top:8px"><span class="meta">Впишите ключ Grok: console.x.ai → API Keys → Create. Ключ хранится на сервере, в браузер не возвращается.</span><div class="row" style="gap:6px"><input id="ai-key" type="password" placeholder="xai-…" autocomplete="off" style="flex:1"><button class="btn small primary" id="ai-key-save">Сохранить ключ</button></div></div>` : '<div class="meta" style="margin-top:8px">Генерация заработает, когда владелец впишет ключ Grok.</div>') : ''}
     <div class="stack" style="gap:8px;margin-top:8px">
       <label class="btn small" style="cursor:pointer;align-self:flex-start">📷 ${AI.cv?'Заменить фото из магазина':'Загрузить фото из магазина'}<input type="file" id="ai-file" accept="image/*" hidden></label>
@@ -1422,7 +1423,7 @@ function aiPhotoHtml(e){
         <button class="btn primary small" data-aigen="model" ${AI.cv&&!AI.busy?'':'disabled'}>Сгенерировать на модели</button>
         ${AI.busy?'<span class="meta">Grok рисует… обычно 10–30 секунд</span>':''}</div>
       ${(AI.list||[]).length?`<div class="row" style="gap:8px;flex-wrap:wrap;justify-content:flex-start">${AI.list.map(x=>`<div class="stack" style="gap:4px;width:150px"><a href="${esc(x.url)}" target="_blank" rel="noopener"><img src="${esc(x.url)}" alt="" style="width:150px;height:150px;object-fit:cover;border-radius:10px"></a>
-        <span class="meta">${x.mode==='model'?'на модели':'белый фон'} · ${dshort(x.created_at)}</span>${e.photo_url===x.url?'<span class="chip ok">главное фото</span>':`<button class="btn small" data-aimain="${esc(x.url)}">Сделать главным</button>`}</div>`).join('')}</div>`:''}
+        <span class="meta">${x.mode==='model'?'на модели':'белый фон'} · ${dshort(x.created_at)}</span>${e.photo_url===x.url?'<span class="chip ok">главное фото</span>':`<button class="btn small" data-aimain="${esc(x.url)}">Сделать главным</button>`}${nmInGal(e.id, x.url)?'<span class="chip">в галерее</span>':`<button class="btn small" data-aigal="${esc(x.url)}">В галерею</button>`}</div>`).join('')}</div>`:''}
     </div></details>`;
 }
 function aiPaint(){
@@ -1476,7 +1477,9 @@ document.addEventListener('click', async e => {
     const { data, error } = await sb.functions.invoke('photo_ai', { body:{ action:'gen', product_id:pid, image, mode:t.dataset.aigen, wish, size } });
     let msg = error ? error.message : null; if(error){ try{ msg = (await error.context.json()).error || msg; }catch(_){} }
     AI.busy = false; if(msg){ render(); return toast(msg); } AI.list = [{ url:data.url, mode:data.mode, created_at:new Date().toISOString() }, ...(AI.list||[])]; toast('Готово! Если нравится — «Сделать главным»'); render(); }
-  else if(t.dataset.aimain){ const { error } = await sb.rpc('product_photo_set', { p_id:AI.pid, p_url:t.dataset.aimain }); if(error) return toast(errText(error));
+  else if(t.dataset.aigal){ t.disabled = true; const { error } = await sb.rpc('product_photo_add', { p_id:AI.pid, p_url:t.dataset.aigal }); if(error){ t.disabled = false; return toast(errText(error)); }
+    toast('Добавлено в галерею товара'); await nmGalLoad(AI.pid); }
+  else if(t.dataset.aimain){ const { error } = await sb.rpc('product_photo_set', { p_id:AI.pid, p_url:t.dataset.aimain }); if(error) return toast(errText(error)); nmGalLoad(AI.pid);
     if(S.nm.ed) S.nm.ed.photo_url = t.dataset.aimain; const row = (S.nm.data&&S.nm.data.rows||[]).find(x=>x.id===AI.pid); if(row) row.photo_url = t.dataset.aimain; toast('Главное фото обновлено'); render(); }
 });
 /* страницы номенклатуры: 1 2 3 … N и сколько товаров на странице */
@@ -1493,41 +1496,99 @@ function nmPagerHtml(f, D){
 document.addEventListener('change', async e => { if(S.view!=='nom' || e.target.id!=='nm-withphoto') return; S.nm.flag = e.target.checked ? 'photo' : null; S.nm.off = 0; S.nm.data = null; render(); await loadNom(); render(); });
 document.addEventListener('change', async e => { if(S.view!=='nom' || e.target.id!=='nm-lim') return; S.nm.lim = +e.target.value; S.nm.off = 0; S.nm.data = null; render(); await loadNom(); render(); });
 function nmEditorHtml(e, f, cats, inp){
-  return `<div class="stack">
+  const op = f.open || {}, G = e.id && Array.isArray((f.gal||{})[e.id]) ? f.gal[e.id] : [], ed = nmCanEdit();
+  const sel = (k, label, opts) => `<label class="stack" style="gap:2px"><span class="label">${label}</span><select data-nf="${k}">${opts}</select></label>`;
+  return `<div class="stack" style="gap:10px">
      <div class="row"><h2 style="margin:0">${e.id?'Карточка товара':'Новый товар'}</h2><button class="btn small" id="nm-close">Закрыть</button></div>
-     <div class="row" style="justify-content:flex-start;align-items:flex-start">
-       ${e.photo_url?`<img src="${esc(e.photo_url)}" alt="" style="width:120px;height:120px;object-fit:cover;border-radius:12px">`:'<span class="thumb" style="width:120px;height:120px"></span>'}
-       <div class="stack" style="flex:1"><span class="label">Фото</span>
-         <input type="file" id="nm-photo" accept="image/*" aria-label="Загрузить фото">
-         <input data-nf="photo_url" placeholder="или ссылка на картинку" value="${esc(e.photo_url||'')}">
-         ${f.busy?'<span class="meta">Загружаем фото…</span>':''}</div></div>
-     ${e.id?`<div class="cust stack" style="gap:4px"><b>${esc(e.name)}</b><span>${esc(nmInfo(e))||'<span class="meta">категория, цвет и материал не указаны</span>'}</span>
-       <span class="meta num">Штрихкод ${esc(e.barcode)}${e.sku?' · артикул '+esc(e.sku):''} · ${fmt(e.price)}${e.cost!==''&&e.cost!=null?' · закуп '+fmt(e.cost):''} · остаток по сети ${e.stock??'—'}</span>${nmSiteLinks(e)||'<span class="meta">На сайте не найден</span>'}</div>`:''}
-     ${inp('name','Название *')}
-     <div class="grid2" style="grid-template-columns:1fr 1fr;gap:10px">
-       ${inp('barcode','Штрихкод', 'placeholder="пусто — создать свой"')}${inp('sku','Артикул')}
-       ${inp('price','Розничная цена, ₸ *','type="number" min="0" inputmode="numeric"')}${inp('cost','Закупочная цена, ₸','type="number" min="0" inputmode="numeric"')}
-       <label class="stack" style="gap:4px"><span class="label">Бренд${e.id?'':' *'}</span><select data-nf="brand">${[['','—'],['moon','MOON'],['sunshine','Sunshine'],['both','MOON и Sunshine']].map(([k,v])=>`<option value="${k}" ${(e.brand||'')===k?'selected':''}>${v}</option>`).join('')}</select></label>
-       <label class="stack" style="gap:4px"><span class="label">Категория</span><select data-nf="category_id"><option value="">—</option>${cats.map(c=>`<option value="${c.id}" ${String(e.category_id)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label>
-       ${inp('material','Материал','list="nm-mats"')}${inp('color','Цвет','list="nm-colors"')}${inp('supplier','Поставщик')}
+     <div class="row" style="justify-content:flex-start;align-items:flex-start;gap:14px;flex-wrap:wrap">
+       <div class="stack" style="gap:6px;width:150px;flex:none">
+         ${e.photo_url?`<a href="${esc(e.photo_url)}" target="_blank" rel="noopener"><img src="${esc(e.photo_url)}" alt="" style="width:150px;height:150px;object-fit:cover;border-radius:12px;display:block"></a>`:'<span class="thumb" style="width:150px;height:150px"></span>'}
+         ${e.id?nmGalHtml(e, f, G, ed):`<label class="btn small" style="cursor:pointer;text-align:center">📷 Фото<input type="file" id="nm-photo" accept="image/*" hidden></label>`}
+         ${f.busy?'<span class="meta">Загружаем фото…</span>':''}
+       </div>
+       <div class="stack" style="gap:8px;flex:1;min-width:260px">
+         ${inp('name','Название *')}
+         ${e.id?`<div class="meta num" style="line-height:1.4">${esc(nmInfo(e))||'категория, цвет и материал не указаны'}<br>Остаток по сети: <b>${e.stock??'—'}</b>${(e.sites||[]).some(x=>x.url)?' · '+(e.sites||[]).filter(x=>x.url).map(x=>`<a href="${esc(x.url)}" target="_blank" rel="noopener">${x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'}</a>`).join(' · '):' · на сайте не найден'}</div>`:''}
+         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 10px">
+           ${inp('price','Цена, ₸ *','type="number" min="0" inputmode="numeric"')}${inp('cost','Закуп, ₸','type="number" min="0" inputmode="numeric"')}
+           ${inp('barcode','Штрихкод', 'placeholder="пусто — создать свой"')}${inp('sku','Артикул')}
+           ${sel('brand', 'Бренд'+(e.id?'':' *'), [['','—'],['moon','MOON'],['sunshine','Sunshine'],['both','MOON и Sunshine']].map(([k,v])=>`<option value="${k}" ${(e.brand||'')===k?'selected':''}>${v}</option>`).join(''))}
+           ${sel('category_id', 'Категория', `<option value="">—</option>${cats.map(c=>`<option value="${c.id}" ${String(e.category_id)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}`)}
+           ${inp('material','Материал','list="nm-mats"')}${inp('color','Цвет','list="nm-colors"')}${inp('supplier','Поставщик')}
+         </div>
+         ${inp('purchase_url','Ссылка на закуп')}
+       </div>
      </div>
      <datalist id="nm-mats">${['Серебро 925','Нержавейка','Мед сплав','Пластик','мельхиор','Жемчуг','Кожа','другой'].map(m=>`<option value="${m}">`).join('')}</datalist>
      <datalist id="nm-colors">${['золото','серебро','цветной','черный'].map(m=>`<option value="${m}">`).join('')}</datalist>
-     ${inp('purchase_url','Ссылка на закуп')}
-     ${e.id?nmHistHtml((f.hist||{})[e.id]):''}
-     ${e.id&&nmCanEdit()?aiPhotoHtml(e):''}
-     <div class="row" style="justify-content:flex-start;gap:16px"><label title="Под одним штрихкодом продаются разные изделия одной цены — на сайте это много карточек"><input type="checkbox" data-nf="is_group" ${e.is_group?'checked':''}> Общий штрихкод (много разных изделий)</label>
-       <label><input type="checkbox" data-nf="archived" ${e.archived?'checked':''}> В архиве</label></div>
-     <div class="row"><span>${e.id&&e.barcode?`<button class="btn small" data-labels='${esc(JSON.stringify([{n:e.name,b:e.barcode,p:+e.price,q:1}]))}'>Этикетка</button>`:''}</span>
-       <button class="btn primary" id="nm-save">${e.id?'Сохранить':'Создать товар'}</button></div>
-     <div class="cust stack"><span class="label">Связь с сайтом</span>
-       ${!e.id?'<span class="meta">Сначала сохраните товар</span>':`
-       ${(e.sites||[]).map(x=>`<div class="row"><span>${x.site==='moon'?'MOON':'Sunshine'}: ${esc(x.title)} ${x.url?`<a href="${esc(x.url)}" target="_blank" rel="noopener">открыть</a>`:''}</span><button class="btn small" data-nmunlink="${x.site}:${x.uid}">Отвязать</button></div>`).join('') || '<span class="meta">Не связан с сайтом</span>'}
+     <div class="row" style="flex-wrap:wrap;gap:8px 16px">
+       <span class="row" style="gap:16px;flex-wrap:wrap;justify-content:flex-start"><label title="Под одним штрихкодом продаются разные изделия одной цены — на сайте это много карточек"><input type="checkbox" data-nf="is_group" ${e.is_group?'checked':''}> Общий штрихкод</label>
+         <label><input type="checkbox" data-nf="archived" ${e.archived?'checked':''}> В архиве</label></span>
+       <span class="row" style="gap:8px">${e.id&&e.barcode?`<button class="btn small" data-labels='${esc(JSON.stringify([{n:e.name,b:e.barcode,p:+e.price,q:1}]))}'>Этикетка</button>`:''}
+         <button class="btn primary" id="nm-save">${e.id?'Сохранить':'Создать товар'}</button></span></div>
+     ${e.id?nmHistHtml((f.hist||{})[e.id], op.hist):''}
+     ${e.id&&ed?aiPhotoHtml(e):''}
+     <details class="cust" data-nmdet="site" ${op.site||f.sq?'open':''}><summary style="cursor:pointer"><b>🔗 Связь с сайтом</b> <span class="meta">${!e.id?'— сначала сохраните товар':(e.sites||[]).length?'— связан: '+(e.sites||[]).map(x=>x.site==='moon'?'MOON':'Sunshine').join(', '):'— не связан'}</span></summary>
+       ${!e.id?'':`<div class="stack" style="gap:6px;margin-top:8px">
+       ${(e.sites||[]).map(x=>`<div class="row"><span>${x.site==='moon'?'MOON':'Sunshine'}: ${esc(x.title)} ${x.url?`<a href="${esc(x.url)}" target="_blank" rel="noopener">открыть</a>`:''}</span><button class="btn small" data-nmunlink="${x.site}:${x.uid}">Отвязать</button></div>`).join('')}
        <input id="nm-sq" placeholder="Найти карточку на сайте по названию" value="${esc(f.sq)}" autocomplete="off">
-       ${f.sfound.map(x=>`<button class="prod" data-nmlink="${x.site}:${x.uid}">${thumb({photo_url:x.photo})}<span><b>${esc(x.title)}</b><br><span class="meta">${x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'}${x.linked_to?' · сейчас связан с: '+esc(x.linked_to):''}</span></span><span class="price num">${fmt(x.price)}</span></button>`).join('')}`}
-     </div>
-   </div>`;
+       ${f.sfound.map(x=>`<button class="prod" data-nmlink="${x.site}:${x.uid}">${thumb({photo_url:x.photo})}<span><b>${esc(x.title)}</b><br><span class="meta">${x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'}${x.linked_to?' · сейчас связан с: '+esc(x.linked_to):''}</span></span><span class="price num">${fmt(x.price)}</span></button>`).join('')}</div>`}
+     </details>
+   </div>`.replace(/<label class="stack" style="gap:4px">/g, '<label class="stack" style="gap:2px">');
 }
+/* галерея фото товара: несколько фото, одно главное (оно же photo_url) */
+function nmInGal(pid, url){ const G = (S.nm.gal||{})[pid]; return Array.isArray(G) && G.some(x => x.url===url); }
+async function nmGalLoad(pid){
+  (S.nm.gal ||= {})[pid] = (S.nm.gal[pid] && S.nm.gal[pid] !== 'wait') ? S.nm.gal[pid] : 'wait';
+  const { data } = await sb.from('product_photos').select('id,url,sort').eq('product_id', pid).order('sort').order('id');
+  S.nm.gal[pid] = data || []; if(S.view==='nom' && S.nm.ed && S.nm.ed.id===pid) render();
+}
+function nmGalHtml(e, f, G, ed){
+  const list = G.length ? G : (e.photo_url ? [{ id:null, url:e.photo_url }] : []);
+  return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">
+    ${list.map(x=>{ const main = x.url===e.photo_url;
+      return `<div style="position:relative">
+        <button type="button" ${x.id&&!main&&ed?`data-ngmain="${x.id}" title="Сделать главным"`:'disabled'} style="border:${main?'2px solid var(--accent,#c58b2e)':'1px solid var(--line,#ddd)'};padding:0;border-radius:8px;overflow:hidden;background:none;cursor:${main?'default':'pointer'};display:block;width:100%"><img src="${esc(x.url)}" alt="" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;display:block"></button>
+        ${x.id&&ed?`<button type="button" data-ngdel="${x.id}" title="${f.galDel===x.id?'Нажмите ещё раз, чтобы убрать':'Убрать из галереи'}" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;border:0;padding:0;font-size:11px;line-height:20px;cursor:pointer;background:${f.galDel===x.id?'var(--bad,#d33)':'rgba(0,0,0,.55)'};color:#fff">${f.galDel===x.id?'?':'✕'}</button>`:''}
+        ${main?'<span style="position:absolute;left:2px;bottom:2px;font-size:9px;background:rgba(0,0,0,.6);color:#fff;border-radius:4px;padding:0 3px">главное</span>':''}</div>`; }).join('')}
+    </div>
+    ${ed?`<label class="btn small" style="cursor:pointer;text-align:center">＋ фото<input type="file" id="nm-gal-add" accept="image/*" multiple hidden></label>`:''}
+    ${G==='wait'?'<span class="meta">загружаем фото…</span>':''}
+    ${list.length>1?'<span class="meta" style="font-size:11px">Нажмите на фото, чтобы сделать главным</span>':''}
+    <details data-nmdet="purl" ${(f.open||{}).purl?'open':''}><summary class="meta" style="cursor:pointer;font-size:12px">ссылка на главное фото</summary><input data-nf="photo_url" placeholder="ссылка на картинку" value="${esc(e.photo_url||'')}" style="margin-top:4px;width:100%"></details>`;
+}
+async function nmGalUpload(files){
+  const e = S.nm.ed; if(!e || !e.id || !files.length) return;
+  S.nm.busy = true; render(); let ok = 0;
+  for(const [i, file] of [...files].entries()){
+    try{
+      const img = await createImageBitmap(file); const k = Math.min(1, 1600/Math.max(img.width, img.height));
+      const c = document.createElement('canvas'); c.width = Math.round(img.width*k); c.height = Math.round(img.height*k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
+      const path = `${e.id}/${Date.now()}-${i}.jpg`;
+      const { error } = await sb.storage.from('product-photos').upload(path, blob, { contentType:'image/jpeg', upsert:true }); if(error) throw error;
+      const url = sb.storage.from('product-photos').getPublicUrl(path).data.publicUrl;
+      const r = await sb.rpc('product_photo_add', { p_id:e.id, p_url:url }); if(r.error) throw r.error;
+      if(!e.photo_url){ e.photo_url = url; const row = (S.nm.data&&S.nm.data.rows||[]).find(x=>x.id===e.id); if(row) row.photo_url = url; }
+      ok++;
+    }catch(err){ toast('Фото не загрузилось: '+errText(err)); }
+  }
+  S.nm.busy = false; if(ok) toast(ok===1?'Фото добавлено':'Добавлено фото: '+ok); await nmGalLoad(e.id); render();
+}
+document.addEventListener('change', e => { if(e.target.id==='nm-gal-add' && e.target.files.length) nmGalUpload(e.target.files); });
+document.addEventListener('toggle', e => { const d = e.target; if(!d || !d.dataset || !d.dataset.nmdet || S.view!=='nom') return; (S.nm.open ||= {})[d.dataset.nmdet] = d.open; }, true);
+document.addEventListener('click', async e => {
+  const t = e.target.closest('button[data-ngmain],button[data-ngdel]'); if(!t || S.view!=='nom' || !S.nm.ed) return;
+  const ed = S.nm.ed, f = S.nm;
+  if(t.dataset.ngmain){ const { data, error } = await sb.rpc('product_photo_main', { p_photo:+t.dataset.ngmain }); if(error) return toast(errText(error));
+    ed.photo_url = data; const row = (f.data&&f.data.rows||[]).find(x=>x.id===ed.id); if(row) row.photo_url = data; f.galDel = null; toast('Главное фото обновлено'); await nmGalLoad(ed.id); return; }
+  const id = +t.dataset.ngdel;
+  if(f.galDel !== id){ f.galDel = id; render(); setTimeout(()=>{ if(f.galDel===id){ f.galDel = null; if(S.view==='nom') render(); } }, 4000); return; }
+  f.galDel = null; const { error } = await sb.rpc('product_photo_del', { p_photo:id }); if(error) return toast(errText(error));
+  const { data:p } = await sb.from('products').select('photo_url').eq('id', ed.id).maybeSingle(); ed.photo_url = p ? p.photo_url : ed.photo_url;
+  const row = (f.data&&f.data.rows||[]).find(x=>x.id===ed.id); if(row) row.photo_url = ed.photo_url; toast('Фото убрано из галереи'); await nmGalLoad(ed.id);
+});
 function nmInfo(p){ return [p.category, p.color, p.material, p.stone, {moon:'MOON',sunshine:'Sunshine',both:'MOON и Sunshine'}[p.brand]||p.brand, +p.price===0?'⚠ нет розничной цены':'', p.supplier?'поставщик '+p.supplier:''].filter(Boolean).join(' · '); }
 function nmSiteLinks(p){ const L=(p.sites||[]).filter(x=>x.url); return L.length?`<div class="meta" style="padding:0 10px 8px">${L.map(x=>`🔗 <a href="${esc(x.url)}" target="_blank" rel="noopener">${x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'}${x.status==='review'?' (связь не проверена)':''}</a>`).join(' &nbsp; ')}</div>`:''; }
 function nmOpen(p){ S.nm.ed = { ...NM_EMPTY(), ...p, category_id: p.category_id??'', cost: p.cost??'', supplier: p.supplier||'', sites: p.sites||[] }; S.nm.sq=''; S.nm.sfound=[]; render(); }
