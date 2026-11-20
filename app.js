@@ -2238,22 +2238,37 @@ async function wuImport(kind, file, forceStore){
         .filter(r => r.no && r.at);
       if(!R.length) throw new Error('В файле нет строк продаж');
       const nos = [...new Set(R.map(r=>r.no))], dates = R.map(r=>r.at).sort();
-      if(!store){ const emps = [...new Set(R.map(r=>r.emp).filter(Boolean).map(String))];
-        const byTxt = [...new Set(emps.map(wuStoreFromText).filter(Boolean))];
-        if(byTxt.length===1){ store = byTxt[0]; WU.pre = (WU.pre||'') + `${esc(storeName(store))} (по продавцу «${esc(emps.join(', '))}») — `; }
+      // в одном файле Wipon бывают чеки разных магазинов (один ИП = несколько точек): делим по продавцу
+      const stOf = r => r.emp ? wuStoreFromText(r.emp) : null;
+      const bySt = {}; R.forEach(r => { const st = stOf(r); if(st) (bySt[st] ||= []).push(r); });
+      const sts = Object.keys(bySt).map(Number), unk = R.filter(r => !stOf(r));
+      let groups;
+      if(sts.length>1 || (sts.length===1 && store && store!==sts[0] && !unk.length)){
+        if(store && !(sts.length===1 && sts[0]===store)) WU.pre = (WU.pre||'') + `в файле чеки нескольких магазинов — разложили по продавцам (выбранный магазин не применён). `;
+        if(unk.length){ const ue = [...new Set(unk.map(r=>String(r.emp||'не указан')))];
+          if(!store) throw new Error(`в файле несколько магазинов, и у части чеков продавец не опознан (${esc(ue.join(', '))}). Выберите магазин для них и загрузите файл ещё раз.`);
+          (bySt[store] ||= []).push(...unk); }
+        groups = Object.entries(bySt).map(([st, rows]) => [+st, rows]);
+      } else {
+        if(!store && sts.length===1 && !unk.length){ store = sts[0]; WU.pre = (WU.pre||'') + `${esc(storeName(store))} (по продавцу) — `; }
+        if(!store){ const emps = [...new Set(R.map(r=>r.emp).filter(Boolean).map(String))];
+          const { data:det, error:de } = await sb.rpc('wipon_detect_store', { p_nos: nos.slice(0, 3000), p_emps: emps }); if(de) throw de;
+          if(!det || !det.store) throw new Error(`не удалось понять, какой это магазин (продавцы в файле: ${esc(emps.join(', ')||'не указаны')}). Выберите магазин в списке и загрузите этот файл ещё раз.`);
+          store = det.store; WU.pre = (WU.pre||'') + `${esc(storeName(store))} (определён ${det.how}) — `; }
+        groups = [[store, R]];
       }
-      if(!store){ const emps = [...new Set(R.map(r=>r.emp).filter(Boolean).map(String))];
-        const { data:det, error:de } = await sb.rpc('wipon_detect_store', { p_nos: nos.slice(0, 3000), p_emps: emps }); if(de) throw de;
-        if(!det || !det.store) throw new Error(`не удалось понять, какой это магазин (продавцы в файле: ${esc(emps.join(', ')||'не указаны')}). Выберите магазин в списке и загрузите этот файл ещё раз.`);
-        store = det.store; WU.pre = (WU.pre||'') + `${esc(storeName(store))} (определён ${det.how}) — `; }
       WU.msg = (WU.pre||'')+`нашли ${nos.length} чеков (${R.length} строк) за ${dates[0].slice(0,10)} — ${dates[dates.length-1].slice(0,10)}. Загружаем…`; render();
-      const tot = { new:0, skipped:0, returns:0, new_products:0 };
-      for(let i=0; i<nos.length; i+=400){
-        const part = new Set(nos.slice(i, i+400)), { data, error } = await sb.rpc('wipon_sales_import', { p_store:store, p_rows: R.filter(r=>part.has(r.no)) });
-        if(error) throw error; for(const k in tot) tot[k] += +(data||{})[k]||0;
-        WU.msg = (WU.pre||'')+`загружаем… ${Math.min(i+400, nos.length)} из ${nos.length} чеков`; render();
+      const res = [];
+      for(const [gst, GR] of groups){
+        const tot = { new:0, skipped:0, returns:0, new_products:0 }, gnos = [...new Set(GR.map(r=>r.no))];
+        for(let i=0; i<gnos.length; i+=400){
+          const part = new Set(gnos.slice(i, i+400)), { data, error } = await sb.rpc('wipon_sales_import', { p_store:gst, p_rows: GR.filter(r=>part.has(r.no)) });
+          if(error) throw error; for(const k in tot) tot[k] += +(data||{})[k]||0;
+          WU.msg = (WU.pre||'')+`${esc(storeName(gst))}: загружаем… ${Math.min(i+400, gnos.length)} из ${gnos.length} чеков`; render();
+        }
+        res.push(`✅ ${esc(storeName(gst))}: новых чеков ${tot.new}${tot.returns?', из них с возвратом '+tot.returns:''}; уже были в Silver и пропущены — ${tot.skipped}.${tot.new_products?` Новых товаров добавлено в базу: ${tot.new_products} (проверьте их в «Номенклатуре»).`:''}`);
       }
-      WU.msg = (WU.pre||'')+`✅ ${esc(storeName(store))}: новых чеков ${tot.new}${tot.returns?', из них с возвратом '+tot.returns:''}; уже были в Silver и пропущены — ${tot.skipped}.${tot.new_products?` Новых товаров добавлено в базу: ${tot.new_products} (проверьте их в «Номенклатуре»).`:''}`;
+      WU.msg = (WU.pre||'') + res.join('<br>');
       if(S.view==='sales'){ await loadSales(); }
     } else {
       const K = { bc: wuCol(H, ['штрих']), nm: wuCol(H, ['наимен','товар','назван'], ['штрих','катег']), qty: wuCol(H, ['остат','колич','кол-во'], ['сумм','стоим']),
@@ -3206,28 +3221,57 @@ function beCell(x){
   const cats = String(x.be_cats||''), miss = [/аренд/i.test(cats)?'':'аренда'].filter(Boolean);
   return `<b class="num">${fmt(be)}</b><br><span class="chip ${done>=100?'ok':done>=need?'ok':'warn'}" title="к этому дню по плану нужно ${need}%">${done>=100?'✓ пройдена':done+'% · надо '+need+'%'}</span>${miss.length?` <span class="chip zero" title="Не внесено в «Рентабельность → расходы магазина»">нет: ${miss.join(', ')}</span>`:''}`;
 }
-/* разбор ИИ (Claude) для владельца: цифры Silver → выводы и действия на завтра */
-const AN = { busy:false, text:'', q:'', st:null, key:false };
+/* разбор ИИ (Claude) для владельца: ежедневный разбор (сервер, 08:05) + вопросы. Карточка — в самом верху «Моего дня» */
+const AN = { busy:false, text:'', q:'', st:null, key:false, d:null, dBusy:false, dErr:'' };
+function anOpen(){ try{ return localStorage.getItem('ai_daily_open')!=='0'; }catch(_){ return true; } }
+function anFmt(t){ const out = []; let ul = false;
+  for(const raw of String(t||'').split('\n')){ const l = raw.trim();
+    const m = l.match(/^[-•*]\s+(.*)$/);
+    if(m){ if(!ul){ out.push('<ul style="margin:2px 0 6px;padding-left:20px">'); ul = true; } out.push((/^\s{2,}/.test(raw)?'<li style="margin-left:16px;list-style:circle">':'<li>')+anInl(m[1])+'</li>'); continue; }
+    if(ul){ out.push('</ul>'); ul = false; }
+    if(!l) continue;
+    const h = l.match(/^#+\s*(.*)$/) || l.match(/^\*\*(.+?)\*\*:?$/);
+    out.push(h ? `<div style="font-weight:700;margin:10px 0 2px">${anInl(h[1].replace(/\*\*/g,''))}</div>` : `<div style="margin:2px 0">${anInl(l)}</div>`); }
+  if(ul) out.push('</ul>'); return out.join(''); }
+function anInl(x){ return esc(x).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>'); }
+function anAt(iso){ if(!iso) return ''; const d = new Date(iso); if(isNaN(d)) return '';
+  return d.toLocaleString('ru-RU',{timeZone:'Asia/Almaty',day:'2-digit',month:'2-digit'})+' '+d.toLocaleTimeString('ru-RU',{timeZone:'Asia/Almaty',hour:'2-digit',minute:'2-digit'}); }
+function anKeyForm(primary){ return `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><input id="an-key" type="password" placeholder="sk-ant-…" autocomplete="off" style="flex:1;min-width:200px"><button class="btn small${primary?' primary':''}" id="an-key-save">Сохранить ключ</button></div>`; }
 function anHtml(){
   const st = AN.st;
-  if(st && !st.ai) return `<div class="card" style="margin-top:12px"><b>✨ Разбор от ИИ (Claude)</b><p class="meta" style="margin:4px 0 8px">Подключите ключ Anthropic — и Claude будет разбирать цифры сети и писать идеи и посты в «Контенте». Ключ: console.anthropic.com → API Keys → Create Key. Хранится на сервере, в браузер не возвращается.</p>
-    <div class="row" style="gap:6px;flex-wrap:wrap"><input id="an-key" type="password" placeholder="sk-ant-…" autocomplete="off" style="flex:1;min-width:200px"><button class="btn small primary" id="an-key-save">Сохранить ключ</button></div></div>`;
-  return `<div class="card" style="margin-top:12px"><div class="row" style="flex-wrap:wrap;gap:8px"><b style="flex:1">✨ Разбор от ИИ (Claude)</b>
-    <button class="btn small primary" id="an-go" ${AN.busy||!st?'disabled':''}>${AN.busy?'Думает… (~30 сек)':AN.text?'Обновить разбор':'Разобрать день'}</button></div>
-    <div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap"><input id="an-q" placeholder="Или спросите: почему просел Толе би? где взять 2 млн до конца месяца?" value="${esc(AN.q)}" style="flex:1;min-width:200px"><button class="btn small" id="an-ask" ${AN.busy||!st?'disabled':''}>Спросить</button></div>
-    <details style="margin-top:6px"><summary class="meta" style="cursor:pointer">Сменить ключ Claude</summary><div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px"><input id="an-key" type="password" placeholder="sk-ant-…" autocomplete="off" style="flex:1;min-width:200px"><button class="btn small" id="an-key-save">Сохранить ключ</button></div></details>
-    ${AN.text?`<div style="white-space:pre-wrap;margin-top:10px;line-height:1.5">${esc(AN.text).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^#+ ?(.*)$/gm,'<b>$1</b>')}</div>`:''}</div>`;
+  if(st && !st.ai) return `<div class="card" style="margin:0 0 12px"><b>✨ Разбор дня от ИИ</b><p class="meta" style="margin:4px 0 8px">Подключите ключ Anthropic — и Claude каждое утро будет разбирать цифры сети: вчера, неделя, месяц, тенденции и на что обратить внимание. Ключ: console.anthropic.com → API Keys → Create Key. Хранится на сервере, в браузер не возвращается.</p>${anKeyForm(true)}</div>`;
+  const d = AN.d, open = anOpen(), off = !st || AN.dBusy || AN.busy;
+  const body = AN.dBusy ? `<p class="meta" style="margin:8px 0">Claude разбирает цифры… (~30–60 сек)</p>`
+    : AN.dErr ? `<p class="meta" style="margin:8px 0;color:var(--bad,#c33)">${esc(AN.dErr)}</p>`
+    : d && d.text ? `<div style="line-height:1.5;margin-top:6px">${anFmt(d.text)}</div>`
+    : d ? `<p class="meta" style="margin:8px 0">Разбора ещё нет — он появится завтра в 8:05 или нажмите «Обновить».</p>`
+    : `<p class="meta" style="margin:8px 0">Загружаю разбор…</p>`;
+  return `<details class="card" id="an-card" style="margin:0 0 12px" ${open?'open':''}>
+    <summary class="row" style="cursor:pointer;flex-wrap:wrap;gap:8px;list-style:none"><b style="flex:1">✨ Разбор дня от ИИ</b>${d&&d.at?`<span class="meta">обновлено ${anAt(d.at)}</span>`:''}
+      <button class="btn small primary" id="an-daily" ${off?'disabled':''}>${AN.dBusy?'Думает… (~30–60 сек)':'Обновить'}</button></summary>
+    ${body}
+    <div class="row" style="gap:6px;margin-top:10px;flex-wrap:wrap"><input id="an-q" placeholder="Спросите: почему просел Толе би? где взять 2 млн до конца месяца?" value="${esc(AN.q)}" style="flex:1;min-width:200px"><button class="btn small" id="an-ask" ${off?'disabled':''}>${AN.busy?'Думает…':'Спросить'}</button></div>
+    ${AN.text?`<div style="line-height:1.5;margin-top:10px;padding-top:8px;border-top:1px solid var(--line,#ddd)">${anFmt(AN.text)}</div>`:''}
+    <details style="margin-top:8px"><summary class="meta" style="cursor:pointer">Сменить ключ Claude</summary>${anKeyForm(false)}</details></details>`;
 }
-async function anStatus(){ if(AN.st) return; const { data } = await sb.functions.invoke('content', { body:{ action:'status' } }); AN.st = data || { ai:false }; if(S.view==='day') render(); }
+async function anErr(error){ let m = error.message; try{ m = (await error.context.json()).error || m; }catch(_){} return m==='no_key'?'Ключ Claude не подключён':m; }
+async function anStatus(){ if(!AN.st){ const { data } = await sb.functions.invoke('content', { body:{ action:'status' } }); AN.st = data || { ai:false }; }
+  if(AN.st.ai && !AN.d && !AN.dBusy){ const { data, error } = await sb.functions.invoke('content', { body:{ action:'daily_get' } }); AN.d = error ? { text:'', at:null } : (data || { text:'', at:null }); }
+  if(S.view==='day') render(); }
+document.addEventListener('toggle', e => { if(e.target && e.target.id==='an-card'){ try{ localStorage.setItem('ai_daily_open', e.target.open?'1':'0'); }catch(_){} } }, true);
 document.addEventListener('click', async e => { if(S.view!=='day') return; const t = e.target.closest('button'); if(!t) return;
   if(t.id==='an-key-save'){ const k = ($('#an-key').value||'').trim(); if(!k) return; t.disabled = true;
     const { error } = await sb.functions.invoke('content', { body:{ action:'set_key', key:k } });
-    if(error){ let m = error.message; try{ m = (await error.context.json()).error || m; }catch(_){} t.disabled = false; return toast(m); }
-    AN.st = null; CT.ai = null; toast('Ключ Claude сохранён'); await anStatus(); }
-  else if(t.id==='an-go' || t.id==='an-ask'){ AN.q = t.id==='an-ask' ? ($('#an-q').value||'').trim() : ''; if(t.id==='an-ask' && !AN.q) return toast('Напишите вопрос');
+    if(error){ t.disabled = false; return toast(await anErr(error)); }
+    AN.st = null; AN.d = null; CT.ai = null; toast('Ключ Claude сохранён'); await anStatus(); }
+  else if(t.id==='an-daily'){ e.preventDefault(); e.stopPropagation(); AN.dBusy = true; AN.dErr = ''; try{ localStorage.setItem('ai_daily_open','1'); }catch(_){} render();
+    const { data, error } = await sb.functions.invoke('content', { body:{ action:'daily' } }); AN.dBusy = false;
+    if(error){ AN.dErr = await anErr(error); render(); return; }
+    AN.d = { text:data.text||'', at:data.at }; render(); }
+  else if(t.id==='an-ask'){ AN.q = ($('#an-q').value||'').trim(); if(!AN.q) return toast('Напишите вопрос');
     AN.busy = true; render();
     const { data, error } = await sb.functions.invoke('content', { body:{ action:'analyze', question:AN.q } }); AN.busy = false;
-    if(error){ let m = error.message; try{ m = (await error.context.json()).error || m; }catch(_){} toast(m); render(); return; }
+    if(error){ toast(await anErr(error)); render(); return; }
     AN.text = data.text || ''; DAY.ai = null; render(); }
 });
 function pulseHtml(P){
@@ -3278,7 +3322,7 @@ function renderDay(){
   const today = new Date().toLocaleDateString('ru-RU',{timeZone:'Asia/Almaty',weekday:'long',day:'numeric',month:'long'});
   if(r==='own'){ $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="day-ref">Обновить</button></div>
     <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><span class="meta">Посмотреть как:</span><div class="seg" style="display:inline-flex">${DAY_ROLES.map(([k,t])=>`<button data-dayrole="${k}" aria-pressed="${k===r}">${t}</button>`).join('')}</div></div>
-    ${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${DAY.pulse?bkRemind()+anHtml():''}${S.canAttn?attnHtml(true,'own'):''}${wiponSyncHtml()}`; DAY.items = []; return; }
+    ${anHtml()}${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${DAY.pulse?bkRemind():''}${S.canAttn?attnHtml(true,'own'):''}${wiponSyncHtml()}`; DAY.items = []; return; }
   let items = D ? [...(D[r]||[])] : [];
   if(r==='buy'){ const sg = DAY.sug && DAY.sug!=='wait' ? DAY.sug : null;
     items.unshift({ k:'sug', t:'Дозаказать — товар заканчивается', n: sg ? sg.n : 1, wait: !sg, h: sg ? (sg.n ? `Всего ${sg.units.toLocaleString('ru-RU')} шт. Удобно формировать заказ сразу по поставщику.` : '') : 'Считаем…', go:'po', mode:'suggest', lvl:'warn' }); }
