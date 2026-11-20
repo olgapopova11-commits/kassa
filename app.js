@@ -270,6 +270,7 @@ function render(){
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
+  if(lazyPending(S.view)){ $('#main').innerHTML = `<div class="card" style="text-align:center;padding:28px 16px"><div style="font-size:32px">📊</div><p style="margin:8px 0 14px">На телефоне аналитика загружается только по запросу — так приложение работает быстрее.</p><button class="btn primary" data-lazyload="${S.view}">Загрузить</button></div>`; return; }
   ({ pos:renderPos, sales:renderSales, stock:renderStock, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, attn:renderAttn, photo:renderPhoto, day:renderDay })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
 }
@@ -2703,7 +2704,13 @@ document.addEventListener('click', async e => {
   render(); scrollTo(0,0); await loadView();
 });
 // данные для открытой вкладки (при переходе и после обновления страницы)
+/* на телефоне тяжёлые отчёты грузятся только по кнопке */
+const LAZY_VIEWS = ['analytics','profit','flow'];
+const isPhone = () => matchMedia('(max-width: 760px)').matches;
+const lazyPending = v => isPhone() && LAZY_VIEWS.includes(v) && !(S.lazyOk||{})[v];
+document.addEventListener('click', async e => { const t = e.target.closest('button[data-lazyload]'); if(!t) return; (S.lazyOk ||= {})[t.dataset.lazyload] = true; render(); await loadView(); });
 async function loadView(){
+  if(lazyPending(S.view)){ render(); return; }
   if(S.view==='shifts'){ await loadShifts(); render(); }
   if(S.view==='sales'){ await loadSales(); render(); }
   if(S.view==='certs'){ await loadCerts(); render(); }
