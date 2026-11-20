@@ -105,8 +105,8 @@ setInterval(flushQueue, 60000);
 
 /* ---------- каталог (кэш на устройстве для быстрого поиска и офлайна) ---------- */
 async function loadCatalog(force){
-  const cached = ls.get('kassa_catalog5', null);
-  if(cached && !force){ S.catalog = cached.items; S.catalogAt = cached.at; }
+  const cached = ls.get('kassa_catalog6', null);
+  if(cached && !force){ S.catalog = cached.items; S.catalogAt = cached.at; S.alias = cached.alias || {}; }
   if(!navigator.onLine) return;
   if(cached && !force && Date.now() - cached.at < 6*3600e3) return;
   const items = []; let from = 0;
@@ -116,12 +116,15 @@ async function loadCatalog(force){
     data.forEach(p => items.push([p.id, p.barcode, p.sku||'', p.name, Number(p.price), p.photo_url||'', p.category_id||null, p.is_service?1:0]));
     if(data.length < 1000) break; from += 1000;
   }
-  S.catalog = items; S.catalogAt = Date.now(); ls.set('kassa_catalog5', {at:S.catalogAt, items});
+  // штрихкоды объединённых дублей (вторая база): пробиваются как основной товар
+  const alias = {}; { let f2 = 0; while(true){ const { data } = await sb.from('products').select('barcode,merged_into').not('merged_into','is',null).range(f2, f2+999); (data||[]).forEach(r => { alias[r.barcode] = r.merged_into; }); if(!data || data.length < 1000) break; f2 += 1000; } }
+  S.catalog = items; S.alias = alias; S.catalogAt = Date.now(); ls.set('kassa_catalog6', {at:S.catalogAt, items, alias});
 }
 const prodObj = a => ({ id:a[0], barcode:a[1], sku:a[2], name:a[3], price:a[4], photo_url:a[5]||null, category_id:a[6]||null, svc:!!a[7] });
 function searchCatalog(q){
   q = q.trim().toLowerCase(); if(!q) return [];
-  const exact = S.catalog.filter(p => p[1] === q || p[2].toLowerCase() === q);
+  let exact = S.catalog.filter(p => p[1] === q || p[2].toLowerCase() === q);
+  if(!exact.length && S.alias && S.alias[q]) exact = S.catalog.filter(p => p[0] === S.alias[q]);
   if(exact.length) return exact.map(prodObj);
   const words = q.split(/\s+/);
   return S.catalog.filter(p => { const n = p[3].toLowerCase(); return words.every(w => n.includes(w)) || p[1].includes(q); }).slice(0,30).map(prodObj);
