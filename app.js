@@ -1412,8 +1412,7 @@ function renderSite(){
       <input id="st-q" placeholder="Поиск: название или штрихкод" value="${esc(f.q)}" style="flex:1;min-width:200px"></div>
     ${f.status==='baseonly'?'':`<div class="filters"><select id="st-part" aria-label="Раздел сайта"><option value="">Все разделы сайта${(f.parts||[]).length?' ('+(f.parts||[]).length+')':''}</option>${(f.parts||[]).map(x=>`<option value="${esc(x.part)}" ${f.part===x.part?'selected':''}>${esc(x.name || 'Без названия: '+(x.sample||[]).slice(0,2).join(', '))} · ${x.n}</option>`).join('')}</select>
       ${f.part?(()=>{ const P = (f.parts||[]).find(x=>x.part===f.part); return P && /^\d+$/.test(P.part) ? `<input id="st-part-name" placeholder="Назовите раздел, например «Авторская работа»" value="${esc(P.name||'')}" style="min-width:240px"><button class="btn small" id="st-part-save">Сохранить название</button>` : ''; })():''}</div>`}
-    <div class="row" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin:0 0 10px"><span class="meta">Сортировка:</span>${[['name','Товар'],['category','Категория'],['barcode','Штрихкод'],['price','Цена'],['stock','Остаток']].map(([k,v])=>`<button class="btn small ${f.sort===k?'primary':''}" data-stsort="${k}">${v} ${f.sort===k?(f.desc?'▼':'▲'):''}</button>`).join('')}${f.sort?'<button class="btn small" data-stsort="">✕</button>':''}</div>
-    ${f.status==='baseonly' ? siteBaseOnlyHtml(f) : !D?'<div class="empty">Загружаем…</div>':!D.rows.length?'<div class="empty">Здесь пусто</div>':D.rows.map(r=>{ const key=r.site+':'+r.uid, open=f.open===key;
+    ${f.status==='baseonly' ? siteBaseOnlyHtml(f) : !D?'<div class="empty">Загружаем…</div>':!D.rows.length?'<div class="empty">Здесь пусто</div>':`<div class="row" style="justify-content:flex-start;gap:18px;flex-wrap:wrap;padding:6px 12px;margin-bottom:6px;border-bottom:1px solid var(--line);font-size:13px;font-weight:600">${[['name','Товар'],['category','Категория'],['barcode','Штрихкод'],['price','Цена'],['stock','Остаток']].map(([k,v])=>stSortTh(f,k,v)).join('')}</div>`+D.rows.map(r=>{ const key=r.site+':'+r.uid, open=f.open===key;
       return `<div class="card" style="margin-bottom:8px">
       <div class="grid2" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:center">
         <div class="row" style="justify-content:flex-start;align-items:flex-start">${siteImg(r.photo)}<div><b>${esc(r.title)}</b><br><span class="meta">${esc(r.part||'')}</span><br><span class="num">${fmt(r.price)}</span>
@@ -1437,10 +1436,11 @@ function renderSite(){
     </div>`; }).join('')}
     ${f.status!=='baseonly'&&D&&(f.off||D.rows.length===50)?`<div class="row"><button class="btn" data-stpage="-1" ${f.off?'':'disabled'}>Назад</button><span class="meta">${f.off+1}–${f.off+D.rows.length}</span><button class="btn" data-stpage="1" ${D.rows.length===50?'':'disabled'}>Дальше</button></div>`:''}`;
 }
+const stSortTh = (f, k, v) => `<button data-stsort="${k}" style="border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;white-space:nowrap" title="Сортировать">${v} ${f.sort===k?(f.desc?'▼':'▲'):'<span class="meta">↕</span>'}</button>`;
 function siteBaseOnlyHtml(f){
   const L = f.base || [];
   return `<p class="meta">Товары из базы, у которых нет карточки на сайте ${esc(SITE_NAME[f.site]||f.site)}. Сверху — те, что есть в наличии. Если карточка на сайте всё-таки есть — нажмите «Найти на сайте» и свяжите.</p>
-  ${!f.data?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Здесь пусто</div>':`<div class="scroll"><table><thead><tr><th></th><th>Товар</th><th>Категория</th><th>Штрихкод</th><th>Цена</th><th>Остаток</th><th></th></tr></thead><tbody>
+  ${!f.data?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Здесь пусто</div>':`<div class="scroll"><table><thead><tr><th></th>${[['name','Товар'],['category','Категория'],['barcode','Штрихкод'],['price','Цена'],['stock','Остаток']].map(([k,v])=>`<th>${stSortTh(f,k,v)}</th>`).join('')}<th></th></tr></thead><tbody>
   ${L.map(p=>`<tr><td>${thumb(p)}</td><td><b>${esc(p.name)}</b>${p.is_group?' <span class="chip">общий штрихкод</span>':''}</td><td>${esc(p.category||'—')}</td><td class="num">${esc(p.barcode)}</td><td class="num">${fmt(p.price)}</td>
     <td class="num">${p.stock>0?'<span class="chip ok">'+p.stock+'</span>':'<span class="meta">0</span>'}</td>
     <td style="white-space:nowrap">${wiponOk()&&!isViewer()?`<button class="btn small" data-stbfind="${p.id}">${f.bfind===p.id?'Скрыть':'Найти на сайте'}</button>
