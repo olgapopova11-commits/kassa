@@ -206,3 +206,13 @@ details.dd .dd-panel label:hover{background:var(--bg)}
   .dialog-foot{margin:0 -14px;padding-bottom:calc(10px + env(safe-area-inset-bottom))}
   #nm-modal .row:has(> span > #nm-save){position:sticky;bottom:0;z-index:2;background:var(--surface);margin:0 -14px;padding:10px 14px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
 }
+
+
+/* ===== общий выбор магазинов (шаг 5) ===== */
+.storebar{max-width:1150px;margin:0 auto;padding:8px max(14px,env(safe-area-inset-right)) 0 max(14px,env(safe-area-inset-left));display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.storebar .filters{flex-basis:100%;margin:4px 0 0}
+.storebar .store-pick select{max-width:70vw}
+@media (max-width:760px){ .storebar{padding:6px max(10px,env(safe-area-inset-right)) 0 max(10px,env(safe-area-inset-left))} }
+/* имя товара → карточка товара */
+a.pcl{color:inherit;text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer}
+a.pcl:hover{color:var(--accent,inherit);text-decoration-style:solid}
