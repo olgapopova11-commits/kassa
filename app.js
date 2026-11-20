@@ -1381,32 +1381,74 @@ function nmHistHtml(H, op){
     ${H.map(h=>`<tr style="${best&&h===best?'background:var(--soft)':''}"><td class="num">${dshort(h.at)}</td><td>${src[h.source]||esc(h.source||'')}</td><td>${esc(noZh(h.supplier)||'—')}</td><td class="meta">${esc(poSpec({ spec:h.spec })||'')}</td>
       <td class="num">${pr(h)}${best&&h===best?' <span class="chip ok">лучшая</span>':''}</td><td class="num">${h.kzt!=null?fmt(h.kzt):'—'}</td><td class="num">${h.qty}</td><td>${h.url?`<a href="${esc(h.url)}" target="_blank" rel="noopener">↗</a>`:''}</td></tr>`).join('')}</tbody></table></div></details>`;
 }
-/* ---------- AI-фото товара (Grok): белый фон / на модели; баланс белого по карточке и размер по линейке ---------- */
-const AI = { pid:null, cv:null, mode:null, pts:[], ppm:null, len:null, wid:null, busy:false, list:null, st:null, wb:false, srcs:[], srcBusy:false };
-function aiReset(pid){ Object.assign(AI, { pid, cv:null, mode:null, pts:[], ppm:null, len:null, wid:null, busy:false, list:null, wb:false, srcs:[], srcBusy:false }); }
+/* ---------- AI-фото товара (Grok): стили из «Стили генерации фото украшений», распознавание изделия, несколько вариантов с автопроверкой ---------- */
+const AI = { pid:null, cv:null, mode:null, pts:[], ppm:null, len:null, wid:null, busy:false, list:null, st:null, wb:false, srcs:[], srcBusy:false,
+  an:null, anBusy:false, srcUrl:null, style:null, n:2, refs:[], showRej:false, run:null, styles:null, t0:0 };
+function aiReset(pid){ Object.assign(AI, { pid, cv:null, mode:null, pts:[], ppm:null, len:null, wid:null, busy:false, list:null, wb:false, srcs:[], srcBusy:false,
+  an:null, anBusy:false, srcUrl:null, style:null, n:2, refs:[], showRej:false, run:null }); }
+async function aiInvoke(body){ const { data, error } = await sb.functions.invoke('photo_ai', { body });
+  if(error){ let msg = error.message; try{ msg = (await error.context.json()).error || msg; }catch(_){} throw Error(msg); } return data; }
 async function aiLoad(pid){
-  const [{ data:l }, st, { data:sp }, { data:su }] = await Promise.all([ sb.from('product_ai_photos').select('id,url,mode,wish,created_at').eq('product_id', pid).order('created_at', { ascending:false }).limit(24),
+  const [{ data:l }, st, { data:sp }, { data:su }, sty] = await Promise.all([ sb.from('product_ai_photos').select('id,url,mode,style,status,source,check_result,attempts,cost_usd,wish,created_at').eq('product_id', pid).order('created_at', { ascending:false }).limit(40),
     AI.st ? Promise.resolve({ data:AI.st }) : sb.functions.invoke('photo_ai', { body:{ action:'status' } }),
     sb.from('site_products').select('photo,gallery').eq('product_id', pid).limit(5),
-    sb.from('product_suppliers').select('photo').eq('product_id', pid).not('photo', 'is', null).limit(5) ]);
-  if(AI.pid !== pid) return; AI.list = l || []; AI.st = st.data || AI.st || {};
+    sb.from('product_suppliers').select('photo').eq('product_id', pid).not('photo', 'is', null).limit(5),
+    AI.styles ? Promise.resolve({ data:{ styles:AI.styles } }) : sb.functions.invoke('photo_ai', { body:{ action:'styles' } }) ]);
+  if(AI.pid !== pid) return; AI.list = l || []; AI.st = st.data || AI.st || {}; AI.styles = (sty.data && sty.data.styles) || AI.styles || [];
   const src = []; (sp||[]).forEach(x => { if(x.photo) src.push([x.photo,'сайт']); (Array.isArray(x.gallery)?x.gallery:[]).forEach(u => typeof u==='string' && src.push([u,'сайт'])); });
   (su||[]).forEach(x => src.push([x.photo,'поставщик'])); AI.srcs = src; if(S.view==='nom') render(); }
 /* готовые фото товара, которые можно взять как исходник: главное, сгенерированные, с сайта, от поставщика */
 function aiSrcList(e){
   const out = [], seen = new Set(), add = (u, t) => { if(u && !seen.has(u)){ seen.add(u); out.push([u, t]); } };
-  add(e.photo_url, 'главное'); const G = (S.nm.gal||{})[e.id]; if(Array.isArray(G)) G.forEach(x => add(x.url, 'галерея')); (AI.list||[]).forEach(x => add(x.url, 'AI')); (AI.srcs||[]).forEach(([u,t]) => add(u, t));
+  add(e.photo_url, 'главное'); const G = (S.nm.gal||{})[e.id]; if(Array.isArray(G)) G.forEach(x => add(x.url, 'галерея')); (AI.list||[]).filter(x=>x.status!=='rejected').forEach(x => add(x.url, 'AI')); (AI.srcs||[]).forEach(([u,t]) => add(u, t));
   return out.slice(0, 20);
 }
+/* распознать изделие и подобрать стили — сразу после загрузки исходного фото */
+async function aiAnalyze(){
+  if(!AI.cv || AI.anBusy || !(AI.st && AI.st.has_key)) return; const pid = AI.pid; AI.anBusy = true; AI.an = null; AI.srcUrl = null; render();
+  try{ const d = await aiInvoke({ action:'analyze', product_id:pid, image:AI.cv.toDataURL('image/jpeg', 0.9) }); if(AI.pid !== pid) return;
+    AI.an = d; AI.srcUrl = d.source_url || null; if(Array.isArray(d.styles) && d.styles.length) AI.styles = d.styles;
+    const sg = (d.suggested && d.suggested.styles) || []; if(!AI.style || !(AI.styles||[]).some(s=>s.code===AI.style)) AI.style = (sg[0] && sg[0].code) || 'catalog';
+    const sz = d.analysis && d.analysis.size_estimate; if(sz && !AI.len && !$('#ai-size')?.value) AI.sizeGuess = String(sz); }
+  catch(err){ toast('Распознать не удалось: ' + err.message); }
+  AI.anBusy = false; if(S.view==='nom') render(); }
+function aiAnHtml(){
+  if(AI.anBusy) return '<div class="meta">🔎 Silver распознаёт изделие и подбирает стили…</div>';
+  const A = AI.an && AI.an.analysis; if(!A) return AI.cv && AI.st && AI.st.has_key ? '<button class="btn small" data-aian="1">🔎 Распознать изделие и подобрать стиль</button>' : '';
+  const stones = (A.stones||[]).map(s => [s.count, s.color, s.kind, s.shape].filter(Boolean).join(' ')).filter(Boolean).join('; ');
+  return `<div class="cust meta" style="line-height:1.45"><b>Silver распознал:</b> ${esc(AI.an.type_ru || A.type_ru || '')}${A.metal_color?' · металл: '+esc(A.metal_color):''}${stones?' · вставки: '+esc(stones):''}${A.size_estimate?' · ≈ '+esc(A.size_estimate):''}${A.notes?'<br>'+esc(A.notes):''}${AI.an.supplier?'<br><span class="chip warn">фото поставщика — получатся черновики, одобрить после фото настоящего изделия</span>':''}${AI.an.suggested&&AI.an.suggested.palette?'<br>Палитра: '+esc(AI.an.suggested.palette):''}</div>`; }
+function aiStylesHtml(){
+  const sg = (AI.an && AI.an.suggested && AI.an.suggested.styles) || [], why = Object.fromEntries(sg.map(s=>[s.code, s.why]));
+  const L = (AI.styles||[]).slice().sort((a,b)=>(why[b.code]?1:0)-(why[a.code]?1:0)); if(!L.length) return '';
+  const cur = AI.style || (sg[0] && sg[0].code) || 'catalog';
+  return `<div class="stack" style="gap:4px"><span class="label">Стиль</span><div class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-start">${L.map(s=>`<button type="button" class="btn small ${s.code===cur?'primary':''}" data-aistyle="${esc(s.code)}" title="${esc(why[s.code]||s.purpose||'')}">${why[s.code]?'★ ':''}${esc(s.title)}${s.card_slot?` <span class="meta" style="font-size:10px">фото №${s.card_slot}</span>`:''}</button>`).join('')}</div>
+    ${why[cur]?`<span class="meta">★ ${esc(why[cur])}</span>`:(L.find(s=>s.code===cur)||{}).purpose?`<span class="meta">${esc((L.find(s=>s.code===cur)||{}).purpose)}</span>`:''}</div>`; }
+function aiStatusChip(x){
+  const r = (x.check_result && x.check_result.reasons) || [];
+  if(x.status==='approved') return '<span class="chip ok">одобрено</span>';
+  if(x.status==='draft') return '<span class="chip ok" title="Прошло автопроверку совпадения с оригиналом">черновик ✓ проверка пройдена</span>';
+  if(x.status==='supplier_draft') return '<span class="chip warn" title="Сделано по фото поставщика — одобрить можно после фото настоящего изделия">черновик по фото поставщика</span>';
+  if(x.status==='rejected') return `<span class="chip zero" title="${esc(r.join('; '))}">брак ✗</span>${r.length?`<span class="meta" style="font-size:11px">${esc(r.join('; '))}</span>`:''}`;
+  return ''; }
+function aiCardHtml(e, x){
+  const sty = (AI.styles||[]).find(s=>s.code===x.style), main = e.photo_url===x.url;
+  return `<div class="stack" style="gap:4px;width:160px"><a href="${esc(x.url)}" target="_blank" rel="noopener"><img src="${esc(x.url)}" alt="" style="width:160px;height:160px;object-fit:cover;border-radius:10px${x.status==='rejected'?';opacity:.55':''}"></a>
+    <span class="meta">${esc(sty?sty.title:x.style?x.style:x.mode==='model'?'на модели':'белый фон')} · ${dshort(x.created_at)}</span>${aiStatusChip(x)}
+    ${main?'<span class="chip ok">главное фото</span>':x.id&&x.status!=='supplier_draft'?`<button class="btn small primary" data-airev="main:${x.id}"${x.status==='rejected'?' title="Фото не прошло автопроверку — нажимайте, только если сами сверили изделие"':''}>${x.status==='rejected'?'Одобрить вручную и сделать главным':'Одобрить и сделать главным'}</button>`:''}
+    ${nmInGal(e.id, x.url)?'<span class="chip">в галерее</span>':x.status==='supplier_draft'?'':`<button class="btn small" data-aigal="${esc(x.url)}">В галерею</button>`}
+    ${x.id&&x.status!=='rejected'&&!main?`<button class="btn small" data-airev="reject:${x.id}">В брак</button>`:''}</div>`; }
 function aiPhotoHtml(e){
   if(AI.pid !== e.id){ aiReset(e.id); aiLoad(e.id); }
-  const sizeTxt = AI.len ? `${AI.len}${AI.wid?' × '+AI.wid:''} мм` : (e.size_mm || '');
+  const sizeTxt = AI.len ? `${AI.len}${AI.wid?' × '+AI.wid:''} мм` : (e.size_mm || AI.sizeGuess || '');
   const step = { wb:'Нажмите на белую (или серую) карточку на фото', r1:'Линейка: нажмите на отметку 0', r2:'Линейка: нажмите на отметку 1 см (10 мм)', l1:'Изделие: нажмите на один край (длина)', l2:'Изделие: нажмите на противоположный край', w1:'Ширина: нажмите на один край', w2:'Ширина: нажмите на другой край' }[AI.mode];
-  return `<details class="cust" data-nmdet="ai" ${AI.cv||AI.busy||(S.nm.open||{}).ai?'open':''} id="ai-box"><summary style="cursor:pointer"><b>✨ AI-фото для сайта (Grok)</b> <span class="meta">— белый фон или на модели из фото из магазина</span></summary>
+  const L = AI.list || [], good = L.filter(x=>x.status!=='rejected'), bad = L.filter(x=>x.status==='rejected');
+  const refSrc = aiSrcList(e).filter(([u]) => /^https:\/\//.test(u));
+  const secs = AI.busy ? Math.round((Date.now()-AI.t0)/1000) : 0;
+  return `<details class="cust" data-nmdet="ai" ${AI.cv||AI.busy||(S.nm.open||{}).ai?'open':''} id="ai-box"><summary style="cursor:pointer"><b>✨ AI-фото для сайта (Grok)</b> <span class="meta">— каталог, студия, на модели, креатив… с проверкой, что изделие не изменилось</span></summary>
     ${AI.st && !AI.st.has_key ? (AI.st.owner ? `<div class="stack" style="gap:6px;margin-top:8px"><span class="meta">Впишите ключ Grok: console.x.ai → API Keys → Create. Ключ хранится на сервере, в браузер не возвращается.</span><div class="row" style="gap:6px"><input id="ai-key" type="password" placeholder="xai-…" autocomplete="off" style="flex:1"><button class="btn small primary" id="ai-key-save">Сохранить ключ</button></div></div>` : '<div class="meta" style="margin-top:8px">Генерация заработает, когда владелец впишет ключ Grok.</div>') : ''}
     <div class="stack" style="gap:8px;margin-top:8px">
       <label class="btn small" style="cursor:pointer;align-self:flex-start">📷 ${AI.cv?'Заменить фото из магазина':'Загрузить фото из магазина'}<input type="file" id="ai-file" accept="image/*" hidden></label>
-      ${(()=>{ const L = aiSrcList(e); return L.length?`<div class="stack" style="gap:4px"><span class="meta">или взять готовое фото:${AI.srcBusy?' загружаем…':''}</span><div class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-start">${L.map(([u,t])=>`<button type="button" data-aisrc="${esc(u)}" title="${esc(t)}" style="border:0;padding:0;background:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px" ${AI.srcBusy?'disabled':''}><img src="${esc(u)}" alt="" loading="lazy" style="width:60px;height:60px;object-fit:cover;border-radius:8px;border:1px solid var(--line,#ddd)"><span class="meta" style="font-size:10px">${esc(t)}</span></button>`).join('')}</div></div>`:''; })()}
+      ${(()=>{ const S2 = aiSrcList(e); return S2.length?`<div class="stack" style="gap:4px"><span class="meta">или взять готовое фото:${AI.srcBusy?' загружаем…':''}</span><div class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-start">${S2.map(([u,t])=>`<button type="button" data-aisrc="${esc(u)}" title="${esc(t)}" style="border:0;padding:0;background:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px" ${AI.srcBusy?'disabled':''}><img src="${esc(u)}" alt="" loading="lazy" style="width:60px;height:60px;object-fit:cover;border-radius:8px;border:1px solid var(--line,#ddd)"><span class="meta" style="font-size:10px">${esc(t)}</span></button>`).join('')}</div></div>`:''; })()}
       <span class="meta">Совет: снимайте рядом с белой карточкой (для цвета) и линейкой (для размера) — на готовой картинке их не будет.</span>
       ${AI.cv?`<div class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-start">
         <button class="btn small ${AI.mode==='wb'?'primary':''}" data-aimode="wb">⚪ Цвет по карточке${AI.wb?' ✓':''}</button>
@@ -1415,15 +1457,25 @@ function aiPhotoHtml(e){
         <button class="btn small ${/^w/.test(AI.mode||'')?'primary':''}" data-aimode="w1" ${AI.ppm?'':'disabled'}>↕ Ширина${AI.wid?' ✓':''}</button>
         ${AI.wb?'<button class="btn small" data-aimode="undo">↺ Вернуть исходные цвета</button>':''}</div>
         ${step?`<div class="chip warn" style="align-self:flex-start">👉 ${step}</div>`:''}
-        <canvas id="ai-cv" style="max-width:100%;border-radius:10px;cursor:crosshair;touch-action:manipulation;background:#eee"></canvas>`:''}
-      <label class="stack" style="gap:2px"><span class="label">Размер изделия</span><input id="ai-size" value="${esc(sizeTxt)}" placeholder="например 18 × 12 мм — посчитается по линейке или впишите сами"></label>
+        <canvas id="ai-cv" style="max-width:100%;max-height:420px;object-fit:contain;border-radius:10px;cursor:crosshair;touch-action:manipulation;background:#eee"></canvas>
+        ${aiAnHtml()}${aiStylesHtml()}`:''}
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px 10px">
+        <label class="stack" style="gap:2px"><span class="label">Размер изделия</span><input id="ai-size" value="${esc(sizeTxt)}" placeholder="например 18 × 12 мм"></label>
+        <label class="stack" style="gap:2px"><span class="label">Вариантов</span><select id="ai-n">${[1,2,3,4].map(k=>`<option value="${k}" ${k===AI.n?'selected':''}>${k}</option>`).join('')}</select></label>
+      </div>
       <label class="stack" style="gap:2px"><span class="label">Пожелания к генерации</span><textarea id="ai-wish" rows="2" placeholder="например: девушка, шея крупно, дневной свет, бежевый свитер">${esc(AI.wish||'')}</textarea></label>
-      <div class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-start">
-        <button class="btn primary small" data-aigen="white" ${AI.cv&&!AI.busy?'':'disabled'}>Сгенерировать на белом фоне</button>
-        <button class="btn primary small" data-aigen="model" ${AI.cv&&!AI.busy?'':'disabled'}>Сгенерировать на модели</button>
-        ${AI.busy?'<span class="meta">Grok рисует… обычно 10–30 секунд</span>':''}</div>
-      ${(AI.list||[]).length?`<div class="row" style="gap:8px;flex-wrap:wrap;justify-content:flex-start">${AI.list.map(x=>`<div class="stack" style="gap:4px;width:150px"><a href="${esc(x.url)}" target="_blank" rel="noopener"><img src="${esc(x.url)}" alt="" style="width:150px;height:150px;object-fit:cover;border-radius:10px"></a>
-        <span class="meta">${x.mode==='model'?'на модели':'белый фон'} · ${dshort(x.created_at)}</span>${e.photo_url===x.url?'<span class="chip ok">главное фото</span>':`<button class="btn small" data-aimain="${esc(x.url)}">Сделать главным</button>`}${nmInGal(e.id, x.url)?'<span class="chip">в галерее</span>':`<button class="btn small" data-aigal="${esc(x.url)}">В галерею</button>`}</div>`).join('')}</div>`:''}
+      <details ${AI.refs.length?'open':''}><summary class="meta" style="cursor:pointer">Референсы стиля (до 3) — свет, палитра и настроение из ваших лучших фото${AI.refs.length?' · выбрано '+AI.refs.length:''}</summary>
+        <div class="stack" style="gap:6px;margin-top:6px">
+          ${refSrc.length?`<div class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-start">${refSrc.map(([u,t])=>{ const on = AI.refs.includes(u); return `<button type="button" data-airef="${esc(u)}" title="${esc(t)}" style="border:${on?'2px solid var(--accent,#c58b2e)':'1px solid var(--line,#ddd)'};padding:0;border-radius:8px;overflow:hidden;background:none;cursor:pointer"><img src="${esc(u)}" alt="" loading="lazy" style="width:52px;height:52px;object-fit:cover;display:block${on?'':';opacity:.75'}"></button>`; }).join('')}</div>`:''}
+          <div class="row" style="gap:6px"><input id="ai-ref-url" placeholder="или вставьте ссылку на картинку https://…" style="flex:1"><button type="button" class="btn small" id="ai-ref-add">Добавить</button></div>
+          ${AI.refs.filter(u=>!refSrc.some(([x])=>x===u)).map(u=>`<span class="chip">${esc(u.slice(0,60))}… <button type="button" data-airef="${esc(u)}" style="border:0;background:none;cursor:pointer">✕</button></span>`).join('')}
+        </div></details>
+      <div class="row" style="gap:8px;flex-wrap:wrap;justify-content:flex-start">
+        <button class="btn primary" data-aigo="1" ${AI.cv&&!AI.busy&&!AI.anBusy?'':'disabled'}>✨ Сгенерировать${AI.style?' — '+esc(((AI.styles||[]).find(s=>s.code===AI.style)||{}).title||AI.style):''}</button>
+        ${AI.busy?`<span class="meta">Grok рисует ${AI.n} вар. и проверяет каждый на совпадение с изделием, брак перерисовывает… ${secs} с (обычно 30–120 с)</span>`:''}</div>
+      ${AI.run?`<span class="meta">Последний запуск: прошло проверку ${AI.run.passed} из ${(AI.run.photos||[]).length}, попыток ${AI.run.attempts}, расход $${(+AI.run.cost_usd||0).toFixed(3)} ≈ ${fmt(Math.round((+AI.run.cost_usd||0)*520))}${AI.run.note?' · '+esc(AI.run.note):''}</span>`:''}
+      ${good.length?`<div class="row" style="gap:10px;flex-wrap:wrap;justify-content:flex-start;align-items:flex-start">${good.map(x=>aiCardHtml(e, x)).join('')}</div>`:''}
+      ${bad.length?`<button type="button" class="btn small" data-airej="1" style="align-self:flex-start">${AI.showRej?'скрыть':'показать'} брак (${bad.length})</button>${AI.showRej?`<div class="row" style="gap:10px;flex-wrap:wrap;justify-content:flex-start;align-items:flex-start">${bad.map(x=>aiCardHtml(e, x)).join('')}</div>`:''}`:''}
     </div></details>`;
 }
 function aiPaint(){
@@ -1445,7 +1497,7 @@ function aiWhiteBalance(x, y){
 }
 async function aiUseBlob(blob){ const bm = await createImageBitmap(blob); const k = Math.min(1, 1600/Math.max(bm.width, bm.height));
   const c = document.createElement('canvas'); c.width = Math.round(bm.width*k); c.height = Math.round(bm.height*k); c.getContext('2d').drawImage(bm, 0, 0, c.width, c.height);
-  Object.assign(AI, { cv:c, orig:null, wb:false, mode:'wb', pts:[], ppm:null, len:null, wid:null }); render(); }
+  Object.assign(AI, { cv:c, orig:null, wb:false, mode:'wb', pts:[], ppm:null, len:null, wid:null, an:null, srcUrl:null }); render(); aiAnalyze(); }
 document.addEventListener('click', async e => { const t = e.target.closest('button[data-aisrc]'); if(!t || AI.srcBusy) return; e.preventDefault();
   const u = t.dataset.aisrc, ext = !/supabase\.co\//.test(u); AI.srcBusy = true; render();
   try{ const r = await fetch(u, { mode:'cors', cache:'no-store' }); if(!r.ok) throw Error('HTTP ' + r.status); const b = await r.blob(); if(!/^image\//.test(b.type||'image/')) throw Error('не картинка');
@@ -1454,11 +1506,12 @@ document.addEventListener('click', async e => { const t = e.target.closest('butt
 document.addEventListener('change', async e => {
   if(e.target.id==='ai-file' && e.target.files[0]){ await aiUseBlob(e.target.files[0]); }
   else if(e.target.id==='ai-wish') AI.wish = e.target.value;
+  else if(e.target.id==='ai-n') AI.n = +e.target.value || 2;
 });
 document.addEventListener('click', async e => {
   const c = e.target.closest('#ai-cv');
   if(c && AI.cv && AI.mode){ const r = c.getBoundingClientRect(), x = Math.round((e.clientX - r.left) * c.width / r.width), y = Math.round((e.clientY - r.top) * c.height / r.height);
-    if(AI.mode==='wb'){ aiWhiteBalance(x, y); AI.mode = 'r1'; AI.pts = []; return render(); }
+    if(AI.mode==='wb'){ aiWhiteBalance(x, y); AI.srcUrl = null; AI.mode = 'r1'; AI.pts = []; return render(); }
     AI.pts.push([x, y]); const dist = () => Math.hypot(AI.pts[1][0]-AI.pts[0][0], AI.pts[1][1]-AI.pts[0][1]);
     if(AI.pts.length===2){
       if(AI.mode==='r2'){ AI.ppm = dist()/10; AI.mode = 'l1'; }
@@ -1468,15 +1521,36 @@ document.addEventListener('click', async e => {
     } else AI.mode = AI.mode.replace('1','2');
     return render(); }
   const t = e.target.closest('button'); if(!t) return;
-  if(t.dataset.aimode){ if(t.dataset.aimode==='undo'){ if(AI.orig){ AI.cv.getContext('2d').putImageData(AI.orig, 0, 0); AI.orig = null; } AI.wb = false; } else { AI.mode = t.dataset.aimode; AI.pts = []; } render(); }
-  else if(t.id==='ai-key-save'){ const k = $('#ai-key').value.trim(); if(!k) return; t.disabled = true; const { data, error } = await sb.functions.invoke('photo_ai', { body:{ action:'set_key', key:k } });
-    let msg = error ? error.message : null; if(error){ try{ msg = (await error.context.json()).error || msg; }catch(_){} } t.disabled = false; if(msg) return toast(msg); AI.st = { ...(AI.st||{}), has_key:true }; toast('Ключ Grok сохранён'); render(); }
-  else if(t.dataset.aigen){ if(!AI.cv || AI.busy) return; const size = ($('#ai-size')||{}).value || '', wish = ($('#ai-wish')||{}).value || ''; AI.wish = wish; AI.busy = true; render();
-    const pid = AI.pid; if(size) sb.rpc('product_size_set', { p_id:pid, p_size:size });
-    const image = AI.cv.toDataURL('image/jpeg', 0.9);
-    const { data, error } = await sb.functions.invoke('photo_ai', { body:{ action:'gen', product_id:pid, image, mode:t.dataset.aigen, wish, size } });
-    let msg = error ? error.message : null; if(error){ try{ msg = (await error.context.json()).error || msg; }catch(_){} }
-    AI.busy = false; if(msg){ render(); return toast(msg); } AI.list = [{ url:data.url, mode:data.mode, created_at:new Date().toISOString() }, ...(AI.list||[])]; toast('Готово! Если нравится — «Сделать главным»'); render(); }
+  if(t.dataset.aimode){ if(t.dataset.aimode==='undo'){ if(AI.orig){ AI.cv.getContext('2d').putImageData(AI.orig, 0, 0); AI.orig = null; } AI.wb = false; AI.srcUrl = null; } else { AI.mode = t.dataset.aimode; AI.pts = []; } render(); }
+  else if(t.id==='ai-key-save'){ const k = $('#ai-key').value.trim(); if(!k) return; t.disabled = true;
+    try{ await aiInvoke({ action:'set_key', key:k }); }catch(err){ t.disabled = false; return toast(err.message); }
+    t.disabled = false; AI.st = { ...(AI.st||{}), has_key:true }; toast('Ключ Grok сохранён'); render(); if(AI.cv && !AI.an) aiAnalyze(); }
+  else if(t.dataset.aian){ aiAnalyze(); }
+  else if(t.dataset.aistyle){ AI.style = t.dataset.aistyle; render(); }
+  else if(t.dataset.airef){ const u = t.dataset.airef; AI.refs = AI.refs.includes(u) ? AI.refs.filter(x=>x!==u) : AI.refs.length>=3 ? (toast('Не больше 3 референсов'), AI.refs) : [...AI.refs, u]; render(); }
+  else if(t.id==='ai-ref-add'){ const u = ($('#ai-ref-url')||{}).value?.trim() || ''; if(!/^https:\/\//.test(u)) return toast('Нужна ссылка на картинку, начинается с https://');
+    if(AI.refs.length>=3) return toast('Не больше 3 референсов'); if(!AI.refs.includes(u)) AI.refs = [...AI.refs, u]; render(); }
+  else if(t.dataset.airej){ AI.showRej = !AI.showRej; render(); }
+  else if(t.dataset.aigo){ if(!AI.cv || AI.busy) return;
+    const size = ($('#ai-size')||{}).value || '', wish = ($('#ai-wish')||{}).value || ''; AI.wish = wish; AI.n = +(($('#ai-n')||{}).value || AI.n || 2);
+    const pid = AI.pid, style = AI.style || (AI.an && AI.an.suggested && AI.an.suggested.styles && AI.an.suggested.styles[0] && AI.an.suggested.styles[0].code) || 'catalog';
+    if(size) sb.rpc('product_size_set', { p_id:pid, p_size:size });
+    AI.busy = true; AI.t0 = Date.now(); render(); const tick = setInterval(()=>{ if(AI.busy && S.view==='nom' && AI.pid===pid) render(); }, 5000);
+    const body = { action:'gen', product_id:pid, style, n:AI.n, wish, size, refs:AI.refs };
+    if(AI.srcUrl) body.image_url = AI.srcUrl; else body.image = AI.cv.toDataURL('image/jpeg', 0.9);
+    try{ const d = await aiInvoke(body); if(AI.pid !== pid) return;
+      AI.run = d; AI.list = [...(d.photos||[]).map(p => ({ ...p, created_at:new Date().toISOString() })), ...(AI.list||[]).filter(x => !(d.photos||[]).some(p=>p.id===x.id))];
+      toast(d.passed ? `Готово: ${d.passed} вар. прошли проверку. Лучший — «Одобрить и сделать главным»` : 'Ни один вариант не прошёл проверку — см. брак и причины'); }
+    catch(err){ toast(err.message); }
+    finally{ clearInterval(tick); AI.busy = false; render(); } }
+  else if(t.dataset.airev){ const [act, id] = t.dataset.airev.split(':'), x = (AI.list||[]).find(p=>String(p.id)===id); if(!x) return;
+    if(act==='main' && x.status==='rejected' && t.dataset.sure!=='1'){ t.dataset.sure = '1'; t.textContent = 'Точно? Изделие сверили сами — нажмите ещё раз'; return; }
+    t.disabled = true;
+    try{ await aiInvoke(act==='main' ? { action:'review', photo_id:+id, decision:'approve', make_main:true, force:x.status==='rejected' } : { action:'review', photo_id:+id, decision:'reject' }); }
+    catch(err){ t.disabled = false; return toast(err.message); }
+    if(act==='main'){ x.status = 'approved'; if(S.nm.ed) S.nm.ed.photo_url = x.url; const row = (S.nm.data&&S.nm.data.rows||[]).find(r=>r.id===AI.pid); if(row) row.photo_url = x.url; toast('Одобрено и стало главным фото'); nmGalLoad(AI.pid); }
+    else { x.status = 'rejected'; toast('Отправлено в брак'); }
+    render(); }
   else if(t.dataset.aigal){ t.disabled = true; const { error } = await sb.rpc('product_photo_add', { p_id:AI.pid, p_url:t.dataset.aigal }); if(error){ t.disabled = false; return toast(errText(error)); }
     toast('Добавлено в галерею товара'); await nmGalLoad(AI.pid); }
   else if(t.dataset.aimain){ const { error } = await sb.rpc('product_photo_set', { p_id:AI.pid, p_url:t.dataset.aimain }); if(error) return toast(errText(error)); nmGalLoad(AI.pid);
