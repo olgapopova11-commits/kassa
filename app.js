@@ -1364,6 +1364,7 @@ function nmModalSync(e, f, cats, inp){
   const sc = has ? M.querySelector('.dialog').scrollTop : 0;
   M.innerHTML = `<div class="overlay" id="nm-modal"><div class="dialog" role="dialog" aria-modal="true" style="max-width:820px">${nmEditorHtml(e, f, cats, inp)}</div></div>`;
   M.querySelector('.dialog').scrollTop = sc;
+  aiPaint();
   if(keep){ const el = document.getElementById(keep.id); if(el){ el.focus(); try{ el.setSelectionRange(keep.s, keep.e); }catch(_){} } }
 }
 /* история закупочных цен товара: где, у кого и почём брали */
@@ -1379,6 +1380,88 @@ function nmHistHtml(H){
     ${H.map(h=>`<tr style="${best&&h===best?'background:var(--soft)':''}"><td class="num">${dshort(h.at)}</td><td>${src[h.source]||esc(h.source||'')}</td><td>${esc(noZh(h.supplier)||'—')}</td><td class="meta">${esc(poSpec({ spec:h.spec })||'')}</td>
       <td class="num">${pr(h)}${best&&h===best?' <span class="chip ok">лучшая</span>':''}</td><td class="num">${h.kzt!=null?fmt(h.kzt):'—'}</td><td class="num">${h.qty}</td><td>${h.url?`<a href="${esc(h.url)}" target="_blank" rel="noopener">↗</a>`:''}</td></tr>`).join('')}</tbody></table></div></details>`;
 }
+/* ---------- AI-фото товара (Grok): белый фон / на модели; баланс белого по карточке и размер по линейке ---------- */
+const AI = { pid:null, cv:null, mode:null, pts:[], ppm:null, len:null, wid:null, busy:false, list:null, st:null, wb:false };
+function aiReset(pid){ Object.assign(AI, { pid, cv:null, mode:null, pts:[], ppm:null, len:null, wid:null, busy:false, list:null, wb:false }); }
+async function aiLoad(pid){
+  const [{ data:l }, st] = await Promise.all([ sb.from('product_ai_photos').select('id,url,mode,wish,created_at').eq('product_id', pid).order('created_at', { ascending:false }).limit(24),
+    AI.st ? Promise.resolve({ data:AI.st }) : sb.functions.invoke('photo_ai', { body:{ action:'status' } }) ]);
+  if(AI.pid !== pid) return; AI.list = l || []; AI.st = st.data || AI.st || {}; if(S.view==='nom') render(); }
+function aiPhotoHtml(e){
+  if(AI.pid !== e.id){ aiReset(e.id); aiLoad(e.id); }
+  const sizeTxt = AI.len ? `${AI.len}${AI.wid?' × '+AI.wid:''} мм` : (e.size_mm || '');
+  const step = { wb:'Нажмите на белую (или серую) карточку на фото', r1:'Линейка: нажмите на отметку 0', r2:'Линейка: нажмите на отметку 1 см (10 мм)', l1:'Изделие: нажмите на один край (длина)', l2:'Изделие: нажмите на противоположный край', w1:'Ширина: нажмите на один край', w2:'Ширина: нажмите на другой край' }[AI.mode];
+  return `<details class="cust" ${AI.cv||AI.busy?'open':''} id="ai-box"><summary style="cursor:pointer"><b>✨ AI-фото для сайта (Grok)</b> <span class="meta">— белый фон или на модели из фото из магазина</span></summary>
+    ${AI.st && !AI.st.has_key ? (AI.st.owner ? `<div class="stack" style="gap:6px;margin-top:8px"><span class="meta">Впишите ключ Grok: console.x.ai → API Keys → Create. Ключ хранится на сервере, в браузер не возвращается.</span><div class="row" style="gap:6px"><input id="ai-key" type="password" placeholder="xai-…" autocomplete="off" style="flex:1"><button class="btn small primary" id="ai-key-save">Сохранить ключ</button></div></div>` : '<div class="meta" style="margin-top:8px">Генерация заработает, когда владелец впишет ключ Grok.</div>') : ''}
+    <div class="stack" style="gap:8px;margin-top:8px">
+      <label class="btn small" style="cursor:pointer;align-self:flex-start">📷 ${AI.cv?'Заменить фото из магазина':'Загрузить фото из магазина'}<input type="file" id="ai-file" accept="image/*" hidden></label>
+      <span class="meta">Совет: снимайте рядом с белой карточкой (для цвета) и линейкой (для размера) — на готовой картинке их не будет.</span>
+      ${AI.cv?`<div class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-start">
+        <button class="btn small ${AI.mode==='wb'?'primary':''}" data-aimode="wb">⚪ Цвет по карточке${AI.wb?' ✓':''}</button>
+        <button class="btn small ${/^r/.test(AI.mode||'')?'primary':''}" data-aimode="r1">📏 Линейка${AI.ppm?' ✓':''}</button>
+        <button class="btn small ${/^l/.test(AI.mode||'')?'primary':''}" data-aimode="l1" ${AI.ppm?'':'disabled'}>↔ Длина${AI.len?' ✓':''}</button>
+        <button class="btn small ${/^w/.test(AI.mode||'')?'primary':''}" data-aimode="w1" ${AI.ppm?'':'disabled'}>↕ Ширина${AI.wid?' ✓':''}</button>
+        ${AI.wb?'<button class="btn small" data-aimode="undo">↺ Вернуть исходные цвета</button>':''}</div>
+        ${step?`<div class="chip warn" style="align-self:flex-start">👉 ${step}</div>`:''}
+        <canvas id="ai-cv" style="max-width:100%;border-radius:10px;cursor:crosshair;touch-action:manipulation;background:#eee"></canvas>`:''}
+      <label class="stack" style="gap:2px"><span class="label">Размер изделия</span><input id="ai-size" value="${esc(sizeTxt)}" placeholder="например 18 × 12 мм — посчитается по линейке или впишите сами"></label>
+      <label class="stack" style="gap:2px"><span class="label">Пожелания к генерации</span><textarea id="ai-wish" rows="2" placeholder="например: девушка, шея крупно, дневной свет, бежевый свитер">${esc(AI.wish||'')}</textarea></label>
+      <div class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-start">
+        <button class="btn primary small" data-aigen="white" ${AI.cv&&!AI.busy?'':'disabled'}>Сгенерировать на белом фоне</button>
+        <button class="btn primary small" data-aigen="model" ${AI.cv&&!AI.busy?'':'disabled'}>Сгенерировать на модели</button>
+        ${AI.busy?'<span class="meta">Grok рисует… обычно 10–30 секунд</span>':''}</div>
+      ${(AI.list||[]).length?`<div class="row" style="gap:8px;flex-wrap:wrap;justify-content:flex-start">${AI.list.map(x=>`<div class="stack" style="gap:4px;width:150px"><a href="${esc(x.url)}" target="_blank" rel="noopener"><img src="${esc(x.url)}" alt="" style="width:150px;height:150px;object-fit:cover;border-radius:10px"></a>
+        <span class="meta">${x.mode==='model'?'на модели':'белый фон'} · ${dshort(x.created_at)}</span>${e.photo_url===x.url?'<span class="chip ok">главное фото</span>':`<button class="btn small" data-aimain="${esc(x.url)}">Сделать главным</button>`}</div>`).join('')}</div>`:''}
+    </div></details>`;
+}
+function aiPaint(){
+  const c = document.getElementById('ai-cv'); if(!c || !AI.cv) return;
+  c.width = AI.cv.width; c.height = AI.cv.height; const g = c.getContext('2d'); g.drawImage(AI.cv, 0, 0);
+  g.fillStyle = '#e11d48'; g.strokeStyle = '#e11d48'; g.lineWidth = Math.max(2, c.width/400);
+  for(const p of AI.pts){ g.beginPath(); g.arc(p[0], p[1], Math.max(5, c.width/160), 0, 7); g.fill(); }
+  if(AI.pts.length===2){ g.beginPath(); g.moveTo(...AI.pts[0]); g.lineTo(...AI.pts[1]); g.stroke(); }
+}
+function aiWhiteBalance(x, y){
+  const g = AI.cv.getContext('2d'), r = Math.max(4, Math.round(AI.cv.width/150));
+  const d = g.getImageData(Math.max(0,x-r), Math.max(0,y-r), r*2, r*2).data; let R=0,G=0,B=0,n=0;
+  for(let i=0;i<d.length;i+=4){ R+=d[i]; G+=d[i+1]; B+=d[i+2]; n++; } R/=n; G/=n; B/=n;
+  const k = (R+G+B)/3, s = Math.min(1.6, 240/Math.max(k,1)), gr = k/R*s, gg = k/G*s, gb = k/B*s;
+  if(!AI.orig) AI.orig = g.getImageData(0, 0, AI.cv.width, AI.cv.height);
+  const img = g.getImageData(0, 0, AI.cv.width, AI.cv.height), p = img.data;
+  for(let i=0;i<p.length;i+=4){ p[i]=Math.min(255,p[i]*gr); p[i+1]=Math.min(255,p[i+1]*gg); p[i+2]=Math.min(255,p[i+2]*gb); }
+  g.putImageData(img, 0, 0); AI.wb = true;
+}
+document.addEventListener('change', async e => {
+  if(e.target.id==='ai-file' && e.target.files[0]){ const bm = await createImageBitmap(e.target.files[0]); const k = Math.min(1, 1600/Math.max(bm.width, bm.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bm.width*k); c.height = Math.round(bm.height*k); c.getContext('2d').drawImage(bm, 0, 0, c.width, c.height);
+    Object.assign(AI, { cv:c, orig:null, wb:false, mode:'wb', pts:[], ppm:null, len:null, wid:null }); render(); }
+  else if(e.target.id==='ai-wish') AI.wish = e.target.value;
+});
+document.addEventListener('click', async e => {
+  const c = e.target.closest('#ai-cv');
+  if(c && AI.cv && AI.mode){ const r = c.getBoundingClientRect(), x = Math.round((e.clientX - r.left) * c.width / r.width), y = Math.round((e.clientY - r.top) * c.height / r.height);
+    if(AI.mode==='wb'){ aiWhiteBalance(x, y); AI.mode = 'r1'; AI.pts = []; return render(); }
+    AI.pts.push([x, y]); const dist = () => Math.hypot(AI.pts[1][0]-AI.pts[0][0], AI.pts[1][1]-AI.pts[0][1]);
+    if(AI.pts.length===2){
+      if(AI.mode==='r2'){ AI.ppm = dist()/10; AI.mode = 'l1'; }
+      else if(AI.mode==='l2'){ AI.len = Math.round(dist()/AI.ppm); AI.mode = 'w1'; toast('Длина: '+AI.len+' мм. Можно измерить ширину или сразу генерировать'); }
+      else if(AI.mode==='w2'){ AI.wid = Math.round(dist()/AI.ppm); AI.mode = null; }
+      setTimeout(()=>{ AI.pts = []; aiPaint(); }, 600);
+    } else AI.mode = AI.mode.replace('1','2');
+    return render(); }
+  const t = e.target.closest('button'); if(!t) return;
+  if(t.dataset.aimode){ if(t.dataset.aimode==='undo'){ if(AI.orig){ AI.cv.getContext('2d').putImageData(AI.orig, 0, 0); AI.orig = null; } AI.wb = false; } else { AI.mode = t.dataset.aimode; AI.pts = []; } render(); }
+  else if(t.id==='ai-key-save'){ const k = $('#ai-key').value.trim(); if(!k) return; t.disabled = true; const { data, error } = await sb.functions.invoke('photo_ai', { body:{ action:'set_key', key:k } });
+    let msg = error ? error.message : null; if(error){ try{ msg = (await error.context.json()).error || msg; }catch(_){} } t.disabled = false; if(msg) return toast(msg); AI.st = { ...(AI.st||{}), has_key:true }; toast('Ключ Grok сохранён'); render(); }
+  else if(t.dataset.aigen){ if(!AI.cv || AI.busy) return; const size = ($('#ai-size')||{}).value || '', wish = ($('#ai-wish')||{}).value || ''; AI.wish = wish; AI.busy = true; render();
+    const pid = AI.pid; if(size) sb.rpc('product_size_set', { p_id:pid, p_size:size });
+    const image = AI.cv.toDataURL('image/jpeg', 0.9);
+    const { data, error } = await sb.functions.invoke('photo_ai', { body:{ action:'gen', product_id:pid, image, mode:t.dataset.aigen, wish, size } });
+    let msg = error ? error.message : null; if(error){ try{ msg = (await error.context.json()).error || msg; }catch(_){} }
+    AI.busy = false; if(msg){ render(); return toast(msg); } AI.list = [{ url:data.url, mode:data.mode, created_at:new Date().toISOString() }, ...(AI.list||[])]; toast('Готово! Если нравится — «Сделать главным»'); render(); }
+  else if(t.dataset.aimain){ const { error } = await sb.rpc('product_photo_set', { p_id:AI.pid, p_url:t.dataset.aimain }); if(error) return toast(errText(error));
+    if(S.nm.ed) S.nm.ed.photo_url = t.dataset.aimain; const row = (S.nm.data&&S.nm.data.rows||[]).find(x=>x.id===AI.pid); if(row) row.photo_url = t.dataset.aimain; toast('Главное фото обновлено'); render(); }
+});
 /* страницы номенклатуры: 1 2 3 … N и сколько товаров на странице */
 function nmPagerHtml(f, D){
   const lim = f.lim || 50, pages = Math.max(1, Math.ceil((D.total||0) / lim)), cur = Math.floor(f.off / lim) + 1;
@@ -1414,6 +1497,7 @@ function nmEditorHtml(e, f, cats, inp){
      <datalist id="nm-colors">${['золото','серебро','цветной','черный'].map(m=>`<option value="${m}">`).join('')}</datalist>
      ${inp('purchase_url','Ссылка на закуп')}
      ${e.id?nmHistHtml((f.hist||{})[e.id]):''}
+     ${e.id&&nmCanEdit()?aiPhotoHtml(e):''}
      <div class="row" style="justify-content:flex-start;gap:16px"><label title="Под одним штрихкодом продаются разные изделия одной цены — на сайте это много карточек"><input type="checkbox" data-nf="is_group" ${e.is_group?'checked':''}> Общий штрихкод (много разных изделий)</label>
        <label><input type="checkbox" data-nf="archived" ${e.archived?'checked':''}> В архиве</label></div>
      <div class="row"><span>${e.id&&e.barcode?`<button class="btn small" data-labels='${esc(JSON.stringify([{n:e.name,b:e.barcode,p:+e.price,q:1}]))}'>Этикетка</button>`:''}</span>
