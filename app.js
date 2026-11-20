@@ -1381,12 +1381,22 @@ function nmHistHtml(H){
       <td class="num">${pr(h)}${best&&h===best?' <span class="chip ok">лучшая</span>':''}</td><td class="num">${h.kzt!=null?fmt(h.kzt):'—'}</td><td class="num">${h.qty}</td><td>${h.url?`<a href="${esc(h.url)}" target="_blank" rel="noopener">↗</a>`:''}</td></tr>`).join('')}</tbody></table></div></details>`;
 }
 /* ---------- AI-фото товара (Grok): белый фон / на модели; баланс белого по карточке и размер по линейке ---------- */
-const AI = { pid:null, cv:null, mode:null, pts:[], ppm:null, len:null, wid:null, busy:false, list:null, st:null, wb:false };
-function aiReset(pid){ Object.assign(AI, { pid, cv:null, mode:null, pts:[], ppm:null, len:null, wid:null, busy:false, list:null, wb:false }); }
+const AI = { pid:null, cv:null, mode:null, pts:[], ppm:null, len:null, wid:null, busy:false, list:null, st:null, wb:false, srcs:[], srcBusy:false };
+function aiReset(pid){ Object.assign(AI, { pid, cv:null, mode:null, pts:[], ppm:null, len:null, wid:null, busy:false, list:null, wb:false, srcs:[], srcBusy:false }); }
 async function aiLoad(pid){
-  const [{ data:l }, st] = await Promise.all([ sb.from('product_ai_photos').select('id,url,mode,wish,created_at').eq('product_id', pid).order('created_at', { ascending:false }).limit(24),
-    AI.st ? Promise.resolve({ data:AI.st }) : sb.functions.invoke('photo_ai', { body:{ action:'status' } }) ]);
-  if(AI.pid !== pid) return; AI.list = l || []; AI.st = st.data || AI.st || {}; if(S.view==='nom') render(); }
+  const [{ data:l }, st, { data:sp }, { data:su }] = await Promise.all([ sb.from('product_ai_photos').select('id,url,mode,wish,created_at').eq('product_id', pid).order('created_at', { ascending:false }).limit(24),
+    AI.st ? Promise.resolve({ data:AI.st }) : sb.functions.invoke('photo_ai', { body:{ action:'status' } }),
+    sb.from('site_products').select('photo,gallery').eq('product_id', pid).limit(5),
+    sb.from('product_suppliers').select('photo').eq('product_id', pid).not('photo', 'is', null).limit(5) ]);
+  if(AI.pid !== pid) return; AI.list = l || []; AI.st = st.data || AI.st || {};
+  const src = []; (sp||[]).forEach(x => { if(x.photo) src.push([x.photo,'сайт']); (Array.isArray(x.gallery)?x.gallery:[]).forEach(u => typeof u==='string' && src.push([u,'сайт'])); });
+  (su||[]).forEach(x => src.push([x.photo,'поставщик'])); AI.srcs = src; if(S.view==='nom') render(); }
+/* готовые фото товара, которые можно взять как исходник: главное, сгенерированные, с сайта, от поставщика */
+function aiSrcList(e){
+  const out = [], seen = new Set(), add = (u, t) => { if(u && !seen.has(u)){ seen.add(u); out.push([u, t]); } };
+  add(e.photo_url, 'главное'); (AI.list||[]).forEach(x => add(x.url, 'AI')); (AI.srcs||[]).forEach(([u,t]) => add(u, t));
+  return out.slice(0, 16);
+}
 function aiPhotoHtml(e){
   if(AI.pid !== e.id){ aiReset(e.id); aiLoad(e.id); }
   const sizeTxt = AI.len ? `${AI.len}${AI.wid?' × '+AI.wid:''} мм` : (e.size_mm || '');
@@ -1395,6 +1405,7 @@ function aiPhotoHtml(e){
     ${AI.st && !AI.st.has_key ? (AI.st.owner ? `<div class="stack" style="gap:6px;margin-top:8px"><span class="meta">Впишите ключ Grok: console.x.ai → API Keys → Create. Ключ хранится на сервере, в браузер не возвращается.</span><div class="row" style="gap:6px"><input id="ai-key" type="password" placeholder="xai-…" autocomplete="off" style="flex:1"><button class="btn small primary" id="ai-key-save">Сохранить ключ</button></div></div>` : '<div class="meta" style="margin-top:8px">Генерация заработает, когда владелец впишет ключ Grok.</div>') : ''}
     <div class="stack" style="gap:8px;margin-top:8px">
       <label class="btn small" style="cursor:pointer;align-self:flex-start">📷 ${AI.cv?'Заменить фото из магазина':'Загрузить фото из магазина'}<input type="file" id="ai-file" accept="image/*" hidden></label>
+      ${(()=>{ const L = aiSrcList(e); return L.length?`<div class="stack" style="gap:4px"><span class="meta">или взять готовое фото:${AI.srcBusy?' загружаем…':''}</span><div class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-start">${L.map(([u,t])=>`<button type="button" data-aisrc="${esc(u)}" title="${esc(t)}" style="border:0;padding:0;background:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px" ${AI.srcBusy?'disabled':''}><img src="${esc(u)}" alt="" loading="lazy" style="width:60px;height:60px;object-fit:cover;border-radius:8px;border:1px solid var(--line,#ddd)"><span class="meta" style="font-size:10px">${esc(t)}</span></button>`).join('')}</div></div>`:''; })()}
       <span class="meta">Совет: снимайте рядом с белой карточкой (для цвета) и линейкой (для размера) — на готовой картинке их не будет.</span>
       ${AI.cv?`<div class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-start">
         <button class="btn small ${AI.mode==='wb'?'primary':''}" data-aimode="wb">⚪ Цвет по карточке${AI.wb?' ✓':''}</button>
@@ -1431,10 +1442,16 @@ function aiWhiteBalance(x, y){
   for(let i=0;i<p.length;i+=4){ p[i]=Math.min(255,p[i]*gr); p[i+1]=Math.min(255,p[i+1]*gg); p[i+2]=Math.min(255,p[i+2]*gb); }
   g.putImageData(img, 0, 0); AI.wb = true;
 }
+async function aiUseBlob(blob){ const bm = await createImageBitmap(blob); const k = Math.min(1, 1600/Math.max(bm.width, bm.height));
+  const c = document.createElement('canvas'); c.width = Math.round(bm.width*k); c.height = Math.round(bm.height*k); c.getContext('2d').drawImage(bm, 0, 0, c.width, c.height);
+  Object.assign(AI, { cv:c, orig:null, wb:false, mode:'wb', pts:[], ppm:null, len:null, wid:null }); render(); }
+document.addEventListener('click', async e => { const t = e.target.closest('button[data-aisrc]'); if(!t || AI.srcBusy) return; e.preventDefault();
+  const u = t.dataset.aisrc, ext = !/supabase\.co\//.test(u); AI.srcBusy = true; render();
+  try{ const r = await fetch(u, { mode:'cors', cache:'no-store' }); if(!r.ok) throw Error('HTTP ' + r.status); const b = await r.blob(); if(!/^image\//.test(b.type||'image/')) throw Error('не картинка');
+    AI.srcBusy = false; await aiUseBlob(b); toast('Фото загружено — отметьте белую карточку или сразу генерируйте'); }
+  catch(err){ AI.srcBusy = false; render(); toast(ext ? 'Это фото с сайта, браузер не даёт его прочитать — скачайте и загрузите вручную' : 'Не удалось загрузить фото: ' + err.message); } });
 document.addEventListener('change', async e => {
-  if(e.target.id==='ai-file' && e.target.files[0]){ const bm = await createImageBitmap(e.target.files[0]); const k = Math.min(1, 1600/Math.max(bm.width, bm.height));
-    const c = document.createElement('canvas'); c.width = Math.round(bm.width*k); c.height = Math.round(bm.height*k); c.getContext('2d').drawImage(bm, 0, 0, c.width, c.height);
-    Object.assign(AI, { cv:c, orig:null, wb:false, mode:'wb', pts:[], ppm:null, len:null, wid:null }); render(); }
+  if(e.target.id==='ai-file' && e.target.files[0]){ await aiUseBlob(e.target.files[0]); }
   else if(e.target.id==='ai-wish') AI.wish = e.target.value;
 });
 document.addEventListener('click', async e => {
