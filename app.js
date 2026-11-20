@@ -2839,12 +2839,12 @@ function renderBonus(){
 
 /* ---------- закуп ---------- */
 /* закуп → «Все остатки»: весь ассортимент с остатками и продажами, решение о дозаказе — вручную */
-const PA = { brand:'', per:30, q:'', cat:'', sort:'sold', dir:-1, lim:100, list:null, flt:'' };
+const PA = { brand:'', per:30, q:'', cat:'', sup:'', sort:'sold', dir:-1, lim:100, list:null, flt:'' };
 function paHtml(){
   const A = PA.list, q = PA.q.trim().toLowerCase(), segB = (k, cur, arr) => `<div class="seg">${arr.map(([v,t])=>`<button data-${k}="${v}" aria-pressed="${String(cur)===String(v)}">${t}</button>`).join('')}</div>`;
   const cats = A ? [...A.reduce((m,p)=>m.set(p.cat,(m.get(p.cat)||0)+1), new Map())].sort((a,b)=>b[1]-a[1]) : [];
   const F = { '':()=>true, low:p=>p.per_day>0 && (p.days_left??0) < 30, out:p=>p.stock<=0 && p.sold>0, dead:p=>p.stock>0 && !(p.sold>0), over:p=>p.per_day>0 && p.days_left>120 };
-  let L = A ? A.filter(p => (!PA.cat || p.cat===PA.cat) && F[PA.flt||''](p) && (!q || q.split(/\s+/).every(w => (p.name+' '+p.barcode).toLowerCase().includes(w)))) : null;
+  let L = A ? A.filter(p => (!PA.cat || p.cat===PA.cat) && (!PA.sup || (PA.sup==='—' ? !p.sup : p.sup===PA.sup)) && F[PA.flt||''](p) && (!q || q.split(/\s+/).every(w => (p.name+' '+p.barcode).toLowerCase().includes(w)))) : null;
   const key = { sold:p=>+p.sold||0, stock:p=>+p.stock||0, days:p=>p.days_left==null?1e9:+p.days_left, name:p=>p.name, cost:p=>(+p.cost||0)*Math.max(+p.stock||0,0) };
   if(L){ const f = key[PA.sort]||key.sold; L = [...L].sort((a,b)=>{ const x=f(a), y=f(b); return (x>y?1:x<y?-1:0)*PA.dir; }); }
   const th = (k,t) => `<th><button data-pasort="${k}" style="border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;white-space:nowrap">${t} ${PA.sort===k?(PA.dir<0?'▼':'▲'):'<span class="meta">↕</span>'}</button></th>`;
@@ -2856,11 +2856,12 @@ function paHtml(){
     <p class="meta" style="margin:0 0 8px">Весь ассортимент, который есть в магазинах, продавался за ${PA.per} дн. или уже едет. «Хватит на» = (остаток + едет) ÷ продажи в день. Наведите на остаток или продажи — покажет по магазинам. Нажмите на название — откроется карточка товара.</p>
     <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:8px"><input id="pa-q" type="search" placeholder="🔍 Название или штрихкод" value="${esc(PA.q)}" style="flex:1;min-width:200px" autocomplete="off">
       ${segB('paflt', PA.flt, [['','Все'],['low','Хватит < 30 дн.'],['out','Закончились, но продаются'],['dead','Лежат без продаж'],['over','Запас > 120 дн.']])}</div>
+    ${A?(()=>{ const sm = [...A.reduce((m,p)=>m.set(p.sup||'—',(m.get(p.sup||'—')||0)+1), new Map())].sort((a,b)=>b[1]-a[1]); return `<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:8px"><span class="meta">Поставщик:</span><select id="pa-sup" style="max-width:420px"><option value="">Все поставщики (${sm.length})</option>${sm.map(([k,n])=>`<option value="${esc(k)}" ${PA.sup===k?'selected':''}>${k==='—'?'Поставщик не указан':esc(k)} · ${n}</option>`).join('')}</select></div>`; })():''}
     ${A?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:10px"><button class="btn small ${!PA.cat?'primary':''}" data-pacat="">Все категории</button>${cats.map(([c,n])=>`<button class="btn small ${PA.cat===c?'primary':''}" data-pacat="${esc(c)}">${esc(c)} (${n})</button>`).join('')}</div>`:''}
     ${!L?'<div class="empty">Загружаем весь ассортимент…</div>':!L.length?'<div class="empty">Ничего не найдено</div>':`
     <p class="meta">Найдено ${L.length.toLocaleString('ru-RU')} товаров${tot?` · в остатке на ${fmt(tot)} по закупу`:''}</p>
     <div class="scroll"><table class="mc"><thead><tr><th></th>${th('name','Товар')}${th('sold','Продано '+PA.per+' дн.')}${th('stock','Остаток')}<th>Едет</th>${th('days','Хватит на')}${th('cost','Закуп')}<th></th></tr></thead><tbody>
-    ${L.slice(0, PA.lim).map(p=>`<tr><td data-l="">${thumb(p)}</td><td class="mc-t">${pcl(p.id, esc(p.name))}<br><span class="meta">${esc(p.cat)} · ${esc(p.barcode||'')} · ${fmt(p.price)}</span>${p.purchase_url?` · <a href="${esc(p.purchase_url)}" target="_blank" rel="noopener" class="meta">у поставщика ↗</a>`:''}</td>
+    ${L.slice(0, PA.lim).map(p=>`<tr><td data-l="">${thumb(p)}</td><td class="mc-t">${pcl(p.id, esc(p.name))}<br><span class="meta">${esc(p.cat)} · ${esc(p.barcode||'')} · ${fmt(p.price)}</span>${p.purchase_url?` · <a href="${esc(p.purchase_url)}" target="_blank" rel="noopener" class="meta">товар у поставщика ↗</a>`:''}${p.sup?`<br><span class="meta">🏪 ${p.sup_url?`<a href="${esc(p.sup_url)}" target="_blank" rel="noopener">${esc(p.sup)} ↗</a>`:esc(p.sup)}</span>`:''}</td>
       <td class="num" data-l="Продано ${PA.per} дн.">${poByStore(p,'sold',p.sold)}${p.per_day>0?`<br><span class="meta">≈ ${(+p.per_day).toLocaleString('ru-RU')}/день</span>`:''}${p.last?`<br><span class="meta">посл. ${dshort(p.last)}</span>`:''}</td>
       <td class="num" data-l="Остаток" ${p.stock<=0?'style="color:var(--bad)"':''}>${poByStore(p,'stock',p.stock)}</td><td class="num" data-l="Едет">${p.incoming||'—'}</td>
       <td class="num" data-l="Хватит на">${p.days_left==null?'<span class="meta">нет продаж</span>':`<b style="color:${p.days_left<14?'var(--bad)':p.days_left<30?'#c08a00':'inherit'}">${p.days_left} дн.</b>`}</td>
@@ -2878,7 +2879,51 @@ document.addEventListener('click', async e => { if(S.view!=='po' || PO.mode!=='a
   else if(d.paadd){ const p = (PA.list||[]).find(x=>x.id===d.paadd); if(!p) return; const q = Math.max(1, +(document.querySelector(`[data-paqty="${p.id}"]`)||{}).value||1);
     const dd = PO.d || (PO.d = poNew()); if(!dd.items.some(i=>i.pid===p.id)) dd.items.push({ pid:p.id, name:p.name, barcode:p.barcode, qty:q, cost:p.cost??'' }); toast('Добавлено в новый заказ ('+dd.items.length+' поз.)'); render(); }
 });
+document.addEventListener('change', e => { if(S.view!=='po' || e.target.id!=='pa-sup') return; PA.sup = e.target.value; PA.lim = 100; render(); });
 let paTimer; document.addEventListener('input', e => { if(S.view!=='po' || e.target.id!=='pa-q') return; PA.q = e.target.value; clearTimeout(paTimer); paTimer = setTimeout(() => { PA.lim = 100; render(); }, 250); });
+/* ---------- закуп → идеи и тренды: что растёт, что заканчивается, что брали в это время год назад + идеи ИИ с поиском трендов ---------- */
+const PI = { brand:'', per:30, t:null, ai:null, busy:false, err:'', hist:null, open:{} };
+async function piLoad(){ const k = PI.brand+'|'+PI.per; PI.t = null; PI.ai = undefined;
+  if(PI.hist==null){ const h = await sb.rpc('sales_history_from'); PI.hist = h.data || ''; }
+  const [a, b] = await Promise.all([ sb.rpc('po_trends', { p_brand:PI.brand||null, p_days:PI.per }), sb.functions.invoke('po_ideas', { body:{ action:'get', brand:PI.brand } }) ]);
+  if(k !== PI.brand+'|'+PI.per) return;
+  if(a.error) toast(errText(a.error)); PI.t = a.data || { cats:[], bands:[], rising:[], runout:[], ly_next:[] }; PI.ai = b.error ? null : (b.data || null); }
+const pn = x => Math.round(+x||0).toLocaleString('ru-RU');
+const piPct = (a, b) => { a = +a||0; b = +b||0; if(!b) return a ? '<span class="chip ok">новое</span>' : '—'; const v = Math.round((a-b)/b*100); return `<span style="color:${v>=10?'var(--ok,#1a7f4b)':v<=-10?'var(--bad)':'inherit'};font-weight:600">${v>0?'+':''}${v}%</span>`; };
+const piZh = s => `https://s.1688.com/selloffer/offer_search.htm?charset=utf8&keywords=${encodeURIComponent(s)}`;
+function piList(L, cols){ return !L || !L.length ? '<div class="meta" style="padding:6px 0">Нет таких товаров</div>' : `<div class="scroll"><table class="mc"><thead><tr><th></th><th>Товар</th>${cols.map(c=>`<th>${c[0]}</th>`).join('')}</tr></thead><tbody>${L.map(p=>`<tr><td data-l="">${thumb(p)}</td><td class="mc-t">${pcl(p.id, esc(p.name))}<br><span class="meta">${esc(p.cat)} · ${fmt(p.price)}</span></td>${cols.map(c=>`<td class="num" data-l="${c[0]}">${c[1](p)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`; }
+function piHtml(){
+  const T = PI.t, A = PI.ai, segB = (k, cur, arr) => `<div class="seg">${arr.map(([v,t])=>`<button data-${k}="${v}" aria-pressed="${String(cur)===String(v)}">${t}</button>`).join('')}</div>`;
+  const short = PI.hist && PI.hist > '2025-11-01';
+  const sec = (id, title, html, open) => `<details class="card" data-pisec="${id}" style="margin-bottom:10px" ${(PI.open[id] ?? open)?'open':''}><summary style="cursor:pointer;font-weight:700">${title}</summary><div style="margin-top:8px">${html}</div></details>`;
+  const ai = A===undefined ? '<p class="meta">Загружаю…</p>' : PI.busy ? '<p class="meta">Claude смотрит продажи и ищет тренды в интернете… (~1–2 мин)</p>' : PI.err ? `<p class="meta" style="color:var(--bad)">${esc(PI.err)}</p>` : !A ? '<p class="meta">Идей ещё нет — нажмите «Собрать идеи». Claude посмотрит цифры ниже, найдёт в интернете актуальные тренды украшений и предложит: что дозаказать, что новое успеть заказать к праздникам и что искать у поставщиков в Китае.</p>' : (()=>{ const d = A.data||{}, li = (a, f) => (a||[]).length ? `<ul style="margin:4px 0 10px;padding-left:20px">${a.map(f).join('')}</ul>` : '';
+      return `<p class="meta" style="margin:0 0 6px">Собрано ${anAt(A.created_at)} · продажи за ${A.days} дн.</p>${d.summary?`<p style="margin:0 0 10px;line-height:1.5"><b>${esc(d.summary)}</b></p>`:''}
+        ${(d.reorder||[]).length?`<div class="label">Дозаказать из нашего</div>${li(d.reorder, x=>`<li><b>${esc(x.name)}</b> — ${esc(x.why||'')}${x.qty_hint?` <span class="chip">${esc(x.qty_hint)}</span>`:''}</li>`)}`:''}
+        ${(d.trends||[]).length?`<div class="label">Тренды и новинки — успеть заказать</div>${li(d.trends, x=>`<li><b>${esc(x.title)}</b>${x.fit?` <span class="chip">${esc(x.fit)}</span>`:''} — ${esc(x.why||'')}${x.deadline?`<br><span class="meta">⏰ ${esc(x.deadline)}</span>`:''}${x.price?` <span class="meta">· цена на полке ${esc(x.price)}</span>`:''}</li>`)}`:''}
+        ${(d.search||[]).length?`<div class="label">Что искать у поставщиков в Китае</div><div class="scroll"><table class="mc"><thead><tr><th>Что</th><th>Запрос по-китайски</th><th>Закупка</th><th></th></tr></thead><tbody>${d.search.map(x=>`<tr><td class="mc-t"><b>${esc(x.ru)}</b><br><span class="meta">${esc(x.why||'')}</span></td><td data-l="Запрос"><span class="num" style="user-select:all">${esc(x.zh||'')}</span></td><td class="num" data-l="Закупка">${esc(x.cny||'—')}</td><td class="mc-a">${x.zh?`<a class="btn small" href="${esc(piZh(x.zh))}" target="_blank" rel="noopener">Искать ↗</a>`:''}</td></tr>`).join('')}</tbody></table></div>`:''}
+        ${(d.stop||[]).length?`<div class="label" style="margin-top:8px">Не дозаказывать</div>${li(d.stop, x=>`<li><b>${esc(x.name)}</b> — ${esc(x.why||'')}</li>`)}`:''}
+        ${(d.supplier_tips||[]).length?`<div class="label">Как выбрать хорошего поставщика</div>${li(d.supplier_tips, x=>`<li>${esc(x)}</li>`)}`:''}
+        ${(d.sources||[]).length?`<details><summary class="meta" style="cursor:pointer">Источники трендов (${d.sources.length})</summary>${li(d.sources, x=>`<li><a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a></li>`)}</details>`:''}`; })();
+  const canRun = S.me && ['owner','purchaser'].includes(S.me.role);
+  const cats = T && T.cats || [], bands = T && T.bands || [];
+  return `<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px 14px;margin-bottom:10px">
+      <span class="row" style="gap:6px"><span class="meta">Бренд:</span>${segB('pibrand', PI.brand, [['','Все'],['moon','MOON'],['sunshine','Sunshine']])}</span>
+      <span class="row" style="gap:6px"><span class="meta">Период:</span>${segB('piper', PI.per, [[30,'30 дн.'],[60,'60 дн.'],[90,'90 дн.']])}</span></div>
+    <div class="card" style="margin-bottom:10px"><div class="row" style="flex-wrap:wrap;gap:8px"><b style="flex:1">✨ Идеи к заказу от ИИ</b>${canRun?`<button class="btn small primary" id="pi-run" ${PI.busy||A===undefined?'disabled':''}>${PI.busy?'Думает…':A?'Собрать заново':'Собрать идеи'}</button>`:''}</div>${ai}</div>
+    ${!T ? '<div class="empty">Считаем тренды…</div>' : `
+    ${sec('cats', 'Категории: растут или падают', `<p class="meta" style="margin:0 0 6px">Последние ${PI.per} дн. против предыдущих ${PI.per} дн.${short?'':' и что брали в ближайшие 60 дн. год назад'}</p><div class="scroll"><table class="mc"><thead><tr><th>Категория</th><th>Продано</th><th>Было</th><th>Изменение</th><th>Выручка</th><th>${short?'Год назад*':'Год назад, след. 60 дн.'}</th><th>Склад</th></tr></thead><tbody>${cats.map(c=>`<tr><td class="mc-t"><b>${esc(c.cat)}</b><br><span class="meta">${c.skus} поз. в наличии</span></td><td class="num" data-l="Продано">${pn(c.q_cur)}</td><td class="num" data-l="Было">${pn(c.q_prev)}</td><td data-l="Изменение">${piPct(c.q_cur, c.q_prev)}</td><td class="num" data-l="Выручка">${fmt(c.r_cur)}</td><td class="num" data-l="Год назад">${c.q_ly_next?pn(c.q_ly_next):'—'}</td><td class="num" data-l="Склад">${pn(c.stock)}</td></tr>`).join('')}</tbody></table></div>${short?`<p class="meta">* Продажи в Silver есть только с ${dshort(PI.hist)} — сравнение с прошлым годом станет полным после загрузки продаж 2025 (закладка Wipon в каждом ИП).</p>`:''}`, true)}
+    ${sec('bands', 'Ценовые сегменты', `<div class="scroll"><table class="mc"><thead><tr><th>Цена</th><th>Продано</th><th>Было</th><th>Изменение</th><th>Выручка</th><th>Склад</th></tr></thead><tbody>${bands.map(b=>`<tr><td class="mc-t"><b>${esc(b.band)} ₸</b></td><td class="num" data-l="Продано">${pn(b.q_cur)}</td><td class="num" data-l="Было">${pn(b.q_prev)}</td><td data-l="Изменение">${piPct(b.q_cur, b.q_prev)}</td><td class="num" data-l="Выручка">${fmt(b.r_cur)}</td><td class="num" data-l="Склад">${pn(b.stock)}</td></tr>`).join('')}</tbody></table></div>`, false)}
+    ${sec('runout', `Хиты заканчиваются · ${(T.runout||[]).length}`, piList(T.runout, [['Продано', p=>pn(p.q_cur)], ['Остаток', p=>pn(p.stock)+(p.incoming?` <span class="meta">+${p.incoming} едет</span>`:'')], ['Хватит на', p=>`<b style="color:${p.days_left<14?'var(--bad)':'#c08a00'}">${p.days_left} дн.</b>`]]), true)}
+    ${sec('rising', `Набирают продажи · ${(T.rising||[]).length}`, piList(T.rising, [['Сейчас', p=>pn(p.q_cur)], ['Было', p=>pn(p.q_prev)], ['Остаток', p=>pn(p.stock)+(p.incoming?` <span class="meta">+${p.incoming} едет</span>`:'')], ['Хватит на', p=>p.days_left==null?'—':p.days_left+' дн.']]), false)}
+    ${sec('ly', `Что брали в это время год назад · ${(T.ly_next||[]).length}`, (short?`<p class="meta">Пока видно только январь 2026 — продаж за 2025 в Silver ещё нет.</p>`:'')+piList(T.ly_next, [['Год назад, 60 дн.', p=>pn(p.q_ly_next)], ['Остаток', p=>pn(p.stock)+(p.incoming?` <span class="meta">+${p.incoming} едет</span>`:'')]]), false)}`}`;
+}
+document.addEventListener('click', async e => { if(S.view!=='po' || PO.mode!=='ideas') return; const t = e.target.closest('button'); if(!t) return; const d = t.dataset;
+  if('pibrand' in d || d.piper){ if('pibrand' in d) PI.brand = d.pibrand; if(d.piper) PI.per = +d.piper; PI.err = ''; render(); await piLoad(); render(); }
+  else if(t.id==='pi-run'){ PI.busy = true; PI.err = ''; render();
+    const { data, error } = await sb.functions.invoke('po_ideas', { body:{ action:'run', brand:PI.brand, days:PI.per } }); PI.busy = false;
+    if(error){ let m = error.message; try{ m = (await error.context.json()).error || m; }catch(_){} PI.err = m; } else PI.ai = data; render(); }
+});
+document.addEventListener('toggle', e => { const el = e.target; if(el && el.dataset && el.dataset.pisec) PI.open[el.dataset.pisec] = el.open; }, true);
 /* что дозаказать: при наведении — остаток и продажи по каждому магазину */
 function poByStore(p, k, total){ const B = p.by_store || {}, ids = Object.keys(B); if(!ids.length) return `${total}`;
   return `<span class="nm-st" tabindex="0">${total}<span class="nm-st-pop">${S.allStores.filter(st=>B[st.id]).map(st=>{ const b = B[st.id]; return `<span class="row" style="gap:12px"><span>${esc(BRAND[st.brand]+' · '+st.address)}</span><span class="num">остаток <b>${+b.stock||0}</b> · продано <b>${+b.sold||0}</b></span></span>`; }).join('')}</span></span>`; }
@@ -2898,12 +2943,13 @@ async function loadPo(){
     const { data, error } = await sb.rpc('po_suggest3', { p_days:PO.sdays||30, p_brand:PO.sbrand||null, p_sales_days:PO.sper||30, p_mode:PO.smode==='ly'?'ly':'recent' }); if(error) toast(errText(error));
     if(k===[PO.sdays, PO.sbrand, PO.sper, PO.smode].join('|')) PO.sug = data||[]; }
   if(PO.mode==='all'){ const k = [PA.brand, PA.per].join('|'); PA.list = null; const { data, error } = await sb.rpc('po_stock_all', { p_brand:PA.brand||null, p_sales_days:PA.per||30 }); if(error) toast(errText(error)); if(k===[PA.brand, PA.per].join('|')) PA.list = data||[]; }
+  if(PO.mode==='ideas') await piLoad();
   if(PO.mode==='sup'){ const { data, error } = await sb.rpc('suppliers_list'); if(error) toast(errText(error)); PO.sups = data||[]; }
   if(PO.mode==='an'){ const now = new Date(), iso = x => x.toLocaleDateString('sv-SE'); const from = PO.anPer==='month' ? new Date(now.getFullYear(), now.getMonth(), 1) : PO.anPer==='q' ? new Date(now.getFullYear(), now.getMonth()-2, 1) : new Date(now.getFullYear(), 0, 1);
     const { data, error } = await sb.rpc('po_analytics', { p_from: iso(from), p_to: iso(now) }); if(error) toast(errText(error)); PO.an = data||{}; }
 }
 function renderPo(){
-  const modes = [['orders','Заказы'],['new','Новый заказ'],['suggest','Что дозаказать'],['all','Все остатки'],['sup','Поставщики'],['an','Аналитика закупа']].filter(([k])=>poEdit() || k!=='new');
+  const modes = [['orders','Заказы'],['new','Новый заказ'],['suggest','Что дозаказать'],['all','Все остатки'],['ideas','✨ Идеи и тренды'],['sup','Поставщики'],['an','Аналитика закупа']].filter(([k])=>poEdit() || k!=='new');
   const head = `<div class="row" style="flex-wrap:wrap"><h2>Закуп</h2><span class="row" style="gap:6px">${(PO.list||[]).some(o=>(o.supplier&&/[\u4e00-\u9fff]/.test(o.supplier)&&!o.supplier_ru)||(o.items||[]).some(i=>i.supplier_title&&!i.title_ru))?`<button class="btn small" id="po-tr">🌐 Перевести названия на русский</button>`:''}${poEdit()?`<label class="btn small" style="cursor:pointer">⬆ Загрузить заказы: 1688 или Alibaba (Excel)<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label>`:''}</span></div>
   ${PO.imp?`<div class="card meta" style="margin-bottom:8px">${esc(PO.imp)}</div>`:''}
   <div class="seg" style="display:inline-flex;margin-bottom:10px">${modes.map(([k,v])=>`<button data-pomode="${k}" aria-pressed="${PO.mode===k}">${v}</button>`).join('')}</div>`;
@@ -2960,6 +3006,7 @@ function renderPo(){
         <button class="btn primary" id="po-save" ${d.items.length?'':'disabled'}>Оформить заказ</button></div></div>`;
   }
   if(PO.mode==='all') body = paHtml();
+  if(PO.mode==='ideas') body = piHtml();
   if(PO.mode==='suggest'){
     const A = PO.sug, q = (PO.sq||'').trim().toLowerCase(), cat = PO.scat||'';
     const cats = A ? [...A.reduce((m,p)=>m.set(p.cat,(m.get(p.cat)||0)+1), new Map())].sort((a,b)=>b[1]-a[1]) : [];

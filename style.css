@@ -1,6 +1,7 @@
 :root{
-  --bg:#f4f5f8; --surface:#fff; --ink:#1b2033; --muted:#6a7088; --line:#dfe2ea;
-  --accent:#b8456b; --accent-ink:#fff; --soft:#f6e6ec; --ok:#2f7d5b; --warn:#a86a12; --bad:#b33a3a; --night:#1b2033;
+  --bg:#fff8f1; --surface:#fff; --ink:#3d2c2e; --muted:#8a6f63; --line:#f1dcc8;
+  --accent:#e07a5f; --accent-ink:#fff; --soft:#fdebd9; --ok:#3e8e6e; --warn:#b7791f; --bad:#c0443a; --night:#3d2c2e;
+  --sun:#f2a65a; --sun2:#f7c27a; --head-ink:#3d2c2e;
   --font:"Golos Text",system-ui,-apple-system,"Segoe UI",sans-serif;
 }
 *{box-sizing:border-box}
@@ -12,12 +13,12 @@ button{cursor:pointer}
 .num{font-variant-numeric:tabular-nums}
 [hidden]{display:none!important}
 
-header{position:sticky;top:0;z-index:5;background:var(--night);color:#eceef4;padding:10px max(14px,env(safe-area-inset-right)) 10px max(14px,env(safe-area-inset-left));
+header{position:sticky;top:0;z-index:5;background:linear-gradient(100deg,var(--sun2),var(--sun) 55%,#ee9150);color:var(--head-ink);box-shadow:0 2px 10px rgba(224,122,95,.18);padding:10px max(14px,env(safe-area-inset-right)) 10px max(14px,env(safe-area-inset-left));
   padding-top:calc(10px + env(safe-area-inset-top));display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
 header .brand{font-weight:700;letter-spacing:.03em}
-header select{background:#2a3050;border:1px solid #3a4168;border-radius:8px;padding:6px 8px;color:#eceef4;max-width:100%}
-header .who{margin-left:auto;font-size:13px;color:#c9cde0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-header .who button{background:none;border:1px solid #3a4168;color:#c9cde0;border-radius:8px;padding:4px 8px}
+header select{background:rgba(255,255,255,.55);border:1px solid rgba(61,44,46,.18);border-radius:10px;padding:6px 8px;color:var(--head-ink);max-width:100%}
+header .who{margin-left:auto;font-size:13px;color:#5a3f3a;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+header .who button{background:rgba(255,255,255,.45);border:1px solid rgba(61,44,46,.18);color:var(--head-ink);border-radius:10px;padding:4px 10px}
 .net{font-size:12px;padding:2px 8px;border-radius:999px;background:#2f7d5b;color:#fff}
 .net.off{background:#b33a3a}
 
@@ -216,3 +217,22 @@ details.dd .dd-panel label:hover{background:var(--bg)}
 /* имя товара → карточка товара */
 a.pcl{color:inherit;text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer}
 a.pcl:hover{color:var(--accent,inherit);text-decoration-style:solid}
+
+/* ---------- тема «Рассвет» (Moon and Sunshine) ---------- */
+header .brand{font-weight:700;letter-spacing:.06em;display:inline-flex;align-items:center;gap:6px}
+header .brand::before{content:"☾";font-size:17px;opacity:.85} header .brand::after{content:"☀";font-size:16px;color:#fff}
+.net{background:#fff;color:#3e8e6e} .net.off{background:#fff;color:#c0443a}
+.card{border-radius:18px;border-color:var(--line);box-shadow:0 1px 3px rgba(150,90,50,.06)}
+.btn{border-radius:12px;border-color:var(--line)}
+.btn.primary{background:var(--accent);border-color:var(--accent);box-shadow:0 2px 6px rgba(224,122,95,.25)}
+.btn.primary:hover{background:#d96c50}
+.seg{border-radius:12px;border-color:var(--line);background:var(--surface)}
+.seg button[aria-pressed="true"]{background:var(--soft);color:#a3532e;font-weight:600}
+nav.subtabs button{border-color:var(--line)}
+nav.subtabs button[aria-selected="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
+nav.tabs{border-top-color:var(--line);box-shadow:0 -2px 10px rgba(150,90,50,.06)}
+nav.tabs button[aria-selected="true"]{color:var(--accent);box-shadow:inset 0 3px 0 var(--sun)}
+.chip.ok{background:#eaf6f0} .chip.warn{background:#fdf3e1} .chip.zero{background:#fbeceb}
+input,select,textarea{border-radius:10px}
+:focus-visible{outline-color:var(--sun)}
+h2{color:#4a3230}
