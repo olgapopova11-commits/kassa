@@ -1387,7 +1387,7 @@ async function nmPhoto(file){
 }
 
 /* ---------- сайт ↔ база ---------- */
-const SITE_ST = [['review','Проверить'],['auto','Связано автоматически'],['confirmed','Подтверждено'],['siteonly','Только на сайте — нет в базе'],['baseonly','Только в базе — нет на сайте']];
+const SITE_ST = [['review','Проверить'],['auto','Связано автоматически'],['confirmed','Подтверждено'],['siteonly','Только на сайте — нет в базе'],['group','Общий товар (скрыто)'],['baseonly','Только в базе — нет на сайте']];
 const SITE_NAME = { moon:'mooncollection.kz', sunshine:'sunshinejewelry.kz' };
 async function loadSite(){
   const f = S.st; f.data = null;
@@ -1424,7 +1424,7 @@ function renderSite(){
       <div class="row" style="justify-content:flex-end;flex-wrap:wrap;margin-top:8px">
         ${r.product_id&&r.status!=='confirmed'?`<button class="btn small primary" data-stok="${key}" data-pid="${r.product_id}">Верно</button>`:''}
         <button class="btn small" data-stopen="${key}">${open?'Скрыть':'Выбрать другой товар'}</button>
-
+        ${isBoss()&&!isViewer()&&!r.product_id?(r.status==='group'?`<button class="btn small" data-stgcard="${key}" data-on="0">Вернуть в «Только на сайте»</button>`:`<button class="btn small" data-stgcard="${key}" data-on="1" title="Изделие продаётся под общим штрихкодом — в базе отдельного товара нет. Карточка уйдёт из списка «Только на сайте»">Пометить как общий товар</button>`):''}
       </div>
       ${open?`<div class="cust stack" style="margin-top:8px">
         <span class="label">Похожие товары в базе</span>
@@ -1458,6 +1458,9 @@ document.addEventListener('click', async e => {
     else { f.open = d.stgrp; f.cands = data||[]; f.cq = ''; f.cfound = []; render(); toast(G.length ? 'Подходит несколько общих штрихкодов — выберите нужный' : 'Общего штрихкода с такой ценой нет — выберите товар вручную'); } }
   else if(d.stbgrp){ t.disabled = true; const on = d.on==='1'; const { data, error } = await sb.rpc('product_mark_group', { p_id:d.stbgrp, p_on:on }); if(error){ t.disabled = false; return toast(errText(error)); }
     toast(on ? 'Отмечен как общий штрихкод — такой товар на сайт не выводится' : 'Отметка снята'); await loadSite(); render(); }
+  else if(d.stgcard){ const [site, uid] = d.stgcard.split(':'), on = d.on==='1'; t.disabled = true;
+    const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product:null, p_status: on ? 'group' : 'none' }); if(error){ t.disabled = false; return toast(errText(error)); }
+    toast(on ? 'Помечено как общий товар — карточка скрыта из «Только на сайте»' : 'Карточка вернулась в «Только на сайте»'); S.st.parts = null; await loadSite(); render(); }
   else if(d.stblink){ const [site, uid] = d.stblink.split(':'); const { error } = await sb.rpc('site_link_set', { p_site:site, p_uid:+uid, p_product:d.pid, p_status:'confirmed' });
     if(error) return toast(errText(error)); toast('Связано с карточкой сайта'); f.bfind = null; await loadSite(); render(); }
 });
