@@ -1937,6 +1937,11 @@ function silverWiponSync(K){
         if(x.total != null && x.rows.length < x.total) continue; // загрузилось не всё — остатки не трогаем
         const rows = x.rows.filter(i => i.barcode).map(i => ({ bc:i.barcode, name:i.title, qty:+i.quantity, cost:+i.previous_purchase_price || null, price:+i.selling_price || null, cat:i.item_category_name }));
         if(rows.length){ await post('wipon_stock', st, rows); nst++; } }
+      try{ // смены Wipon за 3 дня → Silver (для остатка наличных в кассе)
+        const d3 = day(new Date(now - 3 * 864e5)), sh = await api('/v1/employee/' + emp + '/shift?per_page=100&page=1&date_from=' + d3 + 'T00:00:00%2B05:00&date_to=' + day(now) + 'T23:59:59%2B05:00');
+        const srows = (sh.data || []).map(r => { const x = JSON.parse(JSON.stringify(r)); if(x.employee && typeof x.employee === 'object') delete x.employee.company; if(x.stock && typeof x.stock === 'object') x.stock = { id:x.stock.id, name:x.stock.name }; return x; });
+        if(srows.length) await fetch('https://ottuadjdksxipfjytlyv.supabase.co/functions/v1/wipon_hist', { method:'POST', headers:{ 'content-type':'application/json', 'x-ingest':K }, body:JSON.stringify({ kind:'shift', emp, rows:srows }) });
+      }catch(_){ /* смены не критичны */ }
       P(lk, Date.now()); }
     return [ns, nr, nst];
   }
@@ -2696,7 +2701,13 @@ async function loadDay(){
   if(S.me.role==='owner') wuLoadLast();
   if(DAY.role==='own') loadPulse();
 }
-async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; if(S.view==='day') render(); if(!data.ai) loadAiSpend(); }
+async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; if(S.view==='day') render(); if(!data.ai) loadAiSpend(); loadCash(); }
+/* наличные в кассе: остаток по тетради + наличные продажи Wipon с тех пор − расходы, внесённые в Silver */
+async function loadCash(){ const { data, error } = await sb.rpc('cash_status'); if(error) return; DAY.cash = {}; (data||[]).forEach(c => DAY.cash[c.store] = c); if(S.view==='day') render(); }
+function cashCell(x){ const c = (DAY.cash||{})[x.id]; if(!c) return '<span class="meta">…</span>'; if(c.est_kzt == null) return '<span class="meta">нет данных</span>';
+  const dd = String(c.snap_day||'').slice(8,10)+'.'+String(c.snap_day||'').slice(5,7);
+  const tip = `Остаток по тетради на конец ${dd}: ${fmt(c.snap_kzt)}${+c.snap_usd?' и $'+(+c.snap_usd).toLocaleString('ru-RU'):''}. Плюс наличные продажи по Wipon с тех пор: ${fmt(c.cash_since)}.${+c.moves_since?' Минус расходы и сдача денег, внесённые в Silver: '+fmt(c.moves_since)+'.':''} Расходы после этой даты учтены, только если внесены в Silver, — реальная сумма может быть меньше.${c.snap_note?' Источник: '+c.snap_note:''}`;
+  return `<span title="${esc(tip)}"><b class="num">${fmt(c.est_kzt)}</b>${+c.snap_usd?` <b class="num">· $${(+c.snap_usd).toLocaleString('ru-RU')}</b>`:''}<br><span class="meta" style="font-size:11px">по тетради на ${dd}: ${fmt(c.snap_kzt)} + наличные продажи с тех пор ${fmt(c.cash_since)}${+c.moves_since?' − расходы '+fmt(c.moves_since):''}</span></span>`; }
 /* расход на Grok (AI): сегодня и с начала месяца — из таблицы ai_usage */
 async function loadAiSpend(){
   const now = new Date(), day = now.toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'}), m0 = day.slice(0,8)+'01';
@@ -2735,9 +2746,11 @@ function pulseHtml(P){
       ${tile('Чеков сегодня', C.toLocaleString('ru-RU'), T&&C?'средний чек '+fmt(Math.round(T/C)):'')}
       ${tile('С начала месяца', fmt(M), `${chip(pct(M,MP))} к тому же периоду прошлого месяца`)}${aiTile(P)}</div>
     <h3 style="margin:16px 0 6px">Магазины</h3>
-    <div class="scroll"><table><thead><tr><th>Магазин</th><th>Сегодня</th><th>Неделю назад</th><th></th><th>Месяц</th><th></th><th title="Сколько нужно продать за месяц, чтобы покрыть аренду, коммуналку и расходы магазина">Безубыточность в месяц</th><th>Возвраты 2 дня</th><th>Чеки Wipon</th><th>Остатки Wipon</th></tr></thead><tbody>
+    <div class="scroll"><table><thead><tr><th>Магазин</th><th>Сегодня</th><th>Неделю назад</th><th></th><th>Месяц</th><th></th><th title="Сколько нужно продать за месяц, чтобы покрыть аренду, коммуналку и расходы магазина">Безубыточность в месяц</th><th title="Остаток по последней странице тетради + наличные продажи Wipon после неё − расходы, внесённые в Silver">Наличные в кассе</th><th>Возвраты 2 дня</th><th>Чеки Wipon</th><th>Остатки Wipon</th></tr></thead><tbody>
       ${St.map(x=>`<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td class="num"><b>${fmt(x.today)}</b></td><td class="num meta">${fmt(x.week_ago)}</td><td>${chip(pct(+x.today,+x.week_ago))}</td>
-        <td class="num">${fmt(x.mtd)}</td><td>${chip(pct(+x.mtd,+x.mtd_prev))}</td><td>${beCell(x)}</td><td class="num">${+x.returns_2d?'<span class="chip warn">'+x.returns_2d+'</span>':'0'}</td><td>${fresh(x.sync_sales)}</td><td>${fresh(x.sync_stock)}</td></tr>`).join('')}</tbody></table></div>
+        <td class="num">${fmt(x.mtd)}</td><td>${chip(pct(+x.mtd,+x.mtd_prev))}</td><td>${beCell(x)}</td><td style="min-width:150px">${cashCell(x)}</td><td class="num">${+x.returns_2d?'<span class="chip warn">'+x.returns_2d+'</span>':'0'}</td><td>${fresh(x.sync_sales)}</td><td>${fresh(x.sync_stock)}</td></tr>`).join('')}</tbody></table></div>
+    ${(()=>{ const C = Object.values(DAY.cash||{}).filter(c=>c.est_kzt!=null); if(!C.length) return ''; const k = C.reduce((a,c)=>a+(+c.est_kzt||0),0), u = C.reduce((a,c)=>a+(+c.snap_usd||0),0);
+      return `<p style="margin:8px 0 0"><b>Наличных по сети ≈ ${fmt(k)}${u?' и $'+u.toLocaleString('ru-RU'):''}</b> <span class="meta">— остаток по тетрадям + наличные продажи Wipon после них; расходы учтены, только если внесены в Silver</span></p>`; })()}
     <p class="meta" style="margin:6px 0 0">Безубыточность = (аренда, коммуналка и другие расходы из «Рентабельности» + хозрасходы магазина из журнала «Расходы магазинов», в среднем за 3 мес.) ÷ доля, что остаётся с продажи после себестоимости и налога (по продажам за 90 дней). Зарплаты пока не учтены — впишите их в расходы магазина, и точка станет точной.</p>
     <h3 style="margin:16px 0 6px">Где застряла работа <span class="meta">— только просрочки и то, что не в списках команды</span></h3>
     ${stuck.length?`<div class="stack" style="gap:6px">${stuck.map(([n,t,v])=>`<div class="card row" style="flex-wrap:wrap;gap:8px;padding:8px 12px"><span style="flex:1;min-width:200px">${t}</span><span class="chip warn">${(+n).toLocaleString('ru-RU')}</span><button class="btn small" data-pulsego="${v}">Открыть →</button></div>`).join('')}</div>`:'<div class="card">✅ Ничего не застряло</div>'}
