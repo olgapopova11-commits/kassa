@@ -84,7 +84,7 @@ function storesDD(ids, attr){
   return `<details class="dd"><summary>${esc(ddSummary(ids))}</summary><div class="dd-panel">${S.allStores.map(st=>`<label><input type="checkbox" ${attr(st.id)} ${ids.includes(st.id)?'checked':''}> ${esc(BRAND[st.brand]+' · '+st.address)}</label>`).join('')}</div></details>`;
 }
 document.addEventListener('click', e => { document.querySelectorAll('details.dd[open]').forEach(d => { if(!d.contains(e.target)) d.removeAttribute('open'); }); });
-const thumb = p => p.photo_url ? `<img class="thumb" referrerpolicy="no-referrer" src="${esc(thumbUrl(p.photo_url))}" data-full="${esc(p.photo_url)}" alt="" loading="lazy" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : '<span class="thumb"></span>';
+const thumb = p => p.photo_url ? `<img class="thumb" referrerpolicy="no-referrer" src="${esc(thumbUrl(p.photo_url))}" data-full="${esc(p.photo_url)}" alt="" loading="lazy" decoding="async" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : '<span class="thumb"></span>';
 function errText(e){ return (e && (e.message || e.error_description)) || String(e); }
 const isNetErr = e => !navigator.onLine || /Failed to fetch|NetworkError|Load failed|network/i.test(errText(e));
 
@@ -258,6 +258,8 @@ const GROUPS = [['home','✅','Мой день',['day']],['goods','📦','Тов
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 // старые адреса вкладок: #attn → «Мой день», #stock → «Склад» в режиме «Остатки»
 function viewAlias(){ if(S.view==='attn') S.view = 'day'; else if(S.view==='stock'){ S.view = 'wh'; S.wmode = 'stock'; } }
+/* меняем DOM, только если разметка изменилась — меньше перерисовок и не сбивается фокус */
+function setHtml(el, h){ if(el._h !== h){ el.innerHTML = h; el._h = h; } }
 function renderNav(){
   const tabs = S.tabs || [], has = v => tabs.some(t => t[0]===v), title = v => (tabs.find(t=>t[0]===v)||[])[1];
   const cur = groupOf(S.view); (S.lastView ||= {})[cur[0]] = S.view;
@@ -265,14 +267,14 @@ function renderNav(){
   // внизу не больше 5 разделов: 4 первых + «Ещё» (остальные открываются листом)
   const GA = GROUPS.filter(g => g[3].some(has)), main = GA.length > 5 ? GA.slice(0, 4) : GA, more = GA.length > 5 ? GA.slice(4) : [];
   const gbtn = g => `<button role="tab" data-group="${g[0]}" aria-selected="${g===cur}"><span class="ico">${g[1]}</span>${g[2]}${g[0]==='goods'?rq:''}</button>`;
-  const mn = $('#mainnav'); if(mn) mn.innerHTML = main.map(gbtn).join('')
+  const mn = $('#mainnav'); if(mn) setHtml(mn, main.map(gbtn).join('')
     + (more.length ? `<button role="tab" data-more="1" aria-selected="${more.includes(cur)}"><span class="ico">☰</span>${more.includes(cur)?esc(cur[2]):'Ещё'}</button>` : '')
-    + (more.length && S.moreOpen ? `<div class="more-bg" data-moreclose="1"></div><div class="more-sheet" id="more-sheet">${more.map(gbtn).join('')}</div>` : '');
+    + (more.length && S.moreOpen ? `<div class="more-bg" data-moreclose="1"></div><div class="more-sheet" id="more-sheet">${more.map(gbtn).join('')}</div>` : ''));
   const av = cur[3].filter(has), sn = $('#subnav');
   // магазин выбирают только в разделе «Касса»: чек, смена и расходы относятся к конкретной кассе
   const kassa = cur[0]==='kassa' && ['pos','shifts','cash'].includes(S.view) && (S.view==='pos' || S.posOn);
-  if(sn){ sn.hidden = av.length < 2 && !kassa; sn.innerHTML = av.map(v => `<button role="tab" data-view="${v}" aria-selected="${v===S.view}">${title(v)}${v==='wh'?rq:''}</button>`).join('')
-    + (kassa && S.stores && S.stores.length ? `<label class="store-pick"><span class="meta">Магазин</span><select id="store-sel" aria-label="Магазин">${S.stores.map(s=>`<option value="${s.id}" ${s.id===S.store?'selected':''}>${esc(BRAND[s.brand]+' · '+s.city+', '+s.address)}</option>`).join('')}</select></label>` : '');
+  if(sn){ sn.hidden = av.length < 2 && !kassa; setHtml(sn, av.map(v => `<button role="tab" data-view="${v}" aria-selected="${v===S.view}">${title(v)}${v==='wh'?rq:''}</button>`).join('')
+    + (kassa && S.stores && S.stores.length ? `<label class="store-pick"><span class="meta">Магазин</span><select id="store-sel" aria-label="Магазин">${S.stores.map(s=>`<option value="${s.id}" ${s.id===S.store?'selected':''}>${esc(BRAND[s.brand]+' · '+s.city+', '+s.address)}</option>`).join('')}</select></label>` : ''));
     const ss = $('#store-sel'); if(ss) ss.onchange = e => { S.store = +e.target.value; ls.set('kassa_store', S.store); S.cust = null; S.bonusSpend = 0; if(S.phone) lookupCustomer(); renderHeader(); render(); loadPosShift().then(render); if(S.view==='shifts') loadShifts().then(render); if(S.view==='cash') loadCash().then(render); };
   }
   renderStoreBar(kassa);
@@ -287,7 +289,7 @@ function renderStoreBar(kassa){
     else if(!isBoss() && STORE_ONE.includes(S.view))
       h = `<label class="store-pick"><span class="meta">Магазин</span><select id="gstore-sel" aria-label="Магазин">${S.stores.map(s=>`<option value="${s.id}" ${s.id===S.store?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select></label>`;
   }
-  el.innerHTML = h; el.hidden = !h;
+  setHtml(el, h); el.hidden = !h;
 }
 function setStore(id){ S.store = +id; ls.set('kassa_store', S.store); S.cust = null; S.bonusSpend = 0;
   if(typeof DAY!=='undefined'){ DAY.store = null; DAY.data = null; } if(typeof PH!=='undefined') PH.store = null; if(typeof PY!=='undefined') PY.store = null;
@@ -311,10 +313,11 @@ function render(){
   if(location.hash.slice(1)!==S.view) try{ history.replaceState(null,'','#'+S.view); }catch(_){}
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
-  const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
+  const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart, y0 = scrollY;
   if(lazyPending(S.view)){ $('#main').innerHTML = `<div class="card" style="text-align:center;padding:28px 16px"><div style="font-size:32px">📊</div><p style="margin:8px 0 14px">На телефоне аналитика загружается только по запросу — так приложение работает быстрее.</p><button class="btn primary" data-lazyload="${S.view}">Загрузить</button></div>`; return; }
   ({ pos:renderPos, sales:renderSales, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, photo:renderPhoto, day:renderDay })[S.view]();
-  if(id){ const el = document.getElementById(id); if(el){ el.focus(); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
+  if(id){ const el = document.getElementById(id); if(el){ el.focus({ preventScroll:true }); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
+  if(y0 && Math.abs(scrollY - y0) > 2) scrollTo(0, y0);  // перерисовка не должна сбрасывать прокрутку
 }
 
 /* ---------- продажа ---------- */
@@ -567,6 +570,7 @@ async function loadStockView(){
   const { data, error } = await sb.rpc('stock_top3', { p_sort_store: sortCol, p_order: byName ? (S.stockDir==='asc'?'name_desc':'name_asc') : S.stockDir, p_filter: flt, p_q: S.stockQ.trim(), p_limit: 300, p_offset: 0 });
   if(error) return toast(errText(error));
   const byId = new Map(S.catalog.map(a=>[a[0],a]));
+  S.stockLim = 80;
   S.stockRows = (data||[]).map(r => { S.stock[r.product_id] = Object.fromEntries(Object.entries(r.per_store).map(([k,v])=>[+k,v]));
     const a = byId.get(r.product_id); return a ? prodObj(a) : { id:r.product_id, name:'(нет в кэше — обновите страницу)', barcode:'', price:0 }; });
 }
@@ -582,11 +586,13 @@ function renderStock(head){
           + (Object.values(f).some(Boolean)?'<button class="btn small" id="stf-clear">Сбросить фильтры</button>':''); })()}</div>
     <p class="meta">${S.stockQ.trim()||Object.values(S.stockF||{}).some(Boolean)?'Найдено '+S.stockRows.length+(S.stockRows.length===300?' (показаны первые 300)':''):'300 товаров'}: ${S.stockSort==='name'?'по названию':(S.stockDir==='asc'?'от меньшего остатка к большему':'от большего остатка к меньшему')+' '+(sortCol?'в магазине '+esc(storeName(sortCol)):'по всей сети')}. Повторное нажатие на заголовок — сортировка в обратную сторону.${S.stockDir==='asc'&&S.stockSort!=='name'?' Товары с нулевым остатком не показываются.':''}</p>
     ${S.stockRows.length?`<div class="scroll"><table class="mc"><thead><tr>${th('name','Товар')}${S.allStores.map(st=>th(st.id, esc(BRAND[st.brand])+'<br>'+esc(st.address))).join('')}${th('total','Всего')}<th></th></tr></thead><tbody>
-    ${S.stockRows.map(p=>{ const st=S.stock[p.id]||{}; const qs=S.allStores.map(x=>st[x.id]||0);
+    ${S.stockRows.slice(0, S.stockLim||80).map(p=>{ const st=S.stock[p.id]||{}; const qs=S.allStores.map(x=>st[x.id]||0);
       return `<tr><td class="mc-t"><b>${pcl(p.id, esc(p.name))}</b><br><span class="meta num">${esc(p.barcode)} · ${fmt(p.price)}</span></td>${qs.map((n,i)=>`<td class="num" data-l="${esc(BRAND[S.allStores[i].brand]+' '+S.allStores[i].address)}" style="${n?'':'color:var(--muted)'};${S.allStores[i].id===sortCol?'background:var(--soft)':''}">${n}</td>`).join('')}
-      <td class="num" data-l="Всего" style="${sortCol?'':'background:var(--soft)'}"><b>${qs.reduce((a,b)=>a+b,0)}</b></td><td class="mc-a"><button class="btn small" data-hist="${p.id}">История</button></td></tr>`}).join('')}</tbody></table></div>`
+      <td class="num" data-l="Всего" style="${sortCol?'':'background:var(--soft)'}"><b>${qs.reduce((a,b)=>a+b,0)}</b></td><td class="mc-a"><button class="btn small" data-hist="${p.id}">История</button></td></tr>`}).join('')}</tbody></table></div>${S.stockRows.length>(S.stockLim||80)?`<button class="btn" data-stockmore="1" style="width:100%;margin-top:8px">Показать ещё (${S.stockRows.length-(S.stockLim||80)})</button>`:''}`
     : '<div class="empty">Загружаем остатки…</div>'}`;
 }
+/* остатки: длинный список показываем частями */
+document.addEventListener('click', e => { if(!e.target.closest('[data-stockmore]')) return; S.stockLim = (S.stockLim||80) + 150; render(); });
 const MOVE_T = { opening:'Начальный остаток', receipt:'Приёмка', sale:'Продажа', return:'Возврат', transfer_out:'Перемещение (отправлено)', transfer_in:'Перемещение (получено)', writeoff:'Списание', audit:'Ревизия' };
 async function openHistory(pid){
   const p = prodObj(S.catalog.find(x=>x[0]===pid));
@@ -1800,7 +1806,7 @@ async function loadSite(){
   if(error){ toast(errText(error)); f.data = { rows:[], counts:{} }; } else f.data = data;
   f.baseTotal = b.data ? b.data.total : 0; f.base = bo && b.data ? b.data.rows : [];
 }
-function siteImg(u){ return u ? `<img class="thumb" style="width:64px;height:64px" src="${esc(thumbUrl(u))}" data-full="${esc(u)}" alt="" loading="lazy" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : '<span class="thumb" style="width:64px;height:64px"></span>'; }
+function siteImg(u){ return u ? `<img class="thumb" style="width:64px;height:64px" src="${esc(thumbUrl(u))}" data-full="${esc(u)}" alt="" loading="lazy" decoding="async" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : '<span class="thumb" style="width:64px;height:64px"></span>'; }
 function renderSite(){
   const f = S.st, D = f.data, c0 = k => (D && D.counts && D.counts[f.site+':'+k]) || 0;
   const cnt = k => k==='siteonly' ? c0('none')+c0('rejected') : k==='baseonly' ? (f.baseTotal||0) : c0(k);
@@ -3340,10 +3346,10 @@ document.addEventListener('input', e => {
   else if(t.id==='phone'){ S.phone = t.value; if(normPhone(t.value) && t.value.replace(/\D/g,'').length>=10){ clearTimeout(searchTimer); searchTimer=setTimeout(lookupCustomer, 300); } }
   else if(d.pamt){ S.pays[d.pamt] = Math.max(0,+t.value||0); if(d.pamt==='bonus') S.pays.bonus = Math.min(S.pays.bonus, maxBonus()); render(); }
   else if(t.id==='cert-code'){ S.certCode = t.value; }
-  else if(t.id==='cert-q'){ S.certQ = t.value; render(); }
+  else if(t.id==='cert-q'){ S.certQ = t.value; clearTimeout(searchTimer); searchTimer = setTimeout(render, 200); }
   else if(t.id==='cs-cat'){ CS.cat=t.value; }
   else if(t.id==='py-hours'){ PY.add.hours=t.value; }
-  else if(t.id==='po-q'){ PO.q=t.value; PO.found = searchCatalog(PO.q); render(); }
+  else if(t.id==='po-q'){ PO.q=t.value; clearTimeout(searchTimer); searchTimer = setTimeout(()=>{ PO.found = searchCatalog(PO.q); render(); }, 200); }
   else if(t.id==='po-supplier' && PO.d){ PO.d.supplier=t.value; } else if(t.id==='po-cargo' && PO.d){ PO.d.cargo=t.value; } else if(t.id==='po-note' && PO.d){ PO.d.note=t.value; }
   else if(t.id==='pf-amount'){ PF.add.amount=t.value; } else if(t.id==='pf-note'){ PF.add.note=t.value; }
   else if(t.id==='cs-amount'){ CS.amount=t.value; } else if(t.id==='cs-comment'){ CS.comment=t.value; } else if(t.id==='cs-collector'){ CS.collector=t.value; }
@@ -3353,7 +3359,7 @@ document.addEventListener('input', e => {
   else if(d.nf && t.type!=='checkbox' && t.tagName!=='SELECT'){ S.nm.ed[d.nf]=t.value; }
   else if(t.id==='nm-sq'){ S.nm.sq=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ if(S.nm.sq.trim().length<2){ S.nm.sfound=[]; return render(); } const { data } = await sb.rpc('site_search', { p_q:S.nm.sq.trim() }); S.nm.sfound=data||[]; render(); }, 400); }
   else if(t.id==='st-q'){ S.st.q=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(async()=>{ S.st.off=0; await loadSite(); render(); }, 400); }
-  else if(t.id==='st-cq'){ S.st.cq=t.value; S.st.cfound=searchCatalog(t.value); render(); }
+  else if(t.id==='st-cq'){ S.st.cq=t.value; clearTimeout(searchTimer); searchTimer = setTimeout(()=>{ S.st.cfound=searchCatalog(S.st.cq); render(); }, 200); }
   else if(t.id==='dq'){ S.dq=t.value; clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ S.dfound=searchCatalog(S.dq); render(); }, 200); }
   else if(d.dqty!=null){ S.doc.items[+d.dqty].qty = Math.max(1,+t.value||1); }
   else if(d.dcost!=null){ S.doc.items[+d.dcost].cost = t.value===''?null:Math.max(0,+t.value); }
@@ -3385,9 +3391,26 @@ const LAZY_VIEWS = ['analytics','profit','flow'];
 const isPhone = () => matchMedia('(max-width: 760px)').matches;
 const lazyPending = v => isPhone() && LAZY_VIEWS.includes(v) && !(S.lazyOk||{})[v];
 document.addEventListener('click', async e => { const t = e.target.closest('button[data-lazyload]'); if(!t) return; (S.lazyOk ||= {})[t.dataset.lazyload] = true; render(); await loadView(); });
+/* кэш вкладок: вернулись на вкладку в течение минуты — показываем уже загруженное, без запроса.
+   Любое действие (кнопка, ссылка, поле), кроме переходов по меню, сбрасывает кэш — после записи данные всегда свежие. */
+const VC = {}, VC_TTL = 60e3;
+const VC_OK = { sales:() => Array.isArray(S.sales), day:() => !!DAY.data && (DAY.role!=='own' || !!DAY.pulse), nom:() => !!(S.nm && S.nm.data),
+  site:() => !!(S.st && S.st.data), analytics:() => S.anMode==='stock' ? !!S.sa : !!S.an, profit:() => !!PF.data, flow:() => !!FL.data, content:() => !!CT.list };
+const vcKey = () => JSON.stringify([S.view, selStores(), S.store, S.anMode, DAY.role, DAY.store, CT.brand]);
+const vcDrop = () => { for(const k in VC) delete VC[k]; };
+document.addEventListener('click', e => { const t = e.target.closest && e.target.closest('button, a, input, label, select, [role=button]'); if(!t) return;
+  if(t.closest('nav.tabs, nav.subtabs, [data-pcard], [data-more], [data-moreclose]')) return; vcDrop(); }, true);
+document.addEventListener('change', vcDrop, true); document.addEventListener('submit', vcDrop, true);
 async function loadView(){
   viewAlias();
   if(lazyPending(S.view)){ render(); return; }
+  const v = S.view, c = VC[v];
+  if(VC_OK[v] && c && c.k===vcKey() && Date.now()-c.t < VC_TTL && VC_OK[v]()){ render(); return; }
+  await loadView0();
+  if(VC_OK[v] && S.view===v) VC[v] = { k:vcKey(), t:Date.now() };
+}
+async function loadView0(){
+  viewAlias();
   if(S.view==='shifts'){ await loadShifts(); render(); }
   if(S.view==='sales'){ await loadSales(); render(); }
   if(S.view==='certs'){ await loadCerts(); render(); }
