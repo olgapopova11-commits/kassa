@@ -1994,11 +1994,16 @@ const dshort = d => d ? new Date(d).toLocaleDateString('ru-RU') : '—';
 const WU = { store:null, msg:'', last:null };
 async function wuLoadLast(){ const { data } = await sb.rpc('wipon_last'); WU.last = data || {}; wuLoadSrv(); if(['sales','wh','day'].includes(S.view)) render(); }
 /* обновление из Wipon на сервере (закладка один раз передаёт сеанс Wipon) — статус без токена */
-async function wuLoadSrv(){ if(!S.me || S.me.role==='consultant') return; const { data } = await sb.functions.invoke('wipon_srv', { body:{ action:'status' } }).catch(() => ({})); if(data && !data.error){ WU.srv = data; if(['day','sales','wh'].includes(S.view)) render(); } }
+async function wuLoadSrv(){ if(!S.me || S.me.role==='consultant') return; const { data } = await sb.functions.invoke('wipon_srv', { body:{ action:'status' } }).catch(() => ({})); if(data && !data.error){ WU.srv = data; if(['day','sales','wh','po'].includes(S.view)) render(); } }
+/* история продаж 2025 года из Wipon: прогресс загрузки (для «как в прошлом году» в закупе) */
+function wuBfLine(v){ const b = v && v.backfill; if(!b) return '';
+  if(b.done) return ` <span class="chip ok" title="Загружено продаж: ${b.sales}, возвратов: ${b.refunds}">📚 история 2025 загружена${b.luna?'':' (без ИП «Луна»)'}</span>`;
+  return ` <span class="chip" title="Загружается по ночам и между обновлениями, примерно 10–20 часов. Уже загружено продаж: ${b.sales}">📚 история 2025: ${b.pct}%${b.luna?'':' · ИП «Луна» ещё не подключено'}</span>`; }
+function wuLyReady(){ const b = WU.srv && WU.srv.backfill; if(!b) return false; const ly = new Date(Date.now() - 365*864e5).toLocaleDateString('sv-SE',{timeZone:'Asia/Almaty'}); return b.done || b.ready_from <= ly; }
 function wuSrvLine(){ const v = WU.srv; if(!v) return '';
   const hm = t => t ? new Date(t).toLocaleString('ru-RU',{ day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Asia/Almaty' }) : '—';
   if(v.expired || (!v.active && v.set_at)) return `<div class="card" style="margin-top:12px;border-left:4px solid var(--bad)"><b>⚠ Сеанс Wipon закончился</b><br><span class="meta">Чеки и остатки из Wipon сейчас не приходят. ${S.me.role==='owner'?'Откройте console.wipon.kz и нажмите закладку Silver — сервер снова будет обновлять сам.':'Попросите владельца открыть Wipon и нажать закладку Silver.'}${v.last_ok_at?' Последнее обновление: '+hm(v.last_ok_at)+'.':''}</span></div>`;
-  if(v.active) return `<span class="chip ok" title="${esc(v.last_error||'')}">🟢 Обновляется сервером · последнее обновление ${hm(v.last_ok_at)}</span>${v.last_error?` <span class="chip warn" title="${esc(v.last_error)}">была ошибка ${hm(v.last_error_at)}</span>`:''}`;
+  if(v.active) return `<span class="chip ok" title="${esc(v.last_error||'')}">🟢 Обновляется сервером · последнее обновление ${hm(v.last_ok_at)}</span>${v.last_error?` <span class="chip warn" title="${esc(v.last_error)}">была ошибка ${hm(v.last_error_at)}</span>`:''}${wuBfLine(v)}`;
   return ''; }
 /* блок «Обновление данных из Wipon» для «Моего дня» владельца: когда последний раз пришли чеки и остатки + закладка */
 function wiponSyncHtml(){
@@ -2010,7 +2015,7 @@ function wiponSyncHtml(){
     ${srvWarn?wuSrvLine():''}
     <div class="scroll" style="margin-top:8px"><table><thead><tr><th>Магазин</th><th>Чеки обновлены</th><th>Остатки обновлены</th></tr></thead><tbody>
     ${S.allStores.map(x=>`<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td>${ago((L['sales:'+x.id]||{}).at)}</td><td>${ago((L['stock:'+x.id]||{}).at)}</td></tr>`).join('')}</tbody></table></div>
-    <div class="cust stack" style="gap:6px;margin-top:8px"><span class="meta">${sv&&sv.set_at?'':'<b>Обновите закладку: нажмите «Получить закладку» и замените старую</b> — новая один раз передаёт сеанс Wipon серверу, и дальше Silver обновляется сам, даже когда вкладка Wipon закрыта. '}Как включить: 1) «Получить закладку» и перетащите кнопку на панель закладок Chrome (старую удалите). 2) Откройте console.wipon.kz и нажмите закладку. 3) Переключитесь внизу кабинета на второе ИП и нажмите закладку ещё раз — сервер будет обновлять оба. Когда Wipon завершит сеанс (выход из кабинета, смена пароля), Silver покажет предупреждение — тогда войдите в Wipon и нажмите закладку снова.</span>
+    <div class="cust stack" style="gap:6px;margin-top:8px"><span class="meta">${sv&&sv.set_at?'':'<b>Обновите закладку: нажмите «Получить закладку» и замените старую</b> — новая один раз передаёт сеанс Wipon серверу, и дальше Silver обновляется сам, даже когда вкладка Wipon закрыта. '}Как включить: 1) «Получить закладку» и перетащите кнопку на панель закладок Chrome (старую удалите). 2) Откройте console.wipon.kz и нажмите закладку. 3) Переключитесь внизу кабинета по очереди на каждое ИП — включая старое ИП «Луна» (MOON Курмангазы 33 до января 2026) — и на каждом нажмите закладку ещё раз: сервер будет обновлять текущие ИП и загрузит историю продаж за 2025 год. Когда Wipon завершит сеанс (выход из кабинета, смена пароля), Silver покажет предупреждение — тогда войдите в Wipon и нажмите закладку снова.</span>
       <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">${WU.bm?`<a class="btn small primary" href="${esc(WU.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Wipon</a><span class="meta">← перетащите на панель закладок</span>`:`<button class="btn small" id="wu-bm">Получить закладку</button>`}</div></div></details>`;
 }
 document.addEventListener('toggle', e => { if(e.target && e.target.id==='wu-day') WU.dopen = e.target.open; }, true);
@@ -2098,10 +2103,11 @@ function silverWiponSync(K){
     b.textContent = 'Silver: передаём сеанс Wipon серверу…';
     const v = JSON.parse(localStorage.getItem('vuex')), cur = v.employee.item.id, E = L('silver_wipon_emps') || [];
     if(!E.includes(cur)){ E.push(cur); P('silver_wipon_emps', E); }
-    const s = await call({ action:'set_token', token:v.user.token, emps:E });
+    const it = (v.employee && v.employee.item) || {}, co = String((it.company && (it.company.name || it.company.title)) || it.company_name || (v.company && (v.company.name || v.company.title)) || '');
+    const s = await call({ action:'set_token', token:v.user.token, emps:E, cos:{ [cur]: co } });
     b.textContent = 'Silver: сеанс передан (кабинетов ИП: ' + s.cabinets + '), загружаем данные…';
     let p = null; try{ p = await call({ action:'pull_now' }); }catch(_){ /* сервер повторит сам через 15 мин */ }
-    b.textContent = 'Silver ✓ будет обновляться сам каждые 15 минут — вкладку можно закрыть' + (p && p.sales != null ? ' · новых чеков: ' + p.sales + ' · возвратов: ' + p.refunds : '') + ' · второе ИП: переключитесь на него и нажмите закладку ещё раз';
+    b.textContent = 'Silver ✓ будет обновляться сам каждые 15 минут — вкладку можно закрыть' + (p && p.sales != null ? ' · новых чеков: ' + p.sales + ' · возвратов: ' + p.refunds : '') + ' · переключитесь по очереди на каждое ИП (включая ИП «Луна») и нажмите закладку ещё раз';
   }
   srv().then(() => { window.__ss = { run: () => srv().catch(e => { b.textContent = 'Silver: ' + e.message; }) }; })
     .catch(e => { b.textContent = 'Silver: сервер не принял сеанс (' + e.message + ') — обновляем из этой вкладки'; window.__ss = { run }; run(); setInterval(run, 9e5); });
@@ -2653,7 +2659,7 @@ document.addEventListener('click', e => { if(S.view!=='po') return; const t = e.
 /* ---------- закуп: группы «что дозаказать» и справочник поставщиков ---------- */
 document.addEventListener('click', async e => { if(S.view!=='po') return; const t = e.target.closest('button'); if(!t) return; const d = t.dataset;
   if('poscat' in d){ PO.scat = d.poscat; render(); }
-  else if('posbrand' in d || d.posper || d.posdays){ if('posbrand' in d) PO.sbrand = d.posbrand; if(d.posper) PO.sper = +d.posper; if(d.posdays) PO.sdays = +d.posdays; PO.sug = null; PO.scat = ''; render(); await loadPo(); render(); }
+  else if('posbrand' in d || d.posper || d.posdays){ if('posbrand' in d) PO.sbrand = d.posbrand; if(d.posper){ if(d.posper==='ly') PO.smode = 'ly'; else { PO.smode = 'recent'; PO.sper = +d.posper; } } if(d.posdays) PO.sdays = +d.posdays; PO.sug = null; PO.scat = ''; render(); await loadPo(); render(); }
   else if(t.id==='po-supmore'){ PO.supLim = (PO.supLim||100) + 100; render(); }
   else if(d.supoq){ const s = (PO.sups||[]).find(x=>x.name===d.supoq); PO.mode = 'orders'; PO.filter = 'all'; PO.oq = s ? (s.name) : ''; PO.list = null; render(); await loadPo(); render(); }
   else if(d.supedit){ const s = (PO.sups||[]).find(x=>x.name===d.supedit); if(!s) return;
@@ -2744,7 +2750,7 @@ function renderBonus(){
 /* что дозаказать: при наведении — остаток и продажи по каждому магазину */
 function poByStore(p, k, total){ const B = p.by_store || {}, ids = Object.keys(B); if(!ids.length) return `${total}`;
   return `<span class="nm-st" tabindex="0">${total}<span class="nm-st-pop">${S.allStores.filter(st=>B[st.id]).map(st=>{ const b = B[st.id]; return `<span class="row" style="gap:12px"><span>${esc(BRAND[st.brand]+' · '+st.address)}</span><span class="num">остаток <b>${+b.stock||0}</b> · продано <b>${+b.sold||0}</b></span></span>`; }).join('')}</span></span>`; }
-const PO = { mode:'orders', filter:'open', list:null, sug:null, an:null, anPer:'month', q:'', found:[], d:null, sbrand:'', sper:30, sdays:30 };
+const PO = { mode:'orders', filter:'open', list:null, sug:null, an:null, anPer:'month', q:'', found:[], d:null, sbrand:'', sper:30, sdays:30, smode:'recent' };
 const PO_ST = { ordered:['warn','заказано'], transit:['warn','в пути'], received:['ok','получено'], cancelled:['zero','отменён'] };
 const poNew = () => ({ supplier:'', store:S.store, eta:'', cargo:'', note:'', items:[], cur:'CNY', rate:'', pct:10 });
 const CUR = { KZT:'₸', CNY:'¥', USD:'$', RUB:'₽' };
@@ -2756,7 +2762,9 @@ const poEdit = () => S.me && ['owner','manager','purchaser'].includes(S.me.role)
 async function loadPo(){
   if(!PO.fx){ const r = await sb.rpc('fx_current'); PO.fx = r.data || {}; }
   if(PO.mode==='orders'){ const { data, error } = await sb.rpc('po_list', { p_status: PO.filter==='all'?null:PO.filter }); if(error) toast(errText(error)); PO.list = data||[]; }
-  if(PO.mode==='suggest'){ const k = [PO.sdays, PO.sbrand, PO.sper].join('|'); const { data, error } = await sb.rpc('po_suggest2', { p_days:PO.sdays||30, p_brand:PO.sbrand||null, p_sales_days:PO.sper||30 }); if(error) toast(errText(error)); if(k===[PO.sdays, PO.sbrand, PO.sper].join('|')) PO.sug = data||[]; }
+  if(PO.mode==='suggest'){ if(!WU.srv) wuLoadSrv(); const k = [PO.sdays, PO.sbrand, PO.sper, PO.smode].join('|');
+    const { data, error } = await sb.rpc('po_suggest3', { p_days:PO.sdays||30, p_brand:PO.sbrand||null, p_sales_days:PO.sper||30, p_mode:PO.smode==='ly'?'ly':'recent' }); if(error) toast(errText(error));
+    if(k===[PO.sdays, PO.sbrand, PO.sper, PO.smode].join('|')) PO.sug = data||[]; }
   if(PO.mode==='sup'){ const { data, error } = await sb.rpc('suppliers_list'); if(error) toast(errText(error)); PO.sups = data||[]; }
   if(PO.mode==='an'){ const now = new Date(), iso = x => x.toLocaleDateString('sv-SE'); const from = PO.anPer==='month' ? new Date(now.getFullYear(), now.getMonth(), 1) : PO.anPer==='q' ? new Date(now.getFullYear(), now.getMonth()-2, 1) : new Date(now.getFullYear(), 0, 1);
     const { data, error } = await sb.rpc('po_analytics', { p_from: iso(from), p_to: iso(now) }); if(error) toast(errText(error)); PO.an = data||{}; }
@@ -2826,21 +2834,22 @@ function renderPo(){
     const groups = L ? [...L.reduce((m,p)=>{ (m.get(gk(p)) || m.set(gk(p), []).get(gk(p))).push(p); return m; }, new Map())].sort((a,b)=> bySup ? ((!a[0])-(!b[0]) || b[1].reduce((s,p)=>s+(+p.need||0),0)-a[1].reduce((s,p)=>s+(+p.need||0),0)) : b[1].length-a[1].length) : [];
     const gTitle = (k, ps) => !bySup ? esc(k) : !k ? 'Поставщик не известен' : esc(ps[0].sup_ru && !/[\u4e00-\u9fff]/.test(ps[0].sup_ru) ? ps[0].sup_ru : 'Поставщик из Китая');
     const row = p => `<tr><td data-l="">${thumb(p)}</td><td class="mc-t">${pcl(p.id, esc(p.name))}<br><span class="meta num">${esc(p.barcode)}${p.cost?' · закуп '+fmt(p.cost):''}</span>${p.purchase_url?` · <a href="${esc(p.purchase_url)}" target="_blank" rel="noopener" class="meta">у поставщика ↗</a>`:''}</td>
-        <td class="num" data-l="Продано ${PO.sper||30} дн.">${poByStore(p, 'sold', p.sold??p.sold30)}${p.per_day!=null?`<br><span class="meta">≈ ${(+p.per_day).toLocaleString('ru-RU')} в день</span>`:''}</td><td class="num" data-l="Остаток" ${p.stock<=0?'style="color:var(--bad)"':''}>${poByStore(p, 'stock', p.stock)}${p.days_left!=null?`<br><span class="meta">на ${p.days_left} дн.</span>`:''}</td><td class="num" data-l="Едет">${p.incoming||'—'}</td><td class="num" data-l="Дозаказать"><b>${p.need}</b></td>
+        <td class="num" data-l="Продано ${PO.sper||30} дн.">${poByStore(p, 'sold', p.sold??p.sold30)}${PO.smode==='ly'?`<br><span class="meta">${p.ly_missing?'прошлого года нет — по последним '+(PO.sper||30)+' дн.: ':'прошлый год ≈ '+(+p.per_day_ly).toLocaleString('ru-RU')+'/день · '}сейчас ≈ ${(+p.per_day_recent).toLocaleString('ru-RU')}/день</span>`:p.per_day!=null?`<br><span class="meta">≈ ${(+p.per_day).toLocaleString('ru-RU')} в день</span>`:''}</td><td class="num" data-l="Остаток" ${p.stock<=0?'style="color:var(--bad)"':''}>${poByStore(p, 'stock', p.stock)}${p.days_left!=null?`<br><span class="meta">на ${p.days_left} дн.</span>`:''}</td><td class="num" data-l="Едет">${p.incoming||'—'}</td><td class="num" data-l="Дозаказать"><b>${p.need}</b></td>
         <td class="mc-a">${poEdit()?`<button class="btn small" data-posug="${p.id}" data-need="${p.need}" data-cost="${p.cost??''}">В заказ</button>`:''}</td></tr>`;
     const segB = (k, cur, arr) => `<div class="seg">${arr.map(([v,t])=>`<button data-${k}="${v}" aria-pressed="${String(cur)===String(v)}">${t}</button>`).join('')}</div>`;
     body = `<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px 14px;margin-bottom:8px">
       <span class="row" style="gap:6px"><span class="meta">Бренд:</span>${segB('posbrand', PO.sbrand||'', [['','Все'],['moon','MOON'],['sunshine','Sunshine']])}</span>
-      <span class="row" style="gap:6px"><span class="meta">Скорость продаж за:</span>${segB('posper', PO.sper||30, [[30,'30 дн.'],[60,'60 дн.'],[90,'90 дн.']])}</span>
+      <span class="row" style="gap:6px"><span class="meta">Скорость продаж за:</span><div class="seg">${[[30,'30 дн.'],[60,'60 дн.'],[90,'90 дн.']].map(([v,t])=>`<button data-posper="${v}" aria-pressed="${PO.smode!=='ly' && +(PO.sper||30)===v}">${t}</button>`).join('')}${(()=>{ const ok = wuLyReady(), b = WU.srv && WU.srv.backfill;
+        return `<button data-posper="ly" aria-pressed="${PO.smode==='ly'}" ${ok||PO.smode==='ly'?'':'disabled'} title="${ok?'Продажи в те же дни год назад — для сезонных товаров':esc(b?'Прошлый год ещё загружается из Wipon: '+b.pct+'%':'Прошлый год появится после подключения Wipon к серверу (закладка Silver)')}">как в прошлом году (те же дни)</button>`; })()}</div></span>
       <span class="row" style="gap:6px"><span class="meta">Заказать запас на:</span>${segB('posdays', PO.sdays||30, [[30,'30 дн.'],[45,'45 дн.'],[60,'60 дн.'],[90,'90 дн.']])}</span></div>
-    <p class="meta" style="margin:0 0 8px">Как считается: средние продажи в день за последние ${PO.sper||30} дн. × ${PO.sdays||30} дн. запаса − остаток по всей сети − то, что уже едет. В списке только то, чего не хватит на ${PO.sdays||30} дн.${PO.sbrand?' Бренд: '+(PO.sbrand==='moon'?'MOON':'Sunshine')+' (и общие товары).':''} Наведите на «Продано» или «Остаток» — покажет по магазинам.</p>
+    <p class="meta" style="margin:0 0 8px">Как считается: ${PO.smode==='ly'?`средние продажи в день за те же ${PO.sdays||30} дн. год назад (если товара тогда не было — за последние ${PO.sper||30} дн.)`:`средние продажи в день за последние ${PO.sper||30} дн.`} × ${PO.sdays||30} дн. запаса − остаток по всей сети − то, что уже едет. В списке только то, чего не хватит на ${PO.sdays||30} дн.${PO.sbrand?' Бренд: '+(PO.sbrand==='moon'?'MOON':'Sunshine')+' (и общие товары).':''} Наведите на «Продано» или «Остаток» — покажет по магазинам.</p>
     <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:8px"><input id="po-sq" type="search" placeholder="🔍 Слово из названия или штрихкод" value="${esc(PO.sq||'')}" style="flex:1;min-width:220px" autocomplete="off">
       <span class="meta">Группировать:</span><div class="seg"><button data-posgrpby="cat" aria-pressed="${!bySup}">по категориям</button><button data-posgrpby="sup" aria-pressed="${bySup}">по поставщикам</button></div></div>
     ${A?`<div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:10px"><button class="btn small ${!cat?'primary':''}" data-poscat="">Все (${A.length})</button>${cats.map(([c,n])=>`<button class="btn small ${cat===c?'primary':''}" data-poscat="${esc(c)}">${esc(c)} (${n})</button>`).join('')}</div>`:''}
     ${!A?'<div class="empty">Считаем…</div>':!L.length?'<div class="empty">Ничего не найдено</div>':groups.map(([c,ps])=>`<details class="card" style="margin-bottom:8px;padding:8px 12px" ${groups.length===1||(PO.sopen||{})[(bySup?'s:':'')+c]?'open':''} data-posgrp="${esc((bySup?'s:':'')+c)}"><summary style="cursor:pointer;font-weight:600">${gTitle(c, ps)} <span class="meta">· ${ps.length} поз. · дозаказать ${ps.reduce((a,p)=>a+(+p.need||0),0)} шт.</span></summary>
       ${bySup&&c?`<div class="row" style="justify-content:flex-start;gap:6px;flex-wrap:wrap;margin-top:6px">${ps[0].sup_url?`<a class="btn small" href="${esc(ps[0].sup_url)}" target="_blank" rel="noopener">Магазин ↗</a>`:''}${poEdit()?`<button class="btn small primary" data-posupall="${esc(c)}">Сформировать заказ у этого поставщика (${ps.length} поз.)</button>`:''}</div>`:''}
       ${bySup&&!c?'<div class="meta" style="margin-top:6px">У этих товаров нет связи с заказами из Китая — поставщик не определён. Ссылка «у поставщика ↗» ведёт на товар.</div>':''}
-      <div class="scroll" style="margin-top:6px"><table class="mc"><thead><tr><th></th><th>Товар</th><th>Продано ${PO.sper||30} дн.</th><th>Остаток</th><th>Едет</th><th>Дозаказать</th><th></th></tr></thead><tbody>${ps.map(row).join('')}</tbody></table></div></details>`).join('')}`;
+      <div class="scroll" style="margin-top:6px"><table class="mc"><thead><tr><th></th><th>Товар</th><th>Продано ${PO.sper||30} дн.${PO.smode==='ly'?' / год назад':''}</th><th>Остаток</th><th>Едет</th><th>Дозаказать</th><th></th></tr></thead><tbody>${ps.map(row).join('')}</tbody></table></div></details>`).join('')}`;
   }
   if(PO.mode==='sup'){
     const A = PO.sups, q = (PO.supq||'').trim().toLowerCase();
