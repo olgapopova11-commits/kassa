@@ -541,3 +541,6 @@ nav.tabs.lg-on>button[aria-selected="true"],nav.subtabs.lg-on>button[aria-select
 nav.tabs .lg-blob{background:rgba(255,255,255,.82);box-shadow:inset 0 1px 0 #fff,0 2px 12px rgba(30,60,90,.12);border-radius:24px}
 nav.subtabs .lg-blob{background:var(--accent);box-shadow:0 4px 14px rgba(0,122,255,.30),inset 0 1px 0 rgba(255,255,255,.35)}
 nav.subtabs.lg-on>button[aria-selected="true"]{color:#fff}
+/* меню «Ещё» внутри нижней панели: стекло панели не должно запирать затемнение и лист внутри себя */
+nav.tabs:has(.more-sheet){-webkit-backdrop-filter:none!important;backdrop-filter:none!important;background:rgba(255,255,255,.94)!important}
+nav.tabs .more-bg{border-radius:0}
