@@ -529,3 +529,6 @@ tr:hover td{background:rgba(0,122,255,.035)}
 .toast{font-weight:500}
 .st-sum td{vertical-align:middle}.st-sum td:not(:first-child),.st-sum th:not(:first-child){text-align:right;white-space:nowrap}.st-sum th .meta{display:block;font-size:11px}
 .st-sum tr.st-grp td{background:rgba(118,118,128,.08);padding-top:9px;padding-bottom:9px}.st-sum tr.st-total td{border-top:1.5px solid rgba(60,60,67,.25);background:rgba(0,122,255,.06)}.pc.st-tot{background:rgba(0,122,255,.07)}
+/* «Сильвер» v2 — анимация в окошке 320×320, уменьшенная до ~140 px */
+.ld.ld-fr{position:relative;display:block;width:150px;height:150px;margin:2px auto 0;overflow:hidden}
+.ld-fr iframe{position:absolute;left:50%;top:0;width:320px;height:320px;border:0;background:transparent;color-scheme:light;transform:translateX(-50%) scale(.47);transform-origin:top center;pointer-events:none}

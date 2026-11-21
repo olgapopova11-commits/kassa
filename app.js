@@ -318,9 +318,9 @@ var LD_SVG=(function(){
   return sc;
 })();
 
-/* «Сильвер» — талисман Olga: 45 поз (Storage product-photos/silver-mascot), на загрузке случайная поза покачивается, рядом искорки */
-const LD_POSES = 'basket_fly fly_leaf_glow goggles_fly hug_glow_leaf jump_swirl leaf_umbrella loupe_jewelry magician magnifier_hat p01_polish_ring p02_breathe_ring p03_magnifier p04_try_ring p05_mirror p06_earrings_pillow p07_jewelry_box p08_gift_bow p09_shopping_bag p19_chest_light p20_catch_ring p21_mill p22_balloon_pump p23_progress_pull p24_hourglass p25_pocket_watch p26_knitting p27_typewriter p28_write_book p29_big_book p30_card_drawer p31_water_sprout p32_stir_pot p33_big_coin p34_blocks p35_wind_toy p36_bicycle polish_bracelet read_book ride_leaf ride_leaf_happy sit_leaf_boat sleep thinking waiter_tray wipe_glass'.split(' ');
-function ldHtml(){ const p = LD_POSES[Math.floor(Math.random()*LD_POSES.length)]; return '<span class="ld ld-pose" aria-hidden="true"><i class="ld-sh"></i><img src="https://ottuadjdksxipfjytlyv.supabase.co/storage/v1/object/public/product-photos/silver-mascot/'+p+'.webp" alt="" decoding="async"><b class="ld-sp"></b><b class="ld-sp"></b><b class="ld-sp"></b></span>' }
+/* «Сильвер» v2 — живые анимации загрузки (ld-*.html на сайте, каждая в своём окошке, чтобы переменные не пересекались) */
+const LD_FRAMES = ['magic','polish','search','hourglass','fly','sleep','chest','progress','shop'];
+function ldHtml(){ const p = LD_FRAMES[Math.floor(Math.random()*LD_FRAMES.length)]; return '<span class="ld ld-fr" aria-hidden="true"><iframe src="ld-'+p+'.html" tabindex="-1" title="" scrolling="no"></iframe></span>' }
 const LD_RE = /(Загруж|загруж|Считаем|Собираем|Ищем|Проверяю|Проверяем|Готовим|Обновляем)[^.!?]*…\s*$/;
 let ldQ = 0;
 function ldScan(){ ldQ = 0; if(document.body) ldDefs(); document.querySelectorAll('.empty:not([data-ld]), p.meta:not([data-ld])').forEach(el => {
