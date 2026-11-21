@@ -3562,11 +3562,13 @@ document.addEventListener('click', async e => { if(S.view!=='day') return; const
     if(error){ toast(await anErr(error)); render(); return; }
     AN.text = data.text || ''; DAY.ai = null; render(); }
 });
+document.addEventListener('click', e => { const t = e.target.closest && e.target.closest('button[data-pday]'); if(!t || S.view!=='day') return; DAY.pday = t.dataset.pday; render(); });
 function pulseHtml(P){
   if(!P) return '<div class="empty">Собираем картину по сети…</div>';
   const St = P.stores || [], sum = k => St.reduce((a,x)=>a+(+x[k]||0),0), pct = (a,b) => b>0 ? Math.round((a-b)/b*100) : null;
   const chip = v => v==null ? '<span class="meta">—</span>' : `<span class="chip ${v>=0?'ok':'zero'}">${v>0?'+':''}${v}%</span>`;
   const T = sum('today'), W = sum('week_ago'), M = sum('mtd'), MP = sum('mtd_prev'), C = sum('chk_today');
+  const yd = DAY.pday==='y' && St.some(x => 'yday' in x);
   const fresh = t => { if(!t) return '<span class="chip zero">нет</span>'; const h = (Date.now()-new Date(t))/36e5; return `<span class="chip ${h>3?'warn':'ok'}">${h<1?'<1 ч':Math.round(h)+' ч'} назад</span>`; };
   // владельцу — только просрочки и то, что не входит ни в чей список; обычные дела менеджера и закупа не дублируем
   const k = P.stuck || {}, stuck = [
@@ -3577,14 +3579,14 @@ function pulseHtml(P){
       ${tile('Выручка сегодня', fmt(T), `${chip(pct(T,W))} к прошлой неделе на это время`)}
       ${tile('Чеков сегодня', C.toLocaleString('ru-RU'), T&&C?'средний чек '+fmt(Math.round(T/C)):'')}
       ${tile('С начала месяца', fmt(M), `${chip(pct(M,MP))} к тому же периоду прошлого месяца`)}${aiTile(P)}</div>
-    <h3 style="margin:16px 0 6px">Магазины</h3>
+    <div class="row" style="margin:16px 0 6px;gap:10px;flex-wrap:wrap;justify-content:flex-start"><h3 style="margin:0">Магазины</h3><div class="seg" role="group" aria-label="День">${[['t','Сегодня'],['y','Вчера']].map(([k,t])=>`<button data-pday="${k}" aria-pressed="${(DAY.pday||'t')===k}">${t}</button>`).join('')}</div>${yd?`<span class="meta">вчера всего ${fmt(sum('yday'))} · чеков ${sum('chk_yday').toLocaleString('ru-RU')}</span>`:''}</div>
     ${isPhone()?`<div class="pc-list">${St.map(x=>`<div class="pc"><div class="pc-h">${esc(BRAND[x.brand]+' · '+x.address)}</div><div class="pc-g">
-      <div><span class="pc-l">Сегодня</span><b class="num">${fmt(x.today)}</b>${chip(pct(+x.today,+x.week_ago))}</div>
+      <div><span class="pc-l">${yd?'Вчера':'Сегодня'}</span><b class="num">${fmt(yd?x.yday:x.today)}</b>${chip(yd?pct(+x.yday,+x.yday_week_ago):pct(+x.today,+x.week_ago))}</div>
       <div><span class="pc-l">Месяц</span><b class="num">${fmt(x.mtd)}</b>${chip(pct(+x.mtd,+x.mtd_prev))}</div>
       <div><span class="pc-l">Наличные в кассе</span><b class="num">${(()=>{ const c = (DAY.cash||{})[x.id]; return !c?'…':c.est_kzt==null?'нет данных':fmt(c.est_kzt)+(+c.snap_usd?' · $'+(+c.snap_usd).toLocaleString('ru-RU'):''); })()}</b></div>
       <div><span class="pc-l">Возвраты 2 дня</span><b class="num">${+x.returns_2d?'<span class="chip warn">'+x.returns_2d+'</span>':'0'}</b></div>
-      <div><span class="pc-l">Wipon чеки · остатки</span><b>${fresh(x.sync_sales)} ${fresh(x.sync_stock)}</b></div></div></div>`).join('')}</div>`:`<div class="scroll"><table><thead><tr><th>Магазин</th><th>Сегодня</th><th>Неделю назад</th><th></th><th>Месяц</th><th></th><th title="Остаток по последней странице тетради + наличные продажи Wipon после неё − расходы, внесённые в Silver">Наличные в кассе</th><th>Возвраты 2 дня</th><th>Чеки Wipon</th><th>Остатки Wipon</th></tr></thead><tbody>
-      ${St.map(x=>`<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td class="num"><b>${fmt(x.today)}</b></td><td class="num meta">${fmt(x.week_ago)}</td><td>${chip(pct(+x.today,+x.week_ago))}</td>
+      <div><span class="pc-l">Wipon чеки · остатки</span><b>${fresh(x.sync_sales)} ${fresh(x.sync_stock)}</b></div></div></div>`).join('')}</div>`:`<div class="scroll"><table><thead><tr><th>Магазин</th><th>${yd?'Вчера':'Сегодня'}</th><th>Неделю назад</th><th></th><th>Месяц</th><th></th><th title="Остаток по последней странице тетради + наличные продажи Wipon после неё − расходы, внесённые в Silver">Наличные в кассе</th><th>Возвраты 2 дня</th><th>Чеки Wipon</th><th>Остатки Wipon</th></tr></thead><tbody>
+      ${St.map(x=>`<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td class="num"><b>${fmt(yd?x.yday:x.today)}</b></td><td class="num meta">${fmt(yd?x.yday_week_ago:x.week_ago)}</td><td>${chip(yd?pct(+x.yday,+x.yday_week_ago):pct(+x.today,+x.week_ago))}</td>
         <td class="num">${fmt(x.mtd)}</td><td>${chip(pct(+x.mtd,+x.mtd_prev))}</td><td style="min-width:150px">${cashCell(x)}</td><td class="num">${+x.returns_2d?'<span class="chip warn">'+x.returns_2d+'</span>':'0'}</td><td>${fresh(x.sync_sales)}</td><td>${fresh(x.sync_stock)}</td></tr>`).join('')}</tbody></table></div>`}
     ${(()=>{ const C = Object.values(DAY.cash||{}).filter(c=>c.est_kzt!=null); if(!C.length) return ''; const k = C.reduce((a,c)=>a+(+c.est_kzt||0),0), u = C.reduce((a,c)=>a+(+c.snap_usd||0),0);
       return `<p style="margin:8px 0 0"><b>Наличных по сети ≈ ${fmt(k)}${u?' и $'+u.toLocaleString('ru-RU'):''}</b></p>`; })()}
