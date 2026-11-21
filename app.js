@@ -2057,7 +2057,7 @@ function nmEditorHtml(e, f, cats, inp){
   const op = f.open || {}, G = e.id && Array.isArray((f.gal||{})[e.id]) ? f.gal[e.id] : [], ed = nmCanEdit();
   const sel = (k, label, opts) => `<label class="stack" style="gap:2px"><span class="label">${label}</span><select data-nf="${k}">${opts}</select></label>`;
   return `<div class="stack" style="gap:10px">
-     <div class="row"><h2 style="margin:0">${e.id?'Карточка товара':'Новый товар'}</h2><button class="btn small" id="nm-close">Закрыть</button></div>
+     <div class="row" style="align-items:flex-start"><div style="min-width:0">${e.id?`<div class="meta">Карточка товара${e.barcode?' · '+esc(e.barcode):''}</div>`:''}<h2 style="margin:0;text-wrap:balance">${e.id?esc(e.name||'Без названия'):'Новый товар'}</h2></div><button class="btn small" id="nm-close">Закрыть</button></div>
      <div class="row" style="justify-content:flex-start;align-items:flex-start;gap:14px;flex-wrap:wrap">
        <div class="stack" style="gap:6px;width:150px;flex:none">
          ${e.photo_url?`<a href="${esc(e.photo_url)}" target="_blank" rel="noopener"><img src="${esc(e.photo_url)}" alt="" style="width:150px;height:150px;object-fit:cover;border-radius:12px;display:block"></a>`:'<span class="thumb" style="width:150px;height:150px"></span>'}
