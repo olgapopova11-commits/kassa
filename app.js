@@ -84,6 +84,17 @@ function storesDD(ids, attr){
   return `<details class="dd"><summary>${esc(ddSummary(ids))}</summary><div class="dd-panel">${S.allStores.map(st=>`<label><input type="checkbox" ${attr(st.id)} ${ids.includes(st.id)?'checked':''}> ${esc(BRAND[st.brand]+' · '+st.address)}</label>`).join('')}</div></details>`;
 }
 document.addEventListener('click', e => { document.querySelectorAll('details.dd[open]').forEach(d => { if(!d.contains(e.target)) d.removeAttribute('open'); }); });
+/* ---------- весёлые анимации загрузки: 100 вариантов (10 героев × 10 движений) + шутка, каждый раз случайно ---------- */
+const LD_HERO = ['☾','☀','💍','💎','✨','🌙⭐','🦋','🌸','🎀','🐚'];
+const LD_MOVE = ['ld-bounce','ld-spin','ld-orbit','ld-float','ld-pulse','ld-wiggle','ld-flip','ld-swing','ld-beat','ld-twinkle'];
+const LD_JOKE = ['Полируем серебро…','Считаем блёстки…','Луна догоняет солнце…','Пересчитываем бусинки…','Протираем витрину…','Примеряем кольца…','Распутываем цепочки…','Ищем пару для серёжки…','Солнце встаёт, данные идут…','Шармы выстраиваются в очередь…','Заколки строятся по росту…','Муассанит наводит блеск…','Ловим вдохновение из Китая…','Кассир улыбается — ждём…','Луна проверяет остатки…','Сверяем каждую пробу 925…','Перекладываем бархатные коробочки…','Варим кофе продавцам…','Солнце считает выручку…','Блеск загружается…','Застёгиваем застёжки…','Начищаем до звёздного сияния…','Бантики завязываются…','Бабочки разносят цифры…','Ракушки шепчут новости…','Цирконы выходят на сцену…','Серёжки ищут уши…','Браслеты делают зарядку…','Кольцо крутится на пальце…','Подвески качаются в такт…'];
+function ldHtml(){ const i = Math.floor(Math.random()*100), h = LD_HERO[Math.floor(i/10)], m = LD_MOVE[i%10], j = LD_JOKE[Math.floor(Math.random()*LD_JOKE.length)];
+  return `<span class="ld ${m}" aria-hidden="true">${h}</span><span class="ld-joke">${j}</span>`; }
+const LD_RE = /(Загруж|загруж|Считаем|Собираем|Ищем|Проверяю|Готовим|Обновляем)[^.!?]*…\s*$/;
+let ldQ = 0;
+function ldScan(){ ldQ = 0; document.querySelectorAll('.empty:not([data-ld]), p.meta:not([data-ld])').forEach(el => {
+  if(el.children.length > 2 || !LD_RE.test(el.textContent.trim())) return; el.dataset.ld = '1'; el.classList.add('ld-box'); el.insertAdjacentHTML('afterbegin', ldHtml()); }); }
+new MutationObserver(() => { if(!ldQ) ldQ = requestAnimationFrame(ldScan); }).observe(document.documentElement, { childList:true, subtree:true });
 const brCls = p => p && p.brand==='moon' ? ' br-moon' : p && p.brand==='sunshine' ? ' br-sun' : p && p.brand==='both' ? ' br-both' : '';
 const thumb = p => p.photo_url ? `<img class="thumb${brCls(p)}" referrerpolicy="no-referrer" src="${esc(thumbUrl(p.photo_url))}" data-full="${esc(p.photo_url)}" alt="" loading="lazy" decoding="async" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : `<span class="thumb${brCls(p)}"></span>`;
 function errText(e){ return (e && (e.message || e.error_description)) || String(e); }
@@ -3365,10 +3376,71 @@ document.addEventListener('click', async e => { const t = e.target.closest('butt
 async function loadDaySug(){ if(DAY.sug) return; DAY.sug = 'wait';
   const { data, error } = await sb.rpc('po_suggest', { p_days:30 }); if(error){ DAY.sug = null; return toast(errText(error)); }
   const L = (data||[]).filter(p => +p.need > 0); DAY.sug = { n:L.length, units:L.reduce((a,p)=>a+(+p.need||0),0) }; if(S.view==='day') render(); }
+/* ---------- инструкции для команды: кнопка «📖 Инструкции» в «Моём дне» ---------- */
+const HELP = {
+  mgr: { t:'Менеджер', who:'Менеджер магазинов своего города (Алматы или Астана)', b:[
+    ['☀️ Каждое утро, до 11:00', [
+      'Откройте «Мой день». Всё красное и жёлтое — сделать сегодня. Кнопка «Открыть» ведёт прямо туда, где это делается.',
+      'Проверьте, что во всех магазинах открыта смена. Если есть «Магазины, где сегодня не открыта смена» — позвоните продавцу.',
+      '«Не закрыта смена с прошлых дней» — выясните у продавца и закройте смену, сверьте кассу.']],
+    ['🕐 В течение дня', [
+      'Пришёл товар → «Товары → Склад → Приёмка»: пересчитайте, впишите количество, подтвердите. Не совпало с накладной — сразу напишите закупу.',
+      '«Принять перемещения» — товар из другого магазина: пересчитайте и примите.',
+      'Запросы продавцов (оприходовать, списать) — решите в тот же день: принять или отклонить с причиной. Дорогие списания ждут решения директора.',
+      '«Товары в наличии без цены» — касса их не продаст. Поставьте цену или напишите закупу.']],
+    ['📅 Раз в неделю (понедельник)', [
+      '«Склад → Перемещение → Сравнить остатки магазинов»: переложите товар туда, где он продаётся. Только внутри своего города и своего бренда (MOON → MOON, Sunshine → Sunshine).',
+      'Подтвердите часы консультантов за неделю («Команда»).',
+      '«Аналитика»: какой магазин просел и почему. Придумайте одно действие: выкладка, акция, пост, обучение продавца.']],
+    ['🗓 Раз в месяц', [
+      'Пересчёт: «Склад → На пересчёт», закройте ревизию до конца месяца.',
+      'До 1-го числа проверьте табель и зарплату консультантов.']],
+    ['⚠️ Если что-то случилось', [
+      'Касса не сходится — продавец фотографирует отчёт смены в чат магазина, вы пишете владельцу.',
+      'Брак или поломка — запрос на списание с фото.',
+      'Клиент вернул товар — «Чеки → Чеки и возвраты», найдите чек и оформите возврат. Пробитый чек менять нельзя.']]]},
+  buy: { t:'Закуп', who:'Закупщик: что заказать, у кого, и чтобы товар был в базе правильно', b:[
+    ['☀️ Каждый день', [
+      'Откройте «Мой день» (вид «Закуп») и сделайте всё красное и жёлтое.',
+      '«Дозаказать — товар заканчивается» — посмотрите и включите в ближайший заказ.',
+      '«Поставщик не отправил дольше 5 дней» — напишите поставщику. «В пути дольше 45 дней» — проверьте, пришёл ли заказ, и закройте его.',
+      'У каждого нового товара должны быть: розничная цена, закупочная цена, категория, ссылка на поставщика и фото. Без розничной цены касса его не продаст.']],
+    ['📦 Когда пришёл заказ', [
+      'Убедитесь, что магазин принял товар (приёмка). Если количество не совпало — сразу пишите поставщику.',
+      'Новые товары сфотографируйте (вкладка «Фотосессия») и проверьте карточку в «Номенклатуре».']],
+    ['📅 Раз в неделю', [
+      '«Закуп → Что дозаказать»: выберите бренд и период. Обычно 30 дней, для сезонного товара — 60–90 дней.',
+      '«Закуп → Все остатки»: фильтры «Закончились, но продаются» и «Хватит < 30 дн.» — дозаказ. «Лежат без продаж» и «Запас > 120 дн.» — не заказывать, предложить акцию или перемещение.',
+      'В «Все остатки» выберите «Поставщик» — увидите всё, что у него заканчивается. Удобно собирать заказ сразу на одного поставщика.',
+      'Загрузите новые заказы из Китая (Excel): «Закуп → Загрузить заказы». Проверьте, что все позиции связаны с товаром в базе.',
+      '«Товары → Сайт → Проверить»: подтвердите связи «сайт ↔ база» — «Верно» или выберите другой товар.']],
+    ['🗓 Раз в месяц и к сезону', [
+      '«Закуп → ✨ Идеи и тренды»: что растёт и падает по категориям и ценам. Кнопка «Собрать идеи» стоит денег (~$0,25) — согласуйте с владельцем.',
+      'К праздникам заказывайте за 6–8 недель. К 8 марта — до начала февраля: перед китайским Новым годом фабрики закрыты около месяца.',
+      '«Закуп → Поставщики»: дайте поставщикам понятные имена («Как называем у себя») и проверьте ссылки на магазины.']],
+    ['✋ Правила закупа', [
+      'Не заказываем мировые бренды и узнаваемые копии (клевер, гвозди, пантера и т. п.) — их нельзя показывать в Instagram.',
+      'Качество важнее цены: нержавеющая сталь 316L, серебро 925 с пробой, покрытие не темнеет.',
+      'MOON — серебро, муассанит, студия; Sunshine — доступная сталь, шармы, заколки, подарки. Не путаем ассортимент.']]]},
+  sell: { t:'Продавец', who:'Продавец-консультант в магазине', b:[
+    ['☀️ Начало дня', ['Откройте смену: посчитайте наличные в кассе и впишите сумму.', 'Проверьте витрину и ценники.']],
+    ['🛍 В течение дня', ['Каждая продажа — через кассу. Найдите товар по штрихкоду или названию.', 'Спросите телефон клиента — начислим бонусы.', 'Брак, недостача, лишний товар — отправьте запрос менеджеру (оприходование или списание).']],
+    ['🌙 Конец дня', ['Закройте смену: пересчитайте наличные, впишите расходы за день.', 'Сфотографируйте отчёт смены и отправьте в чат своего магазина.']]]}
+};
+function helpHtml(k){ const H = HELP[k] || HELP.mgr;
+  return `<div class="row" style="gap:8px;flex-wrap:wrap"><b style="flex:1;font-size:17px">📖 Инструкции</b><button class="btn small" id="help-close">Закрыть</button></div>
+    <div class="seg" style="display:inline-flex;align-self:flex-start">${Object.entries(HELP).map(([x,h])=>`<button data-help="${x}" aria-pressed="${x===k}">${h.t}</button>`).join('')}</div>
+    <p class="meta" style="margin:0">${esc(H.who)}</p>
+    ${H.b.map(([t,L])=>`<div><div style="font-weight:700;margin:6px 0 4px">${t}</div><ol style="margin:0;padding-left:20px;line-height:1.5">${L.map(x=>`<li style="margin-bottom:4px">${esc(x)}</li>`).join('')}</ol></div>`).join('')}
+    <p class="meta" style="margin:4px 0 0">Если что-то непонятно или кнопка не работает — напишите владельцу.</p>`; }
+function helpOpen(k){ modal(helpHtml(k)); const d = document.querySelector('#modal .dialog'); if(d) d.style.maxWidth = '640px'; }
+const helpDef = () => { const r = S.me && S.me.role; return r==='purchaser' ? 'buy' : r==='consultant' ? 'sell' : (DAY.role==='buy' ? 'buy' : DAY.role==='sell' ? 'sell' : 'mgr'); };
+document.addEventListener('click', e => { const t = e.target.closest('#help-open,#help-close,[data-help]'); if(!t) return;
+  if(t.id==='help-open') helpOpen(helpDef()); else if(t.id==='help-close') closeModal(); else helpOpen(t.dataset.help); });
 function renderDay(){
   const D = DAY.data, own = S.me.role==='owner', r = DAY.role || dayDefRole(), st = DAY.store || S.store;
   const today = new Date().toLocaleDateString('ru-RU',{timeZone:'Asia/Almaty',weekday:'long',day:'numeric',month:'long'});
-  if(r==='own'){ $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="day-ref">Обновить</button></div>
+  if(r==='own'){ $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="help-open">📖 Инструкции</button><button class="btn small" id="day-ref">Обновить</button></div>
     <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><span class="meta">Посмотреть как:</span><div class="seg" style="display:inline-flex">${DAY_ROLES.map(([k,t])=>`<button data-dayrole="${k}" aria-pressed="${k===r}">${t}</button>`).join('')}</div></div>
     ${anHtml()}${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${DAY.pulse?bkRemind():''}${S.canAttn?attnHtml(true,'own'):''}${wiponSyncHtml()}`; DAY.items = []; return; }
   let items = D ? [...(D[r]||[])] : [];
@@ -3379,7 +3451,7 @@ function renderDay(){
   const ord = { bad:0, warn:1, '':2 }, col = { bad:'var(--bad)', warn:'var(--warn,#d90)', '':'var(--accent)' };
   const todo = items.filter(i => i.wait || +i.n > 0).sort((a,b) => ord[a.lvl] - ord[b.lvl]), done = items.filter(i => !i.wait && !(+i.n > 0));
   DAY.items = items;
-  $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="day-ref">Обновить</button></div>
+  $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="help-open">📖 Инструкции</button><button class="btn small" id="day-ref">Обновить</button></div>
     ${own?`<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><span class="meta">Посмотреть как:</span><div class="seg" style="display:inline-flex">${DAY_ROLES.map(([k,t])=>`<button data-dayrole="${k}" aria-pressed="${k===r}">${t}</button>`).join('')}</div>
       ${r==='sell'?`<select id="day-store" aria-label="Магазин">${(S.stores||[]).map(s=>`<option value="${s.id}" ${s.id===st?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select>`:''}</div>`:''}
     <p class="meta" style="margin:4px 0 12px">${r==='sell'?'Дела по магазину '+esc(storeName(st)):r==='buy'?'Дела по закупу, по всем магазинам':'Дела по вашим магазинам'}. Нажмите «Открыть» — попадёте сразу туда, где это делается. Сделанное уходит вниз само.</p>
