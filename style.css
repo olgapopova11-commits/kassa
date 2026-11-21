@@ -527,3 +527,5 @@ h2 .sf,h3 .sf,summary .sf,.card>b .sf{color:var(--accent)}
 th,td{padding:11px 10px}
 tr:hover td{background:rgba(0,122,255,.035)}
 .toast{font-weight:500}
+.st-sum td{vertical-align:middle}.st-sum td:not(:first-child),.st-sum th:not(:first-child){text-align:right;white-space:nowrap}.st-sum th .meta{display:block;font-size:11px}
+.st-sum tr.st-grp td{background:rgba(118,118,128,.08);padding-top:9px;padding-bottom:9px}.st-sum tr.st-total td{border-top:1.5px solid rgba(60,60,67,.25);background:rgba(0,122,255,.06)}.pc.st-tot{background:rgba(0,122,255,.07)}

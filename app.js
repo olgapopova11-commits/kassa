@@ -2415,7 +2415,7 @@ function wiponSyncHtml(){
   const btn = `<button class="btn small${st&&!st.ok?' primary':''}" id="wu-pull" ${busy?'disabled':''}>${busy?'⏳ Обновляем…':'🔄 Обновить сейчас'}</button>`;
   if(!st) return `<div class="card wu-one" style="margin:12px 0"><div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap"><span><b>Данные Wipon</b> <span class="meta">проверяем…</span></span>${btn}</div></div>`;
   return `<div class="card wu-one ${st.ok?'wu-ok':'wu-bad'}" style="margin:12px 0"><div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap">
-    <span style="font-size:1.05em">${st.ok?`✅ <b>Все данные получены</b> <span class="meta">· обновлено ${st.at} · дальше сервер обновляет сам каждые 15 мин</span>`:`⚠️ <b>Получены не все данные</b>`}</span>${btn}</div>
+    <span style="font-size:1.05em">${st.ok?`✅ <b>Все данные получены</b> <span class="meta">· последнее обновление ${st.at} · сервер обновляет сам каждые 15 мин</span>`:`⚠️ <b>Получены не все данные</b> <span class="meta">· последнее обновление ${st.at}</span>`}</span>${btn}</div>
     ${st.ok?'':`<ul class="meta" style="margin:8px 0 0 18px;padding:0">${st.why.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>`}
     ${WU.pmsg?`<div class="meta" style="margin-top:6px">${esc(WU.pmsg)}</div>`:''}
     ${st.bm&&S.me.role==='owner'?`<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:8px">${WU.bm?`<a class="btn small primary" href="${esc(WU.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Wipon</a><span class="meta">← перетащите на панель закладок (старую удалите)</span>`:`<button class="btn small" id="wu-bm">Получить закладку</button>`}</div>`:''}</div>`;
@@ -3657,6 +3657,8 @@ document.addEventListener('click', async e => { if(S.view!=='day') return; const
     AN.text = data.text || ''; DAY.ai = null; render(); }
 });
 document.addEventListener('click', e => { const t = e.target.closest && e.target.closest('button[data-pday]'); if(!t || S.view!=='day') return; DAY.pday = t.dataset.pday; render(); });
+document.addEventListener('click', e => { const t = e.target.closest && e.target.closest('button[data-pgrp]'); if(!t || S.view!=='day') return; DAY.pgrp = t.dataset.pgrp; try{ localStorage.setItem('silver_pgrp', DAY.pgrp); }catch(_){} render(); });
+try{ DAY.pgrp = localStorage.getItem('silver_pgrp') || 'all'; }catch(_){}
 function pulseHtml(P){
   if(!P) return '<div class="empty">Собираем картину по сети…</div>';
   const St = P.stores || [], sum = k => St.reduce((a,x)=>a+(+x[k]||0),0), pct = (a,b) => b>0 ? Math.round((a-b)/b*100) : null;
@@ -3674,14 +3676,31 @@ function pulseHtml(P){
       ${tile('Чеков сегодня', C.toLocaleString('ru-RU'), T&&C?'средний чек '+fmt(Math.round(T/C)):'')}
       ${tile('С начала месяца', fmt(M), `${chip(pct(M,MP))} к тому же периоду прошлого месяца`)}${aiTile(P)}</div>
     <div class="row" style="margin:16px 0 6px;gap:10px;flex-wrap:wrap;justify-content:flex-start"><h3 style="margin:0">Магазины</h3><div class="seg" role="group" aria-label="День">${[['t','Сегодня'],['y','Вчера']].map(([k,t])=>`<button data-pday="${k}" aria-pressed="${(DAY.pday||'t')===k}">${t}</button>`).join('')}</div>${yd?`<span class="meta">вчера всего ${fmt(sum('yday'))} · чеков ${sum('chk_yday').toLocaleString('ru-RU')}</span>`:''}</div>
-    ${isPhone()?`<div class="pc-list">${St.map(x=>`<div class="pc"><div class="pc-h">${esc(BRAND[x.brand]+' · '+x.address)}</div><div class="pc-g">
-      <div><span class="pc-l">${yd?'Вчера':'Сегодня'}</span><b class="num">${fmt(yd?x.yday:x.today)}</b>${chip(yd?pct(+x.yday,+x.yday_week_ago):pct(+x.today,+x.week_ago))}</div>
-      <div><span class="pc-l">Месяц</span><b class="num">${fmt(x.mtd)}</b>${chip(pct(+x.mtd,+x.mtd_prev))}</div>
-      <div><span class="pc-l">Наличные в кассе</span><b class="num">${(()=>{ const c = (DAY.cash||{})[x.id]; return !c?'…':c.est_kzt==null?'нет данных':fmt(c.est_kzt)+(+c.snap_usd?' · $'+(+c.snap_usd).toLocaleString('ru-RU'):''); })()}</b></div>
-      <div><span class="pc-l">Возвраты 2 дня</span><b class="num">${+x.returns_2d?'<span class="chip warn">'+x.returns_2d+'</span>':'0'}</b></div>
-      <div><span class="pc-l">Wipon чеки · остатки</span><b>${fresh(x.sync_sales)} ${fresh(x.sync_stock)}</b></div></div></div>`).join('')}</div>`:`<div class="scroll"><table><thead><tr><th>Магазин</th><th>${yd?'Вчера':'Сегодня'}</th><th>Неделю назад</th><th></th><th>Месяц</th><th></th><th title="Остаток по последней странице тетради + наличные продажи Wipon после неё − расходы, внесённые в Silver">Наличные в кассе</th><th>Возвраты 2 дня</th><th>Чеки Wipon</th><th>Остатки Wipon</th></tr></thead><tbody>
-      ${St.map(x=>`<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td class="num"><b>${fmt(yd?x.yday:x.today)}</b></td><td class="num meta">${fmt(yd?x.yday_week_ago:x.week_ago)}</td><td>${chip(yd?pct(+x.yday,+x.yday_week_ago):pct(+x.today,+x.week_ago))}</td>
-        <td class="num">${fmt(x.mtd)}</td><td>${chip(pct(+x.mtd,+x.mtd_prev))}</td><td style="min-width:150px">${cashCell(x)}</td><td class="num">${+x.returns_2d?'<span class="chip warn">'+x.returns_2d+'</span>':'0'}</td><td>${fresh(x.sync_sales)}</td><td>${fresh(x.sync_stock)}</td></tr>`).join('')}</tbody></table></div>`}
+    ${(()=>{ // коротко: выручка + % к прошлой неделе, месяц в млн + %, наличные одной цифрой; группировка: все / по городам / по брендам, с итогами
+      const mln = v => (+v||0) >= 1e6 ? ((+v)/1e6).toLocaleString('ru-RU',{maximumFractionDigits:2})+' млн ₸' : fmt(v);
+      const cashV = x => { const c = (DAY.cash||{})[x.id]; return c && c.est_kzt!=null ? +c.est_kzt : null; };
+      const cashN = x => { const c = (DAY.cash||{})[x.id]; return !c?'…':c.est_kzt==null?'—':fmt(c.est_kzt)+(+c.snap_usd?' · $'+(+c.snap_usd).toLocaleString('ru-RU'):''); };
+      const city = x => { const z = (S.allStores||[]).find(q => q.id===x.id); return (z && z.city) || x.city || ([4,5,7].includes(+x.id) ? 'Астана' : 'Алматы'); };
+      const g = DAY.pgrp || 'all';
+      const dv = x => yd ? [+x.yday||0, +x.yday_week_ago||0] : [+x.today||0, +x.week_ago||0];
+      const flags = x => (+x.returns_2d?` <span class="chip warn" title="Возвраты за 2 дня">↩ ${x.returns_2d}</span>`:'');
+      const nm = x => `<b style="font-weight:600">${esc(x.address)}</b> <span class="meta">${esc(g==='brand'?city(x):g==='city'?(BRAND[x.brand]||''):(BRAND[x.brand]||'')+' · '+city(x))}</span>${flags(x)}`;
+      const tot = L => { const d = L.reduce((a,x)=>{ const [v,w] = dv(x); a[0]+=v; a[1]+=w; a[2]+=+x.mtd||0; a[3]+=+x.mtd_prev||0; const c = cashV(x); if(c!=null) a[4]+=c; return a; }, [0,0,0,0,0]); return d; };
+      const groups = g==='all' ? [['', St]] : [...St.reduce((m,x)=>{ const k = g==='city' ? city(x) : (BRAND[x.brand]||x.brand); (m.get(k) || m.set(k, []).get(k)).push(x); return m; }, new Map())];
+      const seg = `<div class="seg" role="group" aria-label="Группировка" style="margin:0 0 8px">${[['all','Все магазины'],['city','По городам'],['brand','По брендам']].map(([k,t])=>`<button data-pgrp="${k}" aria-pressed="${g===k}">${t}</button>`).join('')}</div>`;
+      const T0 = tot(St);
+      if(isPhone()){
+        const card = x => { const [v,w] = dv(x); return `<div class="pc"><div class="pc-h">${nm(x)}</div><div class="pc-g">
+          <div><span class="pc-l">${yd?'Вчера':'Сегодня'}</span><b class="num">${fmt(v)}</b> ${chip(pct(v,w))}</div>
+          <div><span class="pc-l">Месяц</span><b class="num">${mln(x.mtd)}</b> ${chip(pct(+x.mtd,+x.mtd_prev))}</div>
+          <div><span class="pc-l">В кассе</span><b class="num">${cashN(x)}</b></div></div></div>`; };
+        const sumLine = (t, d) => `<div class="pc st-tot"><div class="pc-h"><b>${esc(t)}</b></div><div class="pc-g"><div><span class="pc-l">${yd?'Вчера':'Сегодня'}</span><b class="num">${fmt(d[0])}</b> ${chip(pct(d[0],d[1]))}</div><div><span class="pc-l">Месяц</span><b class="num">${mln(d[2])}</b> ${chip(pct(d[2],d[3]))}</div><div><span class="pc-l">В кассе</span><b class="num">${fmt(d[4])}</b></div></div></div>`;
+        return seg + `<div class="pc-list">${groups.map(([k,L]) => (k?sumLine(k, tot(L)):'') + L.map(card).join('')).join('')}${sumLine('Итого по сети', T0)}</div>`;
+      }
+      const row = x => { const [v,w] = dv(x); return `<tr><td>${nm(x)}</td><td class="num"><b style="font-size:16px">${fmt(v)}</b> ${chip(pct(v,w))}</td><td class="num">${mln(x.mtd)} ${chip(pct(+x.mtd,+x.mtd_prev))}</td><td class="num">${cashN(x)}</td></tr>`; };
+      const trow = (t, d, cls) => `<tr class="${cls}"><td><b>${esc(t)}</b></td><td class="num"><b style="font-size:16px">${fmt(d[0])}</b> ${chip(pct(d[0],d[1]))}</td><td class="num"><b>${mln(d[2])}</b> ${chip(pct(d[2],d[3]))}</td><td class="num"><b>${fmt(d[4])}</b></td></tr>`;
+      return seg + `<div class="scroll"><table class="st-sum"><thead><tr><th>Магазин</th><th>${yd?'Вчера':'Сегодня'} <span class="meta">к прошл. неделе</span></th><th>Месяц <span class="meta">к прошл. месяцу</span></th><th title="Остаток по последней странице тетради + наличные продажи Wipon после неё − расходы, внесённые в Silver">В кассе</th></tr></thead><tbody>
+        ${groups.map(([k,L]) => (k?trow(k, tot(L), 'st-grp'):'') + L.map(row).join('')).join('')}${trow('Итого по сети', T0, 'st-total')}</tbody></table></div>`; })()}
     ${(()=>{ const C = Object.values(DAY.cash||{}).filter(c=>c.est_kzt!=null); if(!C.length) return ''; const k = C.reduce((a,c)=>a+(+c.est_kzt||0),0), u = C.reduce((a,c)=>a+(+c.snap_usd||0),0);
       return `<p style="margin:8px 0 0"><b>Наличных по сети ≈ ${fmt(k)}${u?' и $'+u.toLocaleString('ru-RU'):''}</b></p>`; })()}
     <details style="margin:6px 0 0"><summary class="meta" style="cursor:pointer">Как считается?</summary>
