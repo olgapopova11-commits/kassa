@@ -4149,26 +4149,35 @@ function flowIdeas(D){
 }
 function renderFlow(){
   const D = FL.data;
-  const step = (ico, t, main, sub, state, soon) => `<div class="fl-step ${soon?'soon':state||''}"><div class="fl-ico">${ico}</div><b>${t}</b><div class="fl-num">${main}</div><div class="meta">${sub}</div>${soon?'<span class="chip">скоро</span>':''}</div>`;
+  const step = (ico, t, main, sub, state, soon, tip, go) => `<div class="fl-step ${soon?'soon':state||''}" tabindex="0"${go&&(S.tabs||[]).some(x=>x[0]===go)?` data-flgo="${go}" role="button"`:''}><div class="fl-ico">${ico}</div><b>${t}</b><div class="fl-num">${main}</div><div class="meta">${sub}</div>${soon?'<span class="chip">скоро</span>':''}${tip?`<span class="fl-q" aria-hidden="true">?</span><div class="fl-tip" role="tooltip">${tip}</div>`:''}</div>`;
+  const TIP = {
+    ord:'<b>Что это:</b> товар, который мы уже заказали у поставщика, но он ещё не отправлен.<br><b>Откуда цифра:</b> заказы во вкладке «Закуп» со статусом «заказано».<br><b>Хорошо:</b> здесь всегда что-то есть — значит, ассортимент пополняется.<br><b>Что делать:</b> если поставщик не отправил больше 5 дней — написать ему.',
+    tr:'<b>Что это:</b> товар уже едет из Китая к нам.<br><b>Откуда цифра:</b> заказы со статусом «в пути».<br><b>Что делать:</b> если едет дольше 45 дней — проверить у карго и закрыть заказ, когда пришёл.',
+    rcv:'<b>Что это:</b> товар, который магазины пересчитали и приняли на склад за выбранный период.<br><b>Откуда цифра:</b> приёмки во вкладке «Склад».<br><b>Почему важно:</b> пока товар не принят, касса не видит остаток, а мы не видим себестоимость.',
+    ast:'<b>Что это:</b> товар, отправленный из Алматы в Астану и ещё не принятый там.<br><b>Красный:</b> едет дольше 4 дней — скорее всего, пришёл, но забыли принять.<br><b>Что делать:</b> менеджер Астаны — «Склад → Перемещения → принять».',
+    ph:'<b>Что это:</b> сколько товаров в наличии имеют фото в Silver.<br><b>Полоска:</b> доля готовых. Зелёный — от 85%, жёлтый — от 50%, красный — меньше.<br><b>Почему важно:</b> без фото товар нельзя показать на сайте, в посте и продавцу в кассе.<br><b>Что делать:</b> «Фотосессия» — начать с ходовых.',
+    card:'<b>Что это:</b> у товара заполнены категория и материал.<br><b>Почему важно:</b> без этого товар не найти фильтром, его не видно в аналитике по категориям и в «Идеях к заказу».<br><b>Что делать:</b> «Номенклатура» → выделить товары → указать категорию.',
+    site:'<b>Что это:</b> товар из наличия есть на сайте MOON или Sunshine (связан с карточкой сайта).<br><b>Почему важно:</b> нет на сайте — нет онлайн-заказов.<br><b>Что делать:</b> «Товары → Сайт» — проверить связи и добавить ходовые.',
+    post:'<b>Что это:</b> будущий этап — сколько товаров попало в посты и контент-план.<br>Пока в разработке.',
+    sold:'<b>Что это:</b> сколько штук продано за выбранный период и сколько было чеков.<br><b>Откуда:</b> продажи из Wipon и кассы Silver.',
+    stale:'<b>Что это:</b> товар в наличии, который не продавался 90 дней и больше.<br><b>Сумма:</b> сколько это стоит в розничных ценах — деньги, замороженные на полке.<br><b>Что делать:</b> переложить туда, где продаётся, сделать подборку или акцию, не дозаказывать.'
+  };
+  const stage = (n, t, c, body) => `<div class="fl-stage fl-s${c}"><div class="fl-stage-h"><span class="fl-stage-n">${n}</span>${t}</div><div class="fl-row">${body}</div></div>`;
   const bar = (ok, no) => { const p = ok+no ? Math.round(ok/(ok+no)*100) : 0; return `<div class="fl-bar"><span style="width:${p}%"></span></div><div class="meta">${p}% готово · не хватает у ${nf(no)}</div>`; };
   const st = (ok,no) => { const p = ok+no ? ok/(ok+no) : 1; return p>=.85?'ok':p>=.5?'warn':'bad'; };
   const list = (L, cols) => `<div class="list" style="margin-top:6px">${L.map(p=>`<div class="prod" style="grid-template-columns:44px minmax(0,1fr) auto">${thumb(p)}<span><b>${pcl(p.id||p.product_id, esc(p.name))}</b><br><span class="meta num">${esc(p.barcode||'')} · в наличии ${nf(p.qty)}${p.units?' · продано '+nf(p.units):''}</span><br>${p.no_photo?'<span class="chip zero">нет фото</span>':''}${p.no_card?'<span class="chip warn">карточка</span>':''}${p.no_site?'<span class="chip warn">нет на сайте</span>':''}</span><span class="price num">${cols==='retail'?fmt(p.retail):fmt(p.price)}</span></div>`).join('')}</div>`;
   $('#main').innerHTML = `<div class="row"><h2>Путь товара</h2><div class="seg">${[30,90].map(d=>`<button data-fldays="${d}" aria-pressed="${FL.days===d}">${d} дней</button>`).join('')}</div></div>
   ${storeFilterHtml()}
   ${!D?'<div class="empty">Считаем…</div>':`
-  <div class="fl-chain">
-    ${step('🧾','Заказано', nf(D.ordered.units)+' шт.', nf(D.ordered.pos)+' позиций у поставщиков', D.ordered.pos?'ok':'warn')}
-    ${step('🚚','В пути из Китая', nf(D.transit.units)+' шт.', nf(D.transit.pos)+' позиций', D.transit.pos?'ok':'warn')}
-    ${step('📥','Принято', nf(D.received.units)+' шт.', `${nf(D.received.pos)} позиций за ${D.days} дней`, D.received.pos?'ok':'warn')}
-    ${(()=>{ const T = D.to_astana || { units:0, pos:0, docs:0 }, age = T.oldest ? Math.floor((Date.now()-new Date(T.oldest))/864e5) : 0;
-      return step('🚛','В пути в Астану', nf(T.units)+' шт.', T.docs ? `${nf(T.pos)} позиций · ${nf(T.docs)} отправок${age?' · самая старая '+age+' дн.':''}` : 'сейчас ничего не едет', T.docs ? (age>4?'bad':'ok') : ''); })()}
-    ${step('📷','Фото', nf(D.photo.ok), bar(D.photo.ok, D.photo.no), st(D.photo.ok, D.photo.no))}
-    ${step('🏷','Карточка', nf(D.card.ok), bar(D.card.ok, D.card.no), st(D.card.ok, D.card.no))}
-    ${step('🌐','На сайте', nf(D.site.ok), bar(D.site.ok, D.site.no), st(D.site.ok, D.site.no))}
-    ${step('📣','Посты и контент-план','—','публикации в Instagram по плану на 2 недели','',true)}
-    ${step('💰','Продано', nf(D.sold.units)+' шт.', `${nf(D.sold.checks)} чеков за ${D.days} дней`, 'ok')}
-    ${step('🕸','Залежи 90+ дней', nf(D.stale.pos)+' поз.', fmt(D.stale.retail)+' в рознице', D.stale.pos?'bad':'ok')}
+  <p class="meta" style="margin:6px 0 4px">Наведите на карточку (или нажмите на телефоне) — появится объяснение. Клик по карточке открывает нужную вкладку.</p>
+  <div class="fl-map">
+    ${stage(1,'Закупка','a', step('🧾','Заказано', nf(D.ordered.units)+' шт.', nf(D.ordered.pos)+' позиций у поставщиков', D.ordered.pos?'ok':'warn', false, TIP.ord, 'po') + step('🚚','В пути из Китая', nf(D.transit.units)+' шт.', nf(D.transit.pos)+' позиций', D.transit.pos?'ok':'warn', false, TIP.tr, 'po'))}
+    ${stage(2,'Склад','b', step('📥','Принято', nf(D.received.units)+' шт.', `${nf(D.received.pos)} позиций за ${D.days} дней`, D.received.pos?'ok':'warn', false, TIP.rcv, 'wh') + (()=>{ const T = D.to_astana || { units:0, pos:0, docs:0 }, age = T.oldest ? Math.floor((Date.now()-new Date(T.oldest))/864e5) : 0;
+      return step('🚛','В пути в Астану', nf(T.units)+' шт.', T.docs ? `${nf(T.pos)} позиций · ${nf(T.docs)} отправок${age?' · самая старая '+age+' дн.':''}` : 'сейчас ничего не едет', T.docs ? (age>4?'bad':'ok') : '', false, TIP.ast, 'wh'); })())}
+    ${stage(3,'Готовность к продаже','c', step('📷','Фото', nf(D.photo.ok), bar(D.photo.ok, D.photo.no), st(D.photo.ok, D.photo.no), false, TIP.ph, 'photo') + step('🏷','Карточка', nf(D.card.ok), bar(D.card.ok, D.card.no), st(D.card.ok, D.card.no), false, TIP.card, 'nom') + step('🌐','На сайте', nf(D.site.ok), bar(D.site.ok, D.site.no), st(D.site.ok, D.site.no), false, TIP.site, 'site') + step('📣','Посты','—','публикации по контент-плану','',true, TIP.post))}
+    ${stage(4,'Результат','d', step('💰','Продано', nf(D.sold.units)+' шт.', `${nf(D.sold.checks)} чеков за ${D.days} дней`, 'ok', false, TIP.sold, 'analytics') + step('🕸','Залежи 90+ дней', nf(D.stale.pos)+' поз.', fmt(D.stale.retail)+' в рознице', D.stale.pos?'bad':'ok', false, TIP.stale, 'po'))}
   </div>
+  <div class="fl-legend meta"><span><i class="fl-dot ok"></i>всё хорошо</span><span><i class="fl-dot warn"></i>стоит заняться</span><span><i class="fl-dot bad"></i>срочно</span></div>
   <p class="meta">В наличии сейчас ${nf(D.instock.pos)} позиций, ${nf(D.instock.units)} шт. на ${fmt(D.instock.retail)}. Фото, карточка и сайт считаются по товарам в наличии.</p>
   <h2 style="margin-top:18px">Где застряло и что сделать</h2>
   <div class="stack">${flowIdeas(D).map(([lvl,t,why,todo,go])=>`<div class="card fl-idea ${lvl}"><b>${lvl==='bad'?'🔴':'🟡'} ${t}</b><div>${why}</div><div class="meta">💡 ${todo}</div>${(S.tabs||[]).some(x=>x[0]===go)?`<button class="btn small" data-flgo="${go}" style="align-self:flex-start">Открыть «${(S.tabs.find(x=>x[0]===go)||[])[1]}»</button>`:''}</div>`).join('') || '<div class="empty">Ничего не застряло 👍</div>'}</div>
@@ -4179,7 +4188,8 @@ function renderFlow(){
   ${(D.new_not_ready||[]).length?`<h3 style="margin-top:14px">📥 Новые поступления, которые ещё не готовы к продаже онлайн</h3>${list(D.new_not_ready)}`:''}`}`;
 }
 document.addEventListener('click', async e => {
-  if(S.view!=='flow') return; const t = e.target.closest('button'); if(!t) return;
+  if(S.view!=='flow') return; const t = e.target.closest('button,.fl-step[data-flgo]'); if(!t) return;
+  if(t.classList.contains('fl-step') && matchMedia('(hover: none)').matches && !t.dataset.tap){ document.querySelectorAll('.fl-step[data-tap]').forEach(x=>delete x.dataset.tap); t.dataset.tap = '1'; t.focus(); return; } // на телефоне: 1-е нажатие — подсказка, 2-е — переход
   if(t.dataset.fldays){ FL.days = +t.dataset.fldays; render(); await loadFlow(); render(); }
   else if(t.dataset.flgo){ const b = document.querySelector(`nav button[data-view="${t.dataset.flgo}"]`); S.view = t.dataset.flgo; const g = groupOf(S.view); (S.lastView ||= {})[g[0]] = S.view; render(); scrollTo(0,0);
     if(S.view==='po'){ await loadPo(); render(); } else if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); } else if(S.view==='site'){ await loadSite(); render(); } else if(S.view==='nom'){ await loadNom(); render(); } else if(S.view==='analytics'){ S.an=null; await loadAnalytics(); render(); } }

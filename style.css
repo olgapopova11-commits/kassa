@@ -275,3 +275,23 @@ header .brand::after{display:inline-block;animation:sunspin 24s linear infinite;
 @keyframes ldBeat{0%,40%,100%{transform:scale(1)}20%{transform:scale(1.25)}60%{transform:scale(1.15)}}
 @keyframes ldTwinkle{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.8)}}
 @media (prefers-reduced-motion: reduce){ header .brand::before, header .brand::after, .ld{animation:none} }
+
+/* путь товара: инфографика по этапам с подсказками */
+.fl-map{display:flex;flex-direction:column;gap:12px;margin:8px 0 6px}
+.fl-stage{border-radius:18px;padding:10px 12px 12px;position:relative}
+.fl-stage:not(:last-child)::after{content:"⬇";position:absolute;left:50%;bottom:-15px;transform:translateX(-50%);font-size:14px;color:var(--muted);z-index:1}
+.fl-sa{background:linear-gradient(90deg,#fff4e3,#fff9f1)} .fl-sb{background:linear-gradient(90deg,#f1eefc,#f8f6fe)} .fl-sc{background:linear-gradient(90deg,#fdeee8,#fff6f2)} .fl-sd{background:linear-gradient(90deg,#eaf6f0,#f4fbf7)}
+.fl-stage-h{font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.fl-stage-n{width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;display:inline-grid;place-items:center;font-size:12px}
+.fl-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.fl-row .fl-step{cursor:default;transition:transform .15s ease, box-shadow .15s ease}
+.fl-row .fl-step[data-flgo]{cursor:pointer}
+.fl-row .fl-step:hover,.fl-row .fl-step:focus{transform:translateY(-2px);box-shadow:0 6px 16px rgba(150,90,50,.12);outline:none;z-index:20}
+.fl-step::before{display:none}
+.fl-q{position:absolute;top:8px;right:10px;width:18px;height:18px;border-radius:50%;background:var(--soft);color:#a3532e;font-size:11px;font-weight:700;display:grid;place-items:center}
+.fl-tip{display:none;position:absolute;left:0;top:calc(100% + 6px);width:min(300px,80vw);background:#3d2c2e;color:#fff;padding:10px 12px;border-radius:12px;font-size:13px;line-height:1.45;box-shadow:0 8px 20px rgba(0,0,0,.18);z-index:30}
+.fl-tip b{color:#f7c27a}
+.fl-step:hover .fl-tip,.fl-step:focus .fl-tip,.fl-step:focus-within .fl-tip{display:block}
+.fl-legend{display:flex;gap:14px;flex-wrap:wrap;margin:4px 0 10px} .fl-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.fl-dot.ok{background:var(--ok)} .fl-dot.warn{background:#e2a400} .fl-dot.bad{background:var(--bad)}
+.fl-row .fl-step:nth-child(n+3):last-child .fl-tip,.fl-row .fl-step:nth-child(4) .fl-tip{left:auto;right:0}
