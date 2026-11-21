@@ -84,15 +84,244 @@ function storesDD(ids, attr){
   return `<details class="dd"><summary>${esc(ddSummary(ids))}</summary><div class="dd-panel">${S.allStores.map(st=>`<label><input type="checkbox" ${attr(st.id)} ${ids.includes(st.id)?'checked':''}> ${esc(BRAND[st.brand]+' · '+st.address)}</label>`).join('')}</div></details>`;
 }
 document.addEventListener('click', e => { document.querySelectorAll('details.dd[open]').forEach(d => { if(!d.contains(e.target)) d.removeAttribute('open'); }); });
-/* ---------- весёлые анимации загрузки: 100 вариантов (10 героев × 10 движений) + шутка, каждый раз случайно ---------- */
-const LD_HERO = ['☾','☀','💍','💎','✨','🌙⭐','🦋','🌸','🎀','🐚'];
-const LD_MOVE = ['ld-bounce','ld-spin','ld-orbit','ld-float','ld-pulse','ld-wiggle','ld-flip','ld-swing','ld-beat','ld-twinkle'];
-const LD_JOKE = ['Полируем серебро…','Считаем блёстки…','Луна догоняет солнце…','Пересчитываем бусинки…','Протираем витрину…','Примеряем кольца…','Распутываем цепочки…','Ищем пару для серёжки…','Солнце встаёт, данные идут…','Шармы выстраиваются в очередь…','Заколки строятся по росту…','Муассанит наводит блеск…','Ловим вдохновение из Китая…','Кассир улыбается — ждём…','Луна проверяет остатки…','Сверяем каждую пробу 925…','Перекладываем бархатные коробочки…','Варим кофе продавцам…','Солнце считает выручку…','Блеск загружается…','Застёгиваем застёжки…','Начищаем до звёздного сияния…','Бантики завязываются…','Бабочки разносят цифры…','Ракушки шепчут новости…','Цирконы выходят на сцену…','Серёжки ищут уши…','Браслеты делают зарядку…','Кольцо крутится на пальце…','Подвески качаются в такт…'];
-function ldHtml(){ const i = Math.floor(Math.random()*100), h = LD_HERO[Math.floor(i/10)], m = LD_MOVE[i%10], j = LD_JOKE[Math.floor(Math.random()*LD_JOKE.length)];
-  return `<span class="ld ${m}" aria-hidden="true">${h}</span><span class="ld-joke">${j}</span>`; }
-const LD_RE = /(Загруж|загруж|Считаем|Собираем|Ищем|Проверяю|Готовим|Обновляем)[^.!?]*…\s*$/;
+/* ---------- анимации загрузки: 12 сценок из жизни магазина в мягком рисованном стиле, каждый раз случайная ---------- */
+/* MOON & Sunshine loaders — soft hand-painted style. Call ldDefs() once, then insert ldHtml(). */
+var LD_DEFS='<svg id="ldg-defs" aria-hidden="true" focusable="false" style="position:absolute;width:0;height:0;overflow:hidden"><defs>'+
+'<linearGradient id="ldg-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b9d7e3"/><stop offset=".55" stop-color="#d7e9ee"/><stop offset="1" stop-color="#fdf6e6"/></linearGradient>'+
+'<linearGradient id="ldg-grass" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#bcd59e"/><stop offset=".6" stop-color="#9fc184"/><stop offset="1" stop-color="#86ab72"/></linearGradient>'+
+'<linearGradient id="ldg-hill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cfe0c0"/><stop offset="1" stop-color="#b7cfa6"/></linearGradient>'+
+'<linearGradient id="ldg-wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7eedd"/><stop offset="1" stop-color="#ead9bb"/></linearGradient>'+
+'<linearGradient id="ldg-floor" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e3cca6"/><stop offset=".5" stop-color="#d9c09a"/><stop offset="1" stop-color="#c9ab84"/></linearGradient>'+
+'<linearGradient id="ldg-wood" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d2a776"/><stop offset=".6" stop-color="#c89b6d"/><stop offset="1" stop-color="#a87a52"/></linearGradient>'+
+'<linearGradient id="ldg-dress" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f8f2e5"/><stop offset=".7" stop-color="#ece3cf"/><stop offset="1" stop-color="#dccfb4"/></linearGradient>'+
+'<linearGradient id="ldg-apr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3c391"/><stop offset=".7" stop-color="#eaab76"/><stop offset="1" stop-color="#d98f5c"/></linearGradient>'+
+'<radialGradient id="ldg-skin" cx=".42" cy=".36" r=".72"><stop offset="0" stop-color="#fdeedf"/><stop offset=".65" stop-color="#fbe2cc"/><stop offset="1" stop-color="#efc9ab"/></radialGradient>'+
+'<radialGradient id="ldg-hair" cx=".45" cy=".25" r=".8"><stop offset="0" stop-color="#7a5441"/><stop offset=".6" stop-color="#5f4031"/><stop offset="1" stop-color="#4b3128"/></radialGradient>'+
+'<radialGradient id="ldg-fur" cx=".4" cy=".3" r=".75"><stop offset="0" stop-color="#fffdf7"/><stop offset=".7" stop-color="#f6efe1"/><stop offset="1" stop-color="#e3d8c3"/></radialGradient>'+
+'<linearGradient id="ldg-gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8e3a0"/><stop offset=".5" stop-color="#d9a94a"/><stop offset="1" stop-color="#f1cf7c"/></linearGradient>'+
+'<linearGradient id="ldg-glass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f1f8fa" stop-opacity=".85"/><stop offset="1" stop-color="#cfe3ea" stop-opacity=".6"/></linearGradient>'+
+'<linearGradient id="ldg-bucket" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#a3b7c3"/><stop offset=".5" stop-color="#bccbd4"/><stop offset="1" stop-color="#8399a8"/></linearGradient>'+
+'<linearGradient id="ldg-pot" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#dba07a"/><stop offset="1" stop-color="#bf7f5c"/></linearGradient>'+
+'<linearGradient id="ldg-can" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#bcd6cb"/><stop offset="1" stop-color="#8fb3a6"/></linearGradient>'+
+'<radialGradient id="ldg-glow" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff8dc" stop-opacity=".9"/><stop offset="1" stop-color="#fff8dc" stop-opacity="0"/></radialGradient>'+
+'<clipPath id="ldg-c4"><rect x="57" y="25" width="28" height="36" rx="1.5"/></clipPath>'+
+'<filter id="ldg-wc" x="-5%" y="-5%" width="110%" height="110%"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="3"/><feDisplacementMap in="SourceGraphic" scale="1.6"/></filter>'+
+'</defs></svg>';
+
+function ldDefs(){ if(!document.getElementById('ldg-defs')) document.body.insertAdjacentHTML('beforeend', LD_DEFS) }
+
+var LD_SVG=(function(){
+  var OL=' stroke="#a8927a" stroke-width=".7"';
+  /* arm: outlined cream sleeve + hand */
+  function A(d,hx,hy){
+    return '<path d="'+d+'" fill="none" stroke="#b9a68c" stroke-width="4.4" stroke-linecap="round"/>'+
+      '<path d="'+d+'" fill="none" stroke="#f1e9d8" stroke-width="3" stroke-linecap="round"/>'+
+      '<circle cx="'+hx+'" cy="'+hy+'" r="2.2" fill="url(#ldg-skin)" stroke="#d9a98a" stroke-width=".5"/>';
+  }
+  var AL=A('M38 66Q33 74 34 82',34,83), AR=A('M58 66Q63 74 62 82',62,83);
+  var APR='<path d="M38 66q10-4 20 0l2 26H36z" fill="url(#ldg-apr)" stroke="#b9774a" stroke-width=".7"/>'+
+    '<path d="M37 88h22" stroke="#c98455" stroke-width="1.4" opacity=".35"/><path d="M42 70h12" stroke="#fff6e8" stroke-width=".9" opacity=".8"/>';
+  /* girl: o.b behind body, o.na no apron, o.m between body and head, o.x in front */
+  function G(dx,dy,o){
+    o=o||{};
+    return '<g transform="translate('+dx+' '+dy+')"><g class="ld-bob">'+(o.b||'')+
+      '<path d="M30 92q2-30 18-32t18 32z" fill="url(#ldg-dress)"'+OL+'/>'+
+      '<path d="M32 90q16 4 32 0" stroke="#d2c3a6" stroke-width="1.6" fill="none" opacity=".6"/>'+
+      (o.na?'':APR)+(o.m||'')+
+      '<path d="M44 56h8v6h-8z" fill="url(#ldg-skin)"/><path d="M44 60q4 2 8 0" stroke="#e8bf9f" stroke-width="1" fill="none"/>'+
+      '<ellipse cx="48" cy="40" rx="15" ry="16" fill="url(#ldg-skin)" stroke="#d9a98a" stroke-width=".6"/>'+
+      '<g class="ld-hair"><path d="M32 42q-2-22 16-22t17 22q-3-10-9-12-4 6-14 6-6 0-10 6z" fill="url(#ldg-hair)"/>'+
+      '<path d="M33 40q-4 14 2 22M63 40q4 14-2 22" fill="none" stroke="#5a3b2e" stroke-width="3" stroke-linecap="round"/>'+
+      '<path d="M38 24q10-6 22 2" fill="none" stroke="#e9c79a" stroke-width="2.2" stroke-linecap="round" opacity=".85"/></g>'+
+      '<g class="ld-eye"><ellipse cx="42" cy="43" rx="1.8" ry="2.4" fill="#3b2a24"/><ellipse cx="54" cy="43" rx="1.8" ry="2.4" fill="#3b2a24"/>'+
+      '<circle cx="42.6" cy="42.2" r=".6" fill="#fff"/><circle cx="54.6" cy="42.2" r=".6" fill="#fff"/></g>'+
+      '<ellipse cx="38.5" cy="48" rx="3" ry="1.6" fill="#f1a7a0" opacity=".55"/><ellipse cx="57.5" cy="48" rx="3" ry="1.6" fill="#f1a7a0" opacity=".55"/>'+
+      '<path d="M46 50q2 1.6 4 0" fill="none" stroke="#a5605a" stroke-width="1" stroke-linecap="round"/>'+
+      (o.x||'')+'</g></g>';
+  }
+  /* original companion: tiny fluffy moon-rabbit with golden crescent mark */
+  function R(x,y,cls){
+    return '<g transform="translate('+x+' '+y+')"><g class="'+(cls||'ld-hop')+'">'+
+      '<ellipse cx="0" cy="9.2" rx="6" ry="1.2" fill="#8a7a5c" opacity=".18"/>'+
+      '<g class="ld-ear"><path d="M-2.6-4q-2.4-7-.2-9.6 2 1.6 1.6 9.6z" fill="url(#ldg-fur)" stroke="#b5a487" stroke-width=".5"/>'+
+      '<path d="M1.2-4q1.4-7.4 4-8.6 1.2 2.4-1.8 9z" fill="url(#ldg-fur)" stroke="#b5a487" stroke-width=".5"/>'+
+      '<path d="M-2-5q-1.2-4-.3-6.4M2.4-5q1-4 2.4-5.8" stroke="#f3c6c0" stroke-width=".9" stroke-linecap="round" fill="none"/></g>'+
+      '<path d="M-6 6q-1-7 4-8.6 2-3.4 5.4-1.4 4 1.4 3.6 6 1.6 3.4-1 5.2Q2 9 -3 8.4q-3-.2-3-2.4z" fill="url(#ldg-fur)" stroke="#ad9b7c" stroke-width=".6"/>'+
+      '<circle cx="5.6" cy="5" r="1.6" fill="#fffdf7" stroke="#d8ccb6" stroke-width=".35"/>'+
+      '<path d="M.6-2.2a1.5 1.5 0 1 0 1.4 2.2 1.2 1.2 0 1 1-1.4-2.2z" fill="url(#ldg-gold)"/>'+
+      '<circle cx="-1.4" cy="1.2" r=".75" fill="#3b2a24"/><circle cx="-1.2" cy=".9" r=".25" fill="#fff"/>'+
+      '<ellipse cx="-3.4" cy="2.8" rx="1.3" ry=".7" fill="#f1a7a0" opacity=".55"/>'+
+      '</g></g>';
+  }
+  function SPK(x,y,s,cls,st){
+    return '<path class="'+cls+'"'+(st?' style="'+st+'"':'')+' d="M'+x+' '+(y-s)+'q.5 '+(s*.7)+' '+s+' '+s+'q-'+(s*.5)+' .3-'+s+' '+s+'q-.5-'+(s*.7)+'-'+s+'-'+s+'q'+(s*.5)+'-.3 '+s+'-'+s+'z" fill="#fff6cf"/>';
+  }
+  var BGS='<rect width="96" height="100" rx="14" fill="url(#ldg-wall)"/>'+
+    '<path d="M0 74h96v12a14 14 0 0 1-14 14H14A14 14 0 0 1 0 86z" fill="url(#ldg-floor)"/>'+
+    '<path d="M0 74.4h96" stroke="#c2a47c" stroke-width=".8" opacity=".7"/><path d="M6 82h28M48 87h36M16 94h30" stroke="#c4a67e" stroke-width=".5" opacity=".55"/>'+
+    '<ellipse cx="20" cy="22" rx="16" ry="10" fill="url(#ldg-glow)" opacity=".7"/>';
+  var BGK='<rect width="96" height="100" rx="14" fill="url(#ldg-sky)"/>'+
+    '<path d="M0 70q20-12 44-6t52-4v14H0z" fill="url(#ldg-hill)"/>'+
+    '<path d="M0 76q24-6 48-2t48-2v14a14 14 0 0 1-14 14H14A14 14 0 0 1 0 86z" fill="url(#ldg-grass)"/>'+
+    '<path d="M10 84q1-3 2 0M22 90q1-3 2 0M74 86q1-3 2 0M84 92q1-3 2 0" stroke="#7da068" stroke-width=".6" fill="none" filter="url(#ldg-wc)"/>';
+  function S(inner){return '<svg viewBox="0 0 96 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'+inner+'</svg>'}
+  var sc=[];
+
+  /* 1 greeting */
+  sc.push(S(BGK+
+    '<g class="ld-cloud"><path d="M12 24q0-6 7-6 3-5 9-2 6-1 6 5 4 1 3 5H14q-3 0-2-2z" fill="#fff" opacity=".9"/></g>'+
+    '<ellipse class="ld-cloud ld-d1" cx="80" cy="14" rx="8" ry="3" fill="#fff" opacity=".75"/>'+
+    '<path class="ld-leaf" d="M78 40q5-4 9 0-5 4-9 0z" fill="#a3c784" stroke="#7a9e62" stroke-width=".4"/>'+
+    G(-4,0,{x:AL+'<g class="ld-wave" style="transform-origin:58px 66px">'+A('M58 66Q66 62 68 52',68,51)+'</g>'})+
+    R(78,82)));
+
+  /* 2 mopping */
+  sc.push(S(BGS+
+    '<ellipse class="ld-shine" cx="52" cy="95" rx="15" ry="2.4" fill="#fff"/>'+
+    G(-12,0,{x:'<g class="ld-mop" style="transform-origin:60px 66px">'+
+      '<path d="M73 44L66 88" stroke="#b5875b" stroke-width="2" stroke-linecap="round"/>'+
+      A('M39 67Q52 72 70 62',70,62)+A('M57 67Q63 74 68.3 74',68.3,74)+
+      '<path d="M63 89q-4 4-6 7M64.5 89q-2 4-3 7.5M66 89v7.5M67.5 89q2 4 3 7.5M69 89q4 4 6 7" stroke="#b8b0a0" stroke-width="2.8" stroke-linecap="round" fill="none"/>'+
+      '<path d="M63 89q-4 4-6 7M64.5 89q-2 4-3 7.5M66 89v7.5M67.5 89q2 4 3 7.5M69 89q4 4 6 7" stroke="#fbfaf6" stroke-width="1.8" stroke-linecap="round" fill="none"/>'+
+      '<rect x="62" y="86" width="8" height="3.4" rx="1.2" fill="#d9d4c7" stroke="#a8927a" stroke-width=".5"/></g>'})+
+    '<path d="M87 75q-7-11-14 0" fill="none" stroke="#6f8593" stroke-width=".9"/>'+
+    '<path d="M70 75h20l-2.4 18h-15.2z" fill="url(#ldg-bucket)" stroke="#71889a" stroke-width=".7"/>'+
+    '<path d="M72 81h16" stroke="#dce6ec" stroke-width=".7"/>'+
+    '<ellipse cx="80" cy="75" rx="10" ry="2.4" fill="#cfe6ef" stroke="#71889a" stroke-width=".7"/>'+
+    '<circle class="ld-bub" cx="77" cy="74" r="1.5" fill="#f4fbff" stroke="#9cc0cf" stroke-width=".4"/>'+
+    '<circle class="ld-bub ld-d1" cx="82" cy="74" r="1.1" fill="#f4fbff" stroke="#9cc0cf" stroke-width=".4"/>'+
+    '<circle class="ld-bub ld-d2" cx="79.5" cy="74" r="1.3" fill="#f4fbff" stroke="#9cc0cf" stroke-width=".4"/>'));
+
+  /* 3 packing a gift */
+  sc.push(S(BGS+
+    G(-14,0,{x:AL+A('M57 67Q66 67 72 63',72,63)})+
+    '<path d="M63 68h22v4H63z" fill="#d6bb8d"/>'+
+    '<g class="ld-drop"><rect x="69" y="64" width="10" height="9" rx="1.4" fill="#b9aee0" stroke="#8f84bf" stroke-width=".6"/>'+
+    '<path d="M74 64v9M69 68h10" stroke="#fff6e8" stroke-width="1.1"/>'+
+    '<path d="M74 64q-3-3.4-4.4-.4 2 1 4.4.4 3-3.4 4.4-.4-2 1-4.4.4z" fill="#fbe6ee" stroke="#c98fae" stroke-width=".4"/></g>'+
+    '<path d="M62 71h24l-2 23H64z" fill="#ecd9b4" stroke="#b39672" stroke-width=".7"/>'+
+    '<path d="M64 90h20" stroke="#cdb087" stroke-width="2" opacity=".45"/><path d="M63 74h22" stroke="#d8c09a" stroke-width=".6"/>'+
+    '<path d="M68 72q6-12 12 0" fill="none" stroke="#a8875c" stroke-width="1.3"/>'+
+    '<path d="M72.4 80.4a2.6 2.6 0 1 0 2.6 3.4 2.1 2.1 0 1 1-2.6-3.4z" fill="url(#ldg-gold)"/>'+
+    R(88,86,'ld-hop ld-d2')));
+
+  /* 4 washing a window */
+  sc.push(S(BGS+
+    '<rect x="54" y="22" width="34" height="42" rx="3" fill="url(#ldg-wood)" stroke="#8d6644" stroke-width=".6"/>'+
+    '<rect x="57" y="25" width="28" height="36" rx="1.5" fill="url(#ldg-sky)"/>'+
+    '<g clip-path="url(#ldg-c4)"><path d="M58 52q14-8 28-2v12H58z" fill="#b9d39a"/><ellipse cx="78" cy="33" rx="5" ry="2" fill="#fff" opacity=".85"/>'+
+    '<path class="ld-glint" d="M50 62L62 22h5L55 62z" fill="#fff" opacity=".6"/></g>'+
+    '<path d="M71 25v36M57 43h28" stroke="#b5875b" stroke-width="1.6"/>'+
+    '<rect x="52" y="62" width="38" height="3.5" rx="1.2" fill="#b5875b" stroke="#8d6644" stroke-width=".5"/>'+
+    G(-16,0,{b:'<g class="ld-wipe" style="transform-origin:56px 68px">'+A('M55 68Q70 62 74 47',74,47)+
+      '<rect x="71" y="42" width="8" height="5.4" rx="1.8" fill="#9cc884" stroke="#6f9455" stroke-width=".5"/>'+
+      '<path d="M72 43.4h6" stroke="#d6efc4" stroke-width=".7"/>'+
+      '<circle cx="80.5" cy="42" r="1" fill="#fff" opacity=".8"/><circle cx="79" cy="40" r=".7" fill="#fff" opacity=".8"/></g>',x:AL})));
+
+  /* 5 engraving a ring */
+  sc.push(S(BGS+
+    G(-14,0,{x:AL+'<g class="ld-engr">'+'<path d="M70 44q-4-4-2-10" stroke="#8f7a6a" stroke-width=".7" fill="none"/>'+
+      '<path d="M70.5 44.6L79.6 59.6" stroke="#5f6b74" stroke-width="3.4" stroke-linecap="round"/>'+
+      '<path d="M70.5 44.6L79.6 59.6" stroke="#9aa8b1" stroke-width="2" stroke-linecap="round"/>'+
+      '<path d="M76.4 54.4l1.2 2" stroke="url(#ldg-gold)" stroke-width="3.2"/>'+
+      '<path d="M79.6 59.6l1.6 2.6" stroke="#3f4347" stroke-width="1.2" stroke-linecap="round"/>'+
+      A('M58 66Q70 64 75.4 53',75.4,53)+'</g>'})+
+    '<path d="M2 70h92v4H2z" fill="#d6ab79"/><path d="M2 74h92v12a14 14 0 0 1-14 14H16A14 14 0 0 1 2 86z" fill="url(#ldg-wood)"/>'+
+    '<path d="M8 80h80" stroke="#a87a52" stroke-width=".6" opacity=".6"/>'+
+    '<ellipse cx="73" cy="69" rx="8" ry="2.6" fill="#b9aee0" stroke="#8f84bf" stroke-width=".5"/>'+
+    '<circle cx="73" cy="61.6" r="6" fill="none" stroke="#b8893a" stroke-width="3"/>'+
+    '<circle cx="73" cy="61.6" r="6" fill="none" stroke="url(#ldg-gold)" stroke-width="2.2"/>'+
+    '<path d="M71 56.4q2-1 4 0" stroke="#fff7d8" stroke-width=".8" fill="none"/>'+
+    SPK(67.4,62.4,2.2,'ld-spark')+'<circle class="ld-spark ld-d1" cx="65" cy="60" r=".6" fill="#f6dc8e"/>'));
+
+  /* 6 arranging a display case */
+  sc.push(S(BGS+
+    G(-18,0,{x:AL+'<g class="ld-reach">'+A('M58 66Q66 62 74 56',74,56)+'</g>'})+
+    '<rect x="56" y="72" width="36" height="20" rx="2" fill="url(#ldg-wood)" stroke="#8d6644" stroke-width=".6"/>'+
+    '<path d="M60 78h28" stroke="#a87a52" stroke-width=".6"/>'+
+    '<rect x="57" y="34" width="34" height="38" rx="2" fill="url(#ldg-glass)" stroke="#a8927a" stroke-width=".7"/>'+
+    '<rect x="55" y="32" width="38" height="3" rx="1" fill="#b5875b"/>'+
+    '<path d="M57 54h34" stroke="#d6c3a2" stroke-width="1.4"/>'+
+    '<g class="ld-p1"><path d="M62 43q1-2 2 0M67 43q1-2 2 0" stroke="#c9993f" stroke-width=".6" fill="none"/><path d="M63 44.6q-1.6 3.4 0 5 1.6-1.6 0-5zM68 44.6q-1.6 3.4 0 5 1.6-1.6 0-5z" fill="#b9aee0" stroke="#8f84bf" stroke-width=".35"/></g>'+
+    '<g class="ld-p2"><circle cx="76" cy="50.4" r="3" fill="none" stroke="url(#ldg-gold)" stroke-width="1.4"/><circle cx="76" cy="47" r="1.1" fill="#e9f3f7" stroke="#8fb7c6" stroke-width=".35"/></g>'+
+    '<g class="ld-p3"><path d="M81 38l4 7 4-7" stroke="#d9a94a" stroke-width=".5" fill="none"/><path d="M84.4 45.4a2 2 0 1 0 2 2.6 1.6 1.6 0 1 1-2-2.6z" fill="url(#ldg-gold)"/></g>'+
+    '<g class="ld-p4"><ellipse cx="66" cy="69" rx="5" ry="1.8" fill="none" stroke="url(#ldg-gold)" stroke-width="1.2"/><circle cx="62" cy="69" r=".9" fill="#f6efe0"/><circle cx="70" cy="69" r=".9" fill="#f6efe0"/></g>'+
+    '<g class="ld-p5"><circle cx="82" cy="68" r="2.6" fill="none" stroke="#e5e8ea" stroke-width="1.2"/><circle cx="82" cy="65.2" r="1" fill="#f1a7a0"/></g>'+
+    '<path d="M60 36l-2.4 9M88 58l-3 10" stroke="#fff" opacity=".75" stroke-width="1"/>'));
+
+  /* 7 sweeping */
+  sc.push(S(BGS+
+    '<g class="ld-dust"><circle cx="66" cy="93" r="2.2" fill="#e9dcc4"/><circle cx="69" cy="91.6" r="1.6" fill="#efe4cf"/><circle cx="68" cy="94.6" r="1.3" fill="#e2d3b8"/></g>'+
+    G(-14,0,{x:'<g class="ld-sweep" style="transform-origin:68px 66px">'+
+      '<path d="M74 44L64 85" stroke="#b5875b" stroke-width="2" stroke-linecap="round"/>'+
+      A('M39 67Q52 70 70 60',70,60)+A('M57 67Q62 74 67 72',67,72)+
+      '<path d="M60 87h9l7 10H53z" fill="#e8cc84" stroke="#b8954f" stroke-width=".6"/>'+
+      '<path d="M61.5 88l-5 9M63.5 88l-3 9M65 88v9M66.8 88l3 9M68.4 88l5 9" stroke="#c9a85e" stroke-width=".5"/>'+
+      '<rect x="60" y="84.4" width="9" height="3" rx="1" fill="#9f93cf" stroke="#7d72ad" stroke-width=".4"/></g>'})));
+
+  /* 8 putting on an apron */
+  sc.push(S(BGS+
+    G(0,0,{na:1,m:'<g class="ld-apron"><path d="M40 67Q42 55 48 55Q54 55 56 67" fill="none" stroke="#df9a64" stroke-width="1.3"/>'+APR+'</g>',
+      x:AL+A('M58 66Q65 72 62 76',62,76)+
+      '<g class="ld-tie"><path d="M60 76q5-4.4 6.4 0-1.4 4.4-6.4 0-5 4.4-6.4 0 1.4-4.4 6.4 0z" fill="#eaa874" stroke="#b9774a" stroke-width=".5"/><path d="M60 76l2.4 6M60 76l-1 6" stroke="#df9a64" stroke-width="1.2"/><circle cx="60" cy="76" r="1" fill="#d98f5c"/></g>'})+
+    R(14,84,'ld-hop ld-d1')));
+
+  /* 9 pinning a name badge */
+  sc.push(S(BGS+
+    G(0,0,{x:AL+AR+
+      '<g class="ld-badge"><rect x="49" y="68.4" width="8.4" height="5.4" rx="1.4" fill="#fdf6e6" stroke="url(#ldg-gold)" stroke-width=".9"/>'+
+      '<path d="M52.2 69.6a1.6 1.6 0 1 0 1.8 2.2 1.3 1.3 0 1 1-1.8-2.2z" fill="#b9aee0"/><circle cx="55.6" cy="71.4" r=".6" fill="#f0b984"/></g>'+
+      SPK(59.6,67,2,'ld-tw')})));
+
+  /* 10 fixing hair */
+  sc.push(S(BGK+
+    '<ellipse class="ld-cloud" cx="18" cy="16" rx="9" ry="3.2" fill="#fff" opacity=".8"/>'+
+    G(0,0,{m:'<ellipse cx="63" cy="45" rx="1.8" ry="2.8" fill="url(#ldg-skin)" stroke="#d9a98a" stroke-width=".5"/>',
+      x:AL+'<path class="ld-strand" d="M60 31q6 8 3.4 18" fill="none" stroke="#5a3b2e" stroke-width="2.2" stroke-linecap="round"/>'+
+      '<g class="ld-tuck" style="transform-origin:58px 66px">'+A('M58 66Q70 60 64 46',64,46)+'</g>'})+
+    '<path class="ld-leaf ld-d1" d="M10 40q4-3 7 0-4 3-7 0z" fill="#a3c784" stroke="#7a9e62" stroke-width=".4"/>'));
+
+  /* 11 stringing beads */
+  var cols=['#fbf6ee','#b9aee0','#f0b984','#e9c46a','#a9cfc0'], beads='';
+  for(var i=0;i<5;i++){
+    var rx=30+i*5;
+    beads+='<circle class="ld-bead ld-b'+(i+1)+'" style="--d:'+(84-rx)+'px" cx="'+rx+'" cy="76" r="2.5" fill="'+cols[i]+'" stroke="#9c8a74" stroke-width=".45"/>';
+  }
+  sc.push(S(BGS+
+    G(-6,0,{x:A('M38 67Q28 70 24 76',24,76)+
+      '<path d="M24 76H72" stroke="#8f7a6a" stroke-width=".6"/><circle cx="27" cy="76" r="1" fill="#8f7a6a"/>'+
+      '<path d="M72 76h13" stroke="#9aa6ad" stroke-width="1.1" stroke-linecap="round"/><path d="M85 76h1.6" stroke="#c7d0d5" stroke-width=".7" stroke-linecap="round"/>'+
+      '<ellipse cx="74" cy="76" rx="1.3" ry=".35" fill="#f4f7f8"/>'+
+      '<g class="ld-pick">'+A('M58 67Q72 64 86 72',86.6,73)+'</g>'+beads})+
+    R(12,88,'ld-hop ld-d1')));
+
+  /* 12 watering a plant */
+  sc.push(S(BGS+
+    '<path d="M76 84q-1-8 1-15M76 84q3-6 6-9M76 84q-3-5-7-7" stroke="#7fa564" stroke-width="1" fill="none"/>'+
+    '<path d="M77 69q-6-6-2-11 5 4 2 11z" fill="#a3c784" stroke="#6f9455" stroke-width=".5"/>'+
+    '<path d="M69 77q-6-1-7-5 5-1 7 5z" fill="#93bb76" stroke="#6f9455" stroke-width=".5"/>'+
+    '<path class="ld-perk" d="M82 75q7 1 8 6-6 1-8-6z" fill="#a3c784" stroke="#6f9455" stroke-width=".5"/>'+
+    '<rect x="66.5" y="83" width="19" height="3.6" rx="1.2" fill="#e3a880" stroke="#b07454" stroke-width=".6"/>'+
+    '<path d="M68 86.6h16l-2 8H70z" fill="url(#ldg-pot)" stroke="#b07454" stroke-width=".6"/>'+
+    '<ellipse class="ld-drip" cx="74" cy="60" rx=".8" ry="1.2" fill="#a9d3e3"/>'+
+    '<ellipse class="ld-drip ld-d1" cx="76" cy="61" rx=".8" ry="1.2" fill="#a9d3e3"/>'+
+    '<ellipse class="ld-drip ld-d2" cx="72.4" cy="61" rx=".8" ry="1.2" fill="#a9d3e3"/>'+
+    G(-16,0,{x:AL+A('M58 66Q68 60 75 55.4',75,55.4)+
+      '<g class="ld-tilt" style="transform-origin:75px 56px">'+
+      '<path d="M71 61.4q5-10 10 0" fill="none" stroke="#7fa196" stroke-width="1.3"/>'+
+      '<path d="M82 64l7.4-5.6" stroke="#8fb3a6" stroke-width="2" stroke-linecap="round"/><ellipse cx="89.6" cy="58.2" rx="1.6" ry="1" transform="rotate(-36 89.6 58.2)" fill="#9cbfb2"/>'+
+      '<rect x="69" y="60" width="14" height="11" rx="3" fill="url(#ldg-can)" stroke="#6f9488" stroke-width=".6"/>'+
+      '<path d="M71 62.4h10" stroke="#e3f0ea" stroke-width=".8" opacity=".8"/>'+
+      '<circle cx="75" cy="56" r="2.2" fill="url(#ldg-skin)" stroke="#d9a98a" stroke-width=".5"/></g>'})+
+    R(58,88,'ld-hop')));
+
+  return sc;
+})();
+
+function ldHtml(){return '<span class="ld">'+LD_SVG[Math.floor(Math.random()*LD_SVG.length)]+'</span>'}
+const LD_RE = /(Загруж|загруж|Считаем|Собираем|Ищем|Проверяю|Проверяем|Готовим|Обновляем)[^.!?]*…\s*$/;
 let ldQ = 0;
-function ldScan(){ ldQ = 0; document.querySelectorAll('.empty:not([data-ld]), p.meta:not([data-ld])').forEach(el => {
+function ldScan(){ ldQ = 0; if(document.body) ldDefs(); document.querySelectorAll('.empty:not([data-ld]), p.meta:not([data-ld])').forEach(el => {
   if(el.children.length > 2 || !LD_RE.test(el.textContent.trim())) return; el.dataset.ld = '1'; el.classList.add('ld-box'); el.insertAdjacentHTML('afterbegin', ldHtml()); }); }
 new MutationObserver(() => { if(!ldQ) ldQ = requestAnimationFrame(ldScan); }).observe(document.documentElement, { childList:true, subtree:true });
 const brCls = p => p && p.brand==='moon' ? ' br-moon' : p && p.brand==='sunshine' ? ' br-sun' : p && p.brand==='both' ? ' br-both' : '';
@@ -266,7 +495,7 @@ function renderShell(){
 }
 // вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
 const GROUPS = [['home','✅','Мой день',['day']],['goods','📦','Товары',['flow','wh','po','nom','photo','site']],['analytics','📈','Аналитика',['analytics','profit']],
-  ['team','👥','Команда',['me','emps','cons','pay','adm','audit']],['kassa','🧾','Чеки',['pos','shifts','cash','sales']],['clients','💳','Клиенты',['promo','content','bonus','certs']]];
+  ['team','👥','Команда',['me','emps','cons','bot','pay','adm','audit']],['kassa','🧾','Чеки',['pos','shifts','cash','sales']],['clients','💳','Клиенты',['promo','content','bonus','certs']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 // старые адреса вкладок: #attn → «Мой день», #stock → «Склад» в режиме «Остатки»
 function viewAlias(){ if(S.view==='attn') S.view = 'day'; else if(S.view==='stock'){ S.view = 'wh'; S.wmode = 'stock'; } }
@@ -327,7 +556,7 @@ function render(){
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart, y0 = scrollY;
   if(lazyPending(S.view)){ $('#main').innerHTML = `<div class="card" style="text-align:center;padding:28px 16px"><div style="font-size:32px">📊</div><p style="margin:8px 0 14px">На телефоне аналитика загружается только по запросу — так приложение работает быстрее.</p><button class="btn primary" data-lazyload="${S.view}">Загрузить</button></div>`; return; }
-  ({ pos:renderPos, sales:renderSales, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, photo:renderPhoto, day:renderDay, audit:renderAudit })[S.view]();
+  ({ pos:renderPos, sales:renderSales, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, photo:renderPhoto, day:renderDay, audit:renderAudit, bot:renderBot })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus({ preventScroll:true }); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
   if(y0 && Math.abs(scrollY - y0) > 2) scrollTo(0, y0);  // перерисовка не должна сбрасывать прокрутку
 }
@@ -3476,8 +3705,8 @@ document.addEventListener('change', async e => { if(S.view==='day' && e.target.i
 
 /* ---------- доступ к вкладкам по ролям ---------- */
 const ALL_TABS = [['pos','Продажа'],['analytics','Аналитика'],['shifts','Смены'],['cash','Расходы'],['sales','Чеки и возвраты'],['stock','Остатки (в «Складе»)'],['wh','Склад'],['certs','Сертификаты'],['bonus','Бонусные карты'],['nom','Номенклатура'],['site','Сайт'],['emps','Сотрудники']];
-const EXTRA_TABS = [['day','Мой день'],['attn','Требует внимания (в «Моём дне»)'],['photo','Фотосессия'],['pay','Зарплата'],['cons','Консультанты'],['po','Закуп'],['promo','Акции'],['content','Контент'],['flow','Путь товара'],['profit','Рентабельность']];
-const EXTRA_DEF = { day:['manager','purchaser','consultant','viewer','accountant'], attn:['manager','purchaser','viewer','accountant'], photo:['manager','purchaser'], pay:['manager','purchaser','viewer','accountant'], cons:['manager'], po:['manager','purchaser','viewer','accountant'], promo:['manager','purchaser','viewer','accountant'], content:['manager','purchaser','viewer'], flow:['manager','viewer','accountant'], profit:['viewer'] };
+const EXTRA_TABS = [['day','Мой день'],['attn','Требует внимания (в «Моём дне»)'],['photo','Фотосессия'],['pay','Зарплата'],['cons','Консультанты'],['po','Закуп'],['promo','Акции'],['content','Контент'],['flow','Путь товара'],['profit','Рентабельность'],['bot','Бот']];
+const EXTRA_DEF = { day:['manager','purchaser','consultant','viewer','accountant'], attn:['manager','purchaser','viewer','accountant'], photo:['manager','purchaser'], pay:['manager','purchaser','viewer','accountant'], cons:['manager'], po:['manager','purchaser','viewer','accountant'], promo:['manager','purchaser','viewer','accountant'], content:['manager','purchaser','viewer'], flow:['manager','viewer','accountant'], profit:['viewer'], bot:['manager'] };
 ALL_TABS.push(...EXTRA_TABS);
 const BOSS_ONLY = ['analytics','bonus','nom','site','emps'];
 function defaultTabs(role){ const boss = ['manager','viewer','accountant'].includes(role);
@@ -3862,6 +4091,7 @@ async function loadView0(){
   if(S.view==='me'){ render(); await loadMe(); render(); }
   if(S.view==='adm'){ render(); await loadAdm(); render(); }
   if(S.view==='audit'){ render(); await loadAudit(); render(); }
+  if(S.view==='bot'){ render(); await loadBot(); render(); }
   if(S.view==='flow'){ render(); await loadFlow(); render(); }
   if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); }
   if(S.view==='site'){ render(); await loadSite(); render(); }
@@ -4079,6 +4309,104 @@ document.addEventListener('click', async e => { if(S.view!=='audit') return; con
 document.addEventListener('change', async e => { if(S.view!=='audit' || e.target.id!=='au-actor') return; AU.actor = e.target.value; AU.rows = null; render(); await loadAudit(); render(); });
 document.addEventListener('input', e => { if(S.view!=='audit' || e.target.id!=='au-q') return; AU.q = e.target.value; clearTimeout(auTimer);
   auTimer = setTimeout(async () => { await loadAudit(); render(); }, 350); });
+
+/* ---------- Бот: сообщения и напоминалки консультантам (менеджер — только своим магазинам) ---------- */
+const BT = { st:null, busy:false, sel:null, target:'group', when:'now', at:'', text:'' };
+const BT_DAYS = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+const BT_TGT = { group:'В группу магазина', staff:'Лично консультантам', both:'В группу и лично' };
+const BT_TPL = ['Девочки, не забудьте отметить приход в боте 🟢','Перед закрытием пересчитайте кассу и сфотографируйте отчёт 🧾','Протрите витрины и зеркала перед открытием ✨','Сегодня новая выкладка — фото витрины пришлите в группу 📸','Спасибо за работу сегодня! 💛'];
+async function loadBot(){ const { data, error } = await sb.rpc('bot_state'); if(error){ toast(errText(error)); BT.st = { err:errText(error) }; return; }
+  BT.st = data; if(!BT.sel){ const sc = data.scope || []; BT.sel = sc.includes(S.store) && sc.length > 1 && !isBoss() ? [S.store] : [...sc]; } }
+async function botFn(body){ const { data, error } = await sb.functions.invoke('bot', { body }); if(error){ let m = errText(error); try{ const j = await error.context.json(); if(j && j.error) m = j.error; }catch(_){} throw new Error(m); } if(data && data.error) throw new Error(data.error); return data; }
+const btTime = d => d ? new Date(d).toLocaleString('ru-RU',{ timeZone:'Asia/Almaty', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
+const btStores = ids => (ids||[]).length === ((BT.st&&BT.st.scope)||[]).length && ids.length > 1 ? 'все мои магазины' : (ids||[]).map(id => esc(storeName(id))).join(', ');
+function btReach(ids, target){ const S2 = ((BT.st&&BT.st.stores)||[]).filter(s => (ids||[]).includes(s.id));
+  const g = S2.filter(s => s.chat).length, p = S2.reduce((a,s)=>a+(+s.staff_tg||0),0), all = S2.reduce((a,s)=>a+(+s.staff||0),0);
+  const parts = []; if(target!=='staff') parts.push(`групп: ${g} из ${S2.length}`); if(target!=='group') parts.push(`лично: ${p} из ${all} консультантов`);
+  return { txt: parts.join(' · '), none: (target==='staff' ? p : target==='group' ? g : g+p) === 0 }; }
+function renderBot(){
+  const D = BT.st;
+  if(!D){ $('#main').innerHTML = '<h2>Бот для консультантов</h2><div class="empty">Загружаем…</div>'; return; }
+  if(D.err){ $('#main').innerHTML = `<h2>Бот для консультантов</h2><div class="empty">${esc(D.err)}</div>`; return; }
+  const ST = D.stores || [], R = D.reminders || [], M = D.msgs || [], reach = btReach(BT.sel, BT.target);
+  const noTg = ST.reduce((a,s)=>a+(+s.staff||0)-(+s.staff_tg||0),0);
+  const chip = (id, on) => `<label class="chip ${on?'ok':''}" style="cursor:pointer;padding:4px 10px"><input type="checkbox" data-btst="${id}" ${on?'checked':''} style="margin-right:4px">${esc(storeName(id))}</label>`;
+  const stLbl = { scheduled:'⏳ запланировано', sending:'… отправляется', sent:'✅ отправлено', error:'⚠️ не отправлено', cancelled:'отменено' };
+  $('#main').innerHTML = `<h2>Бот для консультантов</h2>
+  <p class="meta" style="margin:2px 0 10px">Сообщения уходят от бота Silver в Telegram: в группу магазина и/или лично консультантам. ${noTg?`Лично пока получат не все: Telegram подключили не все консультанты (не подключено: ${noTg}). Консультанту нужно открыть бота и нажать «Старт» — номер телефона должен совпадать с номером в «Сотрудниках».`:''}</p>
+  <div class="card" style="margin-bottom:12px"><h3 style="margin-top:0">✉️ Написать</h3>
+    <div class="filters">${ST.map(s => chip(s.id, (BT.sel||[]).includes(s.id))).join('')}</div>
+    <div class="filters"><select id="bt-target" aria-label="Куда">${Object.entries(BT_TGT).map(([k,v])=>`<option value="${k}" ${BT.target===k?'selected':''}>${v}</option>`).join('')}</select>
+      <select id="bt-when" aria-label="Когда"><option value="now" ${BT.when==='now'?'selected':''}>Отправить сейчас</option><option value="later" ${BT.when==='later'?'selected':''}>Отправить позже</option></select>
+      ${BT.when==='later'?`<input type="datetime-local" id="bt-at" value="${esc(BT.at)}" aria-label="Дата и время">`:''}</div>
+    <textarea id="bt-text" rows="4" maxlength="3500" placeholder="Текст сообщения консультантам" style="width:100%;box-sizing:border-box">${esc(BT.text)}</textarea>
+    <div class="filters" style="margin-top:6px"><span class="meta">Быстрые:</span>${BT_TPL.map((t,i)=>`<button class="btn small" data-bttpl="${i}">${esc(t.length>34?t.slice(0,32)+'…':t)}</button>`).join('')}</div>
+    <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px"><button class="btn primary" id="bt-send" ${BT.busy?'disabled':''}>${BT.busy?'Отправляем…':BT.when==='later'?'Запланировать':'Отправить'}</button>
+      <span class="meta" style="${reach.none?'color:var(--bad)':''}">${reach.none?'Некому отправить — выберите другой способ':'Получат: '+reach.txt}</span></div></div>
+  <div class="card" style="margin-bottom:12px"><div class="row" style="flex-wrap:wrap"><h3 style="margin:0">⏰ Напоминалки</h3><button class="btn small" id="bt-radd">+ Добавить</button></div>
+    <p class="meta" style="margin:4px 0 8px">Бот сам отправляет их в выбранные дни и время (по Алматы/Астане).</p>
+    ${!R.length?'<div class="empty">Напоминалок пока нет. Например: «10:00 — отметьте приход», «21:45 — пересчитайте кассу».</div>':R.map(r=>`<div class="row" style="border-top:1px solid var(--line);padding:8px 0;flex-wrap:wrap;gap:8px;align-items:flex-start;${r.active?'':'opacity:.55'}">
+      <div style="min-width:64px"><b style="font-size:18px">${esc(String(r.at_time).slice(0,5))}</b><br><span class="meta">${(r.days||[]).length===7?'каждый день':(r.days||[]).map(d=>BT_DAYS[d-1]).join(' ')}</span></div>
+      <div style="flex:1;min-width:180px">${r.title?`<b>${esc(r.title)}</b><br>`:''}<span style="white-space:pre-wrap">${esc(r.text)}</span><br><span class="meta">${btStores(r.store_ids)} · ${BT_TGT[r.target]}${r.author?' · '+esc(r.author):''}</span></div>
+      <div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn small" data-brtog="${r.id}">${r.active?'Выключить':'Включить'}</button><button class="btn small" data-bred="${r.id}">Изменить</button><button class="btn small" data-brtest="${r.id}" title="Прислать пробу себе в Telegram">Проба мне</button><button class="btn small" data-brdel="${r.id}">Удалить</button></div></div>`).join('')}</div>
+  <div class="card" style="margin-bottom:12px"><h3 style="margin-top:0">📜 Отправленные и запланированные</h3>
+    ${!M.length?'<div class="empty">Сообщений пока не было</div>':M.map(m=>`<div style="border-top:1px solid var(--line);padding:8px 0">
+      <div class="meta">${stLbl[m.status]||esc(m.status)} · ${btTime(m.status==='scheduled'?m.send_at:(m.sent_at||m.created_at))}${m.reminder_id?' · напоминалка':''}${m.author?' · '+esc(m.author):''} · ${btStores(m.store_ids)} · ${BT_TGT[m.target]}${m.status==='sent'?' · доставлено: '+(m.sent||[]).length:''}${m.edited_at?' · исправлено':''}</div>
+      <div style="white-space:pre-wrap;margin:4px 0">${esc(m.text)}</div>${m.error?`<div class="meta" style="color:var(--bad)">${esc(m.error)}</div>`:''}
+      ${['scheduled','sent'].includes(m.status)?`<div class="row" style="gap:6px"><button class="btn small" data-bmed="${m.id}">Исправить</button><button class="btn small" data-bmdel="${m.id}">${m.status==='scheduled'?'Отменить':'Удалить из чатов'}</button></div>`:''}</div>`).join('')}</div>
+  <div class="card" style="margin-bottom:12px"><h3 style="margin-top:0">🤖 Бот присылает сам</h3><ul class="meta" style="margin:0;padding-left:18px;line-height:1.6">
+    <li>Отчёт о закрытии смены — владельцу, менеджерам и в группу отчётов.</li><li>Часы консультантов за день — менеджеру вечером, с кнопкой «Подтвердить».</li>
+    <li>Консультантам — кнопки «Пришла / Ушла со смены», «Отметить часы», «Моя зарплата».</li><li>Заявки, списания и расходы — руководителям.</li></ul></div>`;
+}
+function btRemModal(r){ r = r || { store_ids:[...(BT.sel||[])], title:'', text:'', at_time:'10:00', days:[1,2,3,4,5,6,7], target:'group', active:true };
+  const ST = (BT.st&&BT.st.stores)||[];
+  modal(`<h3 style="margin-top:0">${r.id?'Изменить':'Новая'} напоминалка</h3>
+  <label class="meta">Время <input type="time" id="br-time" value="${esc(String(r.at_time).slice(0,5))}"></label>
+  <div class="filters" style="margin-top:8px">${BT_DAYS.map((d,i)=>`<label class="chip" style="cursor:pointer;padding:4px 8px"><input type="checkbox" data-brday="${i+1}" ${(r.days||[]).includes(i+1)?'checked':''}> ${d}</label>`).join('')}</div>
+  <div class="filters">${ST.map(s=>`<label class="chip" style="cursor:pointer;padding:4px 8px"><input type="checkbox" data-brst="${s.id}" ${(r.store_ids||[]).includes(s.id)?'checked':''}> ${esc(storeName(s.id))}</label>`).join('')}</div>
+  <select id="br-target" style="margin-bottom:8px">${Object.entries(BT_TGT).map(([k,v])=>`<option value="${k}" ${r.target===k?'selected':''}>${v}</option>`).join('')}</select>
+  <input id="br-title" placeholder="Название (необязательно), например «Приход»" value="${esc(r.title)}" style="width:100%;box-sizing:border-box;margin-bottom:8px">
+  <textarea id="br-text" rows="4" maxlength="3500" placeholder="Текст напоминания" style="width:100%;box-sizing:border-box">${esc(r.text)}</textarea>
+  <div class="row" style="margin-top:10px;gap:8px;justify-content:flex-end"><button class="btn" data-close="1">Отмена</button><button class="btn primary" id="br-save" data-id="${r.id||''}" data-active="${r.active!==false}">Сохранить</button></div>`); }
+function btAsk(text, okTxt, run){ modal(`<p style="margin-top:0">${text}</p><div class="row" style="gap:8px;justify-content:flex-end"><button class="btn" data-close="1">Нет</button><button class="btn primary" id="bt-ok">${okTxt}</button></div>`); BT.ask = run; }
+function btEditModal(m){ modal(`<h3 style="margin-top:0">Исправить сообщение</h3>${m.status==='sent'?'<p class="meta">Текст поменяется прямо в Telegram, с пометкой «исправлено».</p>':''}
+  <textarea id="bm-text" rows="5" maxlength="3500" style="width:100%;box-sizing:border-box">${esc(m.text)}</textarea>
+  <div class="row" style="margin-top:10px;gap:8px;justify-content:flex-end"><button class="btn" data-close="1">Отмена</button><button class="btn primary" id="bm-save" data-id="${m.id}">Сохранить</button></div>`); }
+const btClose = () => { $('#modal').innerHTML = ''; };
+async function btReload(){ await loadBot(); if(S.view==='bot') render(); }
+document.addEventListener('click', async e => { if(S.view!=='bot') return; const t = e.target.closest('button'); if(!t) return; const D = BT.st || {};
+  const rem = id => (D.reminders||[]).find(r => r.id===id), msg = id => (D.msgs||[]).find(m => m.id===id);
+  try{
+    if(t.dataset.close){ btClose(); }
+    else if(t.dataset.bttpl!==undefined){ BT.text = BT_TPL[+t.dataset.bttpl]; render(); }
+    else if(t.id==='bt-send'){ BT.text = $('#bt-text').value; const text = BT.text.trim();
+      if(!text) return toast('Напишите текст'); if(!(BT.sel||[]).length) return toast('Выберите магазин');
+      let send_at = null; if(BT.when==='later'){ if(!BT.at) return toast('Укажите дату и время'); send_at = new Date(BT.at).toISOString(); }
+      BT.busy = true; render(); const r = await botFn({ action:'send', store_ids:BT.sel, target:BT.target, text, send_at }); BT.busy = false;
+      toast(r.scheduled ? 'Запланировано' : r.status==='sent' ? `Отправлено: ${r.sent}` : (r.error || 'Не отправлено')); BT.text = ''; await btReload(); }
+    else if(t.id==='bt-radd'){ btRemModal(); }
+    else if(t.dataset.bred){ btRemModal(rem(t.dataset.bred)); }
+    else if(t.id==='br-save'){ const days = [...document.querySelectorAll('[data-brday]:checked')].map(x=>+x.dataset.brday), st = [...document.querySelectorAll('[data-brst]:checked')].map(x=>+x.dataset.brst);
+      if(!days.length) return toast('Выберите дни'); if(!st.length) return toast('Выберите магазин'); if(!$('#br-text').value.trim()) return toast('Напишите текст');
+      const p = { store_ids:st, days, at_time:$('#br-time').value || '10:00', target:$('#br-target').value, title:$('#br-title').value.trim(), text:$('#br-text').value.trim(), active:t.dataset.active!=='false' };
+      if(t.dataset.id) p.id = t.dataset.id; t.disabled = true;
+      const { error } = await sb.rpc('bot_rem_save', { p }); if(error) { t.disabled = false; return toast(errText(error)); } btClose(); toast('Сохранено'); await btReload(); }
+    else if(t.dataset.brtog){ const r = rem(t.dataset.brtog); const { error } = await sb.rpc('bot_rem_save', { p:{ ...r, active:!r.active } }); if(error) return toast(errText(error)); await btReload(); }
+    else if(t.dataset.brtest){ t.disabled = true; const r = await botFn({ action:'test_reminder', id:t.dataset.brtest }); t.disabled = false; toast(r.ok ? 'Проба отправлена вам в Telegram' : 'Не получилось отправить'); }
+    else if(t.dataset.brdel){ const id = t.dataset.brdel; btAsk('Удалить эту напоминалку?', 'Удалить', async () => { const { error } = await sb.rpc('bot_rem_del', { p_id:id }); if(error) return toast(errText(error)); btClose(); await btReload(); }); }
+    else if(t.dataset.bmed){ btEditModal(msg(t.dataset.bmed)); }
+    else if(t.id==='bm-save'){ t.disabled = true; const r = await botFn({ action:'edit', id:t.dataset.id, text:$('#bm-text').value }); btClose(); toast(r.failed ? `Исправлено: ${r.edited||0}, не получилось: ${r.failed}` : 'Исправлено'); await btReload(); }
+    else if(t.dataset.bmdel){ const m = msg(t.dataset.bmdel); btAsk(m.status==='scheduled' ? 'Отменить отправку?' : 'Удалить это сообщение из чатов Telegram? Telegram позволяет удалять только сообщения младше 48 часов.', m.status==='scheduled' ? 'Отменить' : 'Удалить', async () => {
+        const r = await botFn({ action:'delete', id:m.id }); btClose(); toast(r.note || 'Готово'); await btReload(); }); }
+    else if(t.id==='bt-ok'){ const f = BT.ask; BT.ask = null; t.disabled = true; if(f) await f(); }
+  }catch(err){ BT.busy = false; toast(err.message || String(err)); render(); }
+});
+document.addEventListener('change', e => { if(S.view!=='bot') return; const t = e.target;
+  if(t.dataset.btst){ const id = +t.dataset.btst; BT.sel = t.checked ? [...new Set([...(BT.sel||[]), id])] : (BT.sel||[]).filter(x => x!==id); BT.text = ($('#bt-text')||{}).value ?? BT.text; render(); }
+  else if(t.id==='bt-target'){ BT.target = t.value; BT.text = $('#bt-text').value; render(); }
+  else if(t.id==='bt-when'){ BT.when = t.value; BT.text = $('#bt-text').value; render(); }
+  else if(t.id==='bt-at'){ BT.at = t.value; } });
+document.addEventListener('input', e => { if(S.view==='bot' && e.target.id==='bt-text') BT.text = e.target.value; });
 
 function renderAdm(){
   if(S.me.role!=='owner'){ $('#main').innerHTML = '<div class="empty">Нет доступа</div>'; return; }
