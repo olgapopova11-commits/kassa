@@ -4792,3 +4792,39 @@ function poCreateHtml(o, i){
 document.addEventListener('input', e => { if(S.view==='po' && e.target.id==='po-oq'){ PO.oq = e.target.value; PO.lim = 40; clearTimeout(PO.oqT); PO.oqT = setTimeout(render, 250); } });
 
 const poBulkOk = () => isBoss() && !isViewer();
+
+/* ---------- Liquid Glass: «капля» выделения перетекает к выбранному пункту во всех переключателях ---------- */
+const LG = { prev: {}, t: 0, enter: false };
+const lgHosts = () => document.querySelectorAll('nav.tabs, nav.subtabs, .seg');
+const lgSel = h => h.querySelector(':scope > button[aria-pressed="true"], :scope > button[aria-selected="true"]');
+const lgKey = h => h.matches('nav.tabs') ? 'tabs' : h.matches('nav.subtabs') ? 'sub' : (h.getAttribute('aria-label') || '') + '|' + [...(h.querySelector(':scope > button')||{attributes:[]}).attributes].map(a => a.name).filter(n => n.startsWith('data-')).join(',');
+const lgGeo = b => ({ l: b.offsetLeft, t: b.offsetTop, w: b.offsetWidth, h: b.offsetHeight });
+document.addEventListener('pointerdown', e => { const b = e.target.closest && e.target.closest('nav.tabs > button, nav.subtabs > button, .seg > button'); if(!b) return;
+  const h = b.parentElement, s = lgSel(h); if(s && s !== b){ LG.prev[lgKey(h)] = lgGeo(s); LG.t = Date.now(); }
+  if(h.matches('nav.tabs, nav.subtabs')) LG.enter = true; }, true);
+function lgSync(){
+  const rm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  for(const h of lgHosts()){
+    const s = lgSel(h); let blob = h.querySelector(':scope > .lg-blob');
+    if(!s){ if(blob) blob.style.opacity = '0'; continue; }
+    if(!blob){ blob = document.createElement('i'); blob.className = 'lg-blob'; blob.setAttribute('aria-hidden', 'true'); h.prepend(blob); }
+    h.classList.add('lg-on'); blob.style.opacity = '1';
+    const n = lgGeo(s), k = lgKey(h), p = LG.prev[k], cur = blob.dataset.g;
+    const g = n.l + ',' + n.t + ',' + n.w + ',' + n.h; if(cur === g && !p) continue;
+    Object.assign(blob.style, { left: n.l + 'px', top: n.t + 'px', width: n.w + 'px', height: n.h + 'px' }); blob.dataset.g = g;
+    if(p && Date.now() - LG.t < 1500 && !rm && (p.l !== n.l || p.t !== n.t)){
+      delete LG.prev[k];
+      const mw = (p.w + n.w) / 2 * 1.45, ml = (p.l + p.w / 2 + n.l + n.w / 2) / 2 - mw / 2;
+      blob.animate([
+        { left: p.l + 'px', top: p.t + 'px', width: p.w + 'px', height: p.h + 'px', transform: 'scaleY(1)' },
+        { offset: .42, left: ml + 'px', width: mw + 'px', transform: 'scaleY(.78)', filter: 'brightness(1.08)' },
+        { offset: .78, left: (n.l - 3) + 'px', width: (n.w + 6) + 'px', transform: 'scaleY(1.06)' },
+        { left: n.l + 'px', top: n.t + 'px', width: n.w + 'px', height: n.h + 'px', transform: 'scaleY(1)' }
+      ], { duration: 560, easing: 'cubic-bezier(.25,.9,.3,1)' });
+    }
+  }
+  if(LG.enter){ LG.enter = false; const m = document.getElementById('main'); if(m && !rm){ m.animate([{ opacity: 0, transform: 'translateY(8px) scale(.995)', filter: 'blur(4px)' }, { opacity: 1, transform: 'none', filter: 'blur(0)' }], { duration: 380, easing: 'cubic-bezier(.2,.8,.2,1)' }); } }
+}
+let lgQ = 0;
+new MutationObserver(() => { if(!lgQ) lgQ = requestAnimationFrame(() => { lgQ = 0; lgSync(); }); }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-pressed', 'aria-selected'] });
+addEventListener('resize', () => { for(const b of document.querySelectorAll('.lg-blob')) delete b.dataset.g; lgSync(); });
