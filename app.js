@@ -3511,7 +3511,8 @@ function beCell(x){
 }
 /* разбор ИИ (Claude) для владельца: ежедневный разбор (сервер, 08:05) + вопросы. Карточка — в самом верху «Моего дня» */
 const AN = { busy:false, text:'', q:'', st:null, key:false, d:null, dBusy:false, dErr:'' };
-function anOpen(){ try{ return localStorage.getItem('ai_daily_open')!=='0'; }catch(_){ return true; } }
+/* разбор ИИ всегда открывается свёрнутым; разворачивается по клику (состояние помним только до перезагрузки) */
+function anOpen(){ return !!AN.open; }
 function anFmt(t){ const out = []; let ul = false;
   for(const raw of String(t||'').split('\n')){ const l = raw.trim();
     const m = l.match(/^[-•*]\s+(.*)$/);
@@ -3546,13 +3547,13 @@ async function anErr(error){ let m = error.message; try{ m = (await error.contex
 async function anStatus(){ if(!AN.st){ const { data } = await sb.functions.invoke('content', { body:{ action:'status' } }); AN.st = data || { ai:false }; }
   if(AN.st.ai && !AN.d && !AN.dBusy){ const { data, error } = await sb.functions.invoke('content', { body:{ action:'daily_get' } }); AN.d = error ? { text:'', at:null } : (data || { text:'', at:null }); }
   if(S.view==='day') render(); }
-document.addEventListener('toggle', e => { if(e.target && e.target.id==='an-card'){ try{ localStorage.setItem('ai_daily_open', e.target.open?'1':'0'); }catch(_){} } }, true);
+document.addEventListener('toggle', e => { if(e.target && e.target.id==='an-card') AN.open = e.target.open; }, true);
 document.addEventListener('click', async e => { if(S.view!=='day') return; const t = e.target.closest('button'); if(!t) return;
   if(t.id==='an-key-save'){ const k = ($('#an-key').value||'').trim(); if(!k) return; t.disabled = true;
     const { error } = await sb.functions.invoke('content', { body:{ action:'set_key', key:k } });
     if(error){ t.disabled = false; return toast(await anErr(error)); }
     AN.st = null; AN.d = null; CT.ai = null; toast('Ключ Claude сохранён'); await anStatus(); }
-  else if(t.id==='an-daily'){ e.preventDefault(); e.stopPropagation(); AN.dBusy = true; AN.dErr = ''; try{ localStorage.setItem('ai_daily_open','1'); }catch(_){} render();
+  else if(t.id==='an-daily'){ e.preventDefault(); e.stopPropagation(); AN.dBusy = true; AN.dErr = ''; AN.open = true; render();
     const { data, error } = await sb.functions.invoke('content', { body:{ action:'daily' } }); AN.dBusy = false;
     if(error){ AN.dErr = await anErr(error); render(); return; }
     AN.d = { text:data.text||'', at:data.at }; render(); }
