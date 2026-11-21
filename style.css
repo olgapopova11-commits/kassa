@@ -388,3 +388,142 @@ h2{color:#2f4a3c}
 @media (prefers-reduced-motion: reduce){ .ld-pose img,.ld-pose .ld-sh,.ld-pose .ld-sp{animation:none} }
 .wu-one.wu-ok{border-left:4px solid var(--ok,#5e8f6a)}
 .wu-one.wu-bad{border-left:4px solid var(--bad,#c0623b)}
+
+/* ================= Liquid Glass (как в iOS 26): полупрозрачное «жидкое стекло» поверх светлого живого фона ================= */
+:root{
+  --font:-apple-system,"SF Pro Text","Golos Text",system-ui,"Segoe UI",sans-serif;
+  --g-fill:rgba(255,255,255,.52); --g-fill-strong:rgba(255,255,255,.72); --g-edge:rgba(255,255,255,.85);
+  --g-line:rgba(60,70,60,.10); --g-shadow:0 8px 32px rgba(40,60,50,.10),0 1.5px 4px rgba(40,60,50,.06);
+  --g-hi:inset 0 1px 0 rgba(255,255,255,.95),inset 0 -1px 0 rgba(255,255,255,.25);
+  --g-blur:blur(22px) saturate(180%);
+  --line:rgba(60,70,60,.12); --surface:rgba(255,255,255,.62); --soft:rgba(94,143,106,.12);
+  --accent:#3f8f66; --ink:#1f2a24; --muted:#6b7369;
+}
+body{font-family:var(--font);letter-spacing:-.01em;
+  background:
+    radial-gradient(700px 520px at 8% 4%, rgba(255,214,150,.55), transparent 60%),
+    radial-gradient(760px 560px at 96% 10%, rgba(150,205,235,.60), transparent 62%),
+    radial-gradient(820px 620px at 70% 96%, rgba(170,220,180,.55), transparent 62%),
+    radial-gradient(640px 480px at 2% 92%, rgba(245,190,205,.40), transparent 60%),
+    #f4f3ee;background-attachment:fixed}
+/* стеклянная поверхность */
+.card,.list,.cust,details.dd .dd-panel,.pc,.fl-stage,.storebar .filters{
+  background:var(--g-fill);border:1px solid var(--g-edge);box-shadow:var(--g-shadow),var(--g-hi);
+  -webkit-backdrop-filter:var(--g-blur);backdrop-filter:var(--g-blur);border-radius:22px}
+.card{padding:16px}
+.list{border-radius:20px}
+.prod{border-bottom-color:var(--g-line)} .prod:hover{background:rgba(255,255,255,.45)}
+h2{font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--ink)}
+/* шапка — плавающая стеклянная полоса */
+header{background:rgba(255,255,255,.55)!important;-webkit-backdrop-filter:var(--g-blur);backdrop-filter:var(--g-blur);
+  border-bottom:1px solid var(--g-edge);box-shadow:0 4px 24px rgba(40,60,50,.08),var(--g-hi)!important;color:var(--ink)}
+header .who{color:var(--muted)}
+header select,header .who button{background:rgba(255,255,255,.6)!important;border:1px solid var(--g-edge)!important;border-radius:999px!important;box-shadow:var(--g-hi)}
+/* нижнее меню — стеклянная «капсула», как таб-бар в iOS 26 */
+nav.tabs{left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom));padding:5px;border-radius:30px;border:1px solid var(--g-edge)!important;
+  background:rgba(255,255,255,.55)!important;-webkit-backdrop-filter:blur(26px) saturate(190%);backdrop-filter:blur(26px) saturate(190%);
+  box-shadow:0 10px 36px rgba(30,50,40,.16),var(--g-hi)!important;max-width:720px;margin:0 auto}
+nav.tabs button{border-radius:24px;color:#59625a;transition:background .25s,color .25s,transform .2s}
+nav.tabs button[aria-selected="true"]{color:var(--accent);box-shadow:none!important;background:rgba(255,255,255,.75);
+  box-shadow:inset 0 1px 0 #fff,0 2px 10px rgba(30,60,40,.10)!important}
+nav.tabs button:active{transform:scale(.94)}
+main{padding-bottom:110px}
+/* под-вкладки и переключатели — стеклянные капсулы */
+nav.subtabs button,.seg{background:var(--g-fill);border:1px solid var(--g-edge);box-shadow:var(--g-hi);-webkit-backdrop-filter:var(--g-blur);backdrop-filter:var(--g-blur)}
+nav.subtabs button{border-radius:999px}
+nav.subtabs button[aria-selected="true"]{background:var(--accent);border-color:rgba(255,255,255,.5);color:#fff;box-shadow:0 4px 14px rgba(63,143,102,.35),inset 0 1px 0 rgba(255,255,255,.4)}
+.seg{border-radius:999px;padding:3px}
+.seg button{border-radius:999px;border:0}
+.seg button[aria-pressed="true"]{background:#fff!important;color:var(--ink)!important;box-shadow:0 2px 8px rgba(30,50,40,.12)}
+/* кнопки */
+.btn{border-radius:999px;background:rgba(255,255,255,.6);border:1px solid var(--g-edge);box-shadow:var(--g-hi),0 1px 3px rgba(30,50,40,.06);
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);transition:transform .15s,box-shadow .2s,background .2s}
+.btn:hover{background:rgba(255,255,255,.8)}
+.btn:active{transform:scale(.96)}
+.btn.primary{background:linear-gradient(180deg,#53a67b,#3f8f66)!important;border-color:rgba(255,255,255,.45)!important;color:#fff;
+  box-shadow:0 6px 18px rgba(63,143,102,.35),inset 0 1px 0 rgba(255,255,255,.45)!important}
+/* поля ввода */
+input,select,textarea{background:rgba(255,255,255,.65);border:1px solid rgba(60,70,60,.12);border-radius:14px;box-shadow:inset 0 1px 2px rgba(30,50,40,.05)}
+input:focus,select:focus,textarea:focus{outline:none;border-color:rgba(63,143,102,.55);box-shadow:0 0 0 4px rgba(63,143,102,.15)}
+/* чипы */
+.chip{border-radius:999px;background:rgba(255,255,255,.55);border-color:var(--g-edge)}
+.chip.ok{background:rgba(79,170,110,.14);border-color:rgba(79,170,110,.35)} .chip.warn{background:rgba(220,160,40,.14);border-color:rgba(220,160,40,.4)} .chip.zero{background:rgba(210,80,60,.10);border-color:rgba(210,80,60,.35)}
+/* таблицы */
+th,td{border-bottom-color:var(--g-line)}
+/* окна и листы — толстое стекло */
+.overlay,.more-bg{background:rgba(30,40,35,.22)!important;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.dialog,.more-sheet{background:rgba(255,255,255,.72)!important;border:1px solid var(--g-edge);border-radius:28px!important;
+  -webkit-backdrop-filter:blur(30px) saturate(190%);backdrop-filter:blur(30px) saturate(190%);box-shadow:0 24px 60px rgba(30,50,40,.22),var(--g-hi)}
+.dialog-foot{background:rgba(255,255,255,.7);-webkit-backdrop-filter:var(--g-blur);backdrop-filter:var(--g-blur);border-top-color:var(--g-line)}
+.more-sheet{bottom:calc(84px + env(safe-area-inset-bottom))}
+.more-sheet button{background:rgba(255,255,255,.6);border:1px solid var(--g-edge);border-radius:18px;box-shadow:var(--g-hi)}
+.toast{background:rgba(30,40,35,.78);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border-radius:999px;bottom:calc(92px + env(safe-area-inset-bottom));box-shadow:0 10px 30px rgba(0,0,0,.2)}
+.wu-one.wu-ok{border-left:1px solid var(--g-edge);box-shadow:var(--g-shadow),var(--g-hi),inset 4px 0 0 rgba(79,170,110,.75)}
+.wu-one.wu-bad{border-left:1px solid var(--g-edge);box-shadow:var(--g-shadow),var(--g-hi),inset 4px 0 0 rgba(220,110,70,.8)}
+/* браузеры без backdrop-filter — делаем стекло плотнее, чтобы текст читался */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .card,.list,.cust,header,nav.tabs,.dialog,.more-sheet{background:rgba(255,255,255,.9)!important} }
+@media (max-width:760px){ nav.tabs{left:8px;right:8px;border-radius:26px} .card{border-radius:20px;padding:14px} }
+@media print{ body{background:#fff} .card,.list{box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none} }
+.scroll:has(>table){background:var(--g-fill);border:1px solid var(--g-edge);border-radius:20px;box-shadow:var(--g-shadow),var(--g-hi);-webkit-backdrop-filter:var(--g-blur);backdrop-filter:var(--g-blur);padding:2px 4px}
+.scroll:has(>table) tr:last-child td{border-bottom:0}
+.card .scroll:has(>table){background:none;border:0;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none;padding:0}
+
+/* ================= Apple: шрифт, системные цвета iOS, значки как SF Symbols ================= */
+:root{
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Golos Text",system-ui,"Segoe UI",sans-serif;
+  --accent:#007AFF; --accent-ink:#fff; --ok:#34C759; --warn:#FF9500; --bad:#FF3B30; --sun:#FF9500;
+  --ink:#000; --muted:rgba(60,60,67,.6); --line:rgba(60,60,67,.18); --g-line:rgba(60,60,67,.12); --soft:rgba(0,122,255,.10);
+}
+body{font-size:15px;line-height:1.38;letter-spacing:-.015em;-webkit-font-smoothing:antialiased;color:#000;
+  background:
+    radial-gradient(800px 560px at 6% 0%, rgba(255,204,170,.45), transparent 60%),
+    radial-gradient(820px 600px at 100% 8%, rgba(160,200,255,.55), transparent 62%),
+    radial-gradient(900px 640px at 72% 100%, rgba(190,170,255,.38), transparent 62%),
+    radial-gradient(700px 520px at 0% 95%, rgba(170,230,210,.40), transparent 60%),
+    #F2F2F7;background-attachment:fixed}
+/* типографика iOS: крупный заголовок, вторичный серый, без капслока */
+h2{font-size:28px;font-weight:700;letter-spacing:-.025em;color:#000}
+h3{font-size:20px;font-weight:600;letter-spacing:-.02em}
+.meta{color:var(--muted);font-size:13px}
+.label,th{text-transform:none;letter-spacing:-.005em;font-size:13px;color:var(--muted);font-weight:400}
+b,strong{font-weight:600}
+.num,td.num{font-variant-numeric:tabular-nums}
+/* шапка: просто «Silver», как заголовок приложения */
+header .brand{font-size:17px;font-weight:600;letter-spacing:-.02em}
+header .brand::before,header .brand::after{content:none!important;display:none!important}
+header .who button{color:var(--accent)!important;font-weight:500}
+.net{background:rgba(52,199,89,.15)!important;color:#248A3D!important;font-weight:600}
+.net.off{background:rgba(255,59,48,.14)!important;color:#D70015!important}
+/* нижний таб-бар: иконки SF, синий активный */
+nav.tabs button{font-size:11px;font-weight:500;color:rgba(60,60,67,.65);gap:3px}
+nav.tabs button[aria-selected="true"]{color:var(--accent)}
+nav.tabs .ico{font-size:0;line-height:0}
+nav.tabs .ico .sf{width:24px;height:24px;stroke-width:1.8}
+/* кнопки iOS */
+.btn{font-weight:500;color:var(--accent)}
+.btn.primary{background:var(--accent)!important;border-color:rgba(255,255,255,.35)!important;color:#fff;box-shadow:0 6px 16px rgba(0,122,255,.30),inset 0 1px 0 rgba(255,255,255,.35)!important}
+.btn.primary:hover{background:#0A84FF!important}
+nav.subtabs button{font-weight:500}
+nav.subtabs button[aria-selected="true"]{background:var(--accent);box-shadow:0 4px 14px rgba(0,122,255,.30),inset 0 1px 0 rgba(255,255,255,.35)}
+.seg{background:rgba(118,118,128,.12)!important;border-color:transparent!important;box-shadow:none!important}
+.seg button{font-weight:500;color:#000}
+.seg button[aria-pressed="true"]{background:#fff!important;box-shadow:0 3px 8px rgba(0,0,0,.12),0 3px 1px rgba(0,0,0,.04)!important}
+input:focus,select:focus,textarea:focus{border-color:rgba(0,122,255,.6);box-shadow:0 0 0 4px rgba(0,122,255,.15)}
+:focus-visible{outline-color:var(--accent)}
+/* «таблички» — бейджи в цветах iOS */
+.chip{font-size:12px;font-weight:500;padding:2px 8px;border:0;background:rgba(118,118,128,.12);color:rgba(60,60,67,.85)}
+.chip.ok{background:rgba(52,199,89,.15);color:#248A3D} .chip.warn{background:rgba(255,149,0,.15);color:#C93400} .chip.zero{background:rgba(255,59,48,.12);color:#D70015}
+/* значки SF */
+.sf{width:1.15em;height:1.15em;vertical-align:-.2em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;display:inline-block;flex:none}
+.sf-ok{color:var(--ok)} .sf-warn{color:var(--warn)} .sf-bad{color:var(--bad)}
+.btn .sf{stroke-width:2.2}
+h2 .sf,h3 .sf,summary .sf,.card>b .sf{color:var(--accent)}
+.sf-t{display:inline}
+/* карточки статуса Wipon — полоска цвета iOS */
+.wu-one.wu-ok{box-shadow:var(--g-shadow),var(--g-hi),inset 4px 0 0 var(--ok)}
+.wu-one.wu-bad{box-shadow:var(--g-shadow),var(--g-hi),inset 4px 0 0 var(--warn)}
+/* таблицы — как сгруппированные списки iOS */
+th,td{padding:11px 10px}
+tr:hover td{background:rgba(0,122,255,.035)}
+.toast{font-weight:500}

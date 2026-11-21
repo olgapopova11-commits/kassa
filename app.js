@@ -326,6 +326,75 @@ let ldQ = 0;
 function ldScan(){ ldQ = 0; if(document.body) ldDefs(); document.querySelectorAll('.empty:not([data-ld]), p.meta:not([data-ld])').forEach(el => {
   if(el.children.length > 2 || !LD_RE.test(el.textContent.trim())) return; el.dataset.ld = '1'; el.classList.add('ld-box'); el.insertAdjacentHTML('afterbegin', ldHtml()); }); }
 new MutationObserver(() => { if(!ldQ) ldQ = requestAnimationFrame(ldScan); }).observe(document.documentElement, { childList:true, subtree:true });
+/* Значки в стиле Apple (SF Symbols): эмодзи в интерфейсе заменяются на тонкие линейные иконки, цвет — по тексту */
+const SF_P = {
+  check:'<path d="M20 6 9 17l-5-5"/>', checkc:'<circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/>', x:'<path d="M18 6 6 18M6 6l12 12"/>',
+  spark:'<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/>',
+  warn:'<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  cam:'<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3.5"/>',
+  gift:'<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/>',
+  pen:'<path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>', search:'<circle cx="11" cy="11" r="7.5"/><path d="m21 21-4.3-4.3"/>',
+  up:'<path d="M12 19V5M5 12l7-7 7 7"/>', down:'<path d="M12 5v14M19 12l-7 7-7-7"/>',
+  box:'<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+  truck:'<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2M15 18H9M19 18h2a1 1 0 0 0 1-1v-3.6l-3.7-4.6A1 1 0 0 0 17.5 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>',
+  money:'<circle cx="12" cy="12" r="9.5"/><path d="M14.8 9.3c-.5-.9-1.5-1.4-2.8-1.4-1.6 0-2.7.8-2.7 2s1 1.7 2.7 2.1 2.7.9 2.7 2.1-1.1 2-2.7 2c-1.2 0-2.3-.5-2.8-1.5M12 6.3v1.6M12 16.1v1.6"/>',
+  book:'<path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/>',
+  trend:'<path d="M3 3v18h18"/><path d="m7 14 4-4 4 4 5-6"/>', bars:'<path d="M3 3v18h18M8 17v-5M13 17V8M18 17V5"/>',
+  receipt:'<path d="M4 2v20l3-2 3 2 3-2 3 2 3-2 1 1V2l-1 1-3-2-3 2-3-2-3 2z"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+  refresh:'<path d="M21 12a9 9 0 0 1-15.5 6.3L3 16M3 12a9 9 0 0 1 15.5-6.3L21 8M21 3v5h-5M3 21v-5h5"/>',
+  bulb:'<path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/>',
+  cal:'<rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon:'<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/>', eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  plane:'<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>',
+  bell:'<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/>', plus:'<path d="M12 5v14M5 12h14"/>', minus:'<path d="M5 12h14"/>',
+  tag:'<path d="M12 2H2v10l9.3 9.3a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7" cy="7" r="1.5"/>',
+  star:'<path fill="currentColor" d="m12 2 3.1 6.3 6.9 1-5 4.8 1.2 6.9-6.2-3.2L5.8 21 7 14.1 2 9.3l6.9-1z"/>',
+  link:'<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  dotg:'<circle cx="12" cy="12" r="6" fill="#34C759" stroke="none"/>', dotw:'<circle cx="12" cy="12" r="6" fill="#C7C7CC" stroke="none"/>',
+  buoy:'<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><path d="m4.9 4.9 4.2 4.2M14.8 14.8l4.2 4.2M14.8 9.2l4.2-4.2M4.9 19.1l4.2-4.2"/>',
+  cloud:'<path d="M17.5 19H9a7 7 0 1 1 6.7-9h1.8a4.5 4.5 0 1 1 0 9z"/>', key:'<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
+  globe:'<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20"/>',
+  flame:'<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.4-.5-2-1-3-1.1-2.1-.2-4.1 2-6 .5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.2.4-2.3 1-3.2.4 1.3 1.3 2.2 2.5 2.7z"/>',
+  trophy:'<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.7V17c0 .6-.5 1-1 1.2-1.2.5-2 2-2 3.8M14 14.7V17c0 .6.5 1 1 1.2 1.2.5 2 2 2 3.8M18 2H6v7a6 6 0 0 0 12 0z"/>',
+  net:'<circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M12 11.5l-5.3 5.6M12 11.5l5.3 5.6"/>',
+  people:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
+  card:'<rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20"/>', menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',
+  store:'<path d="M3 9l1.5-5h15L21 9M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0M5 12v9h14v-9M10 21v-5h4v5"/>',
+  cart:'<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2 2h2l2.6 12.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L22 6H5.1"/>',
+  bag:'<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0"/>',
+  mail:'<rect x="2" y="4" width="20" height="16" rx="2.5"/><path d="m22 7-10 6L2 7"/>',
+  trash:'<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  clip:'<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
+  scale:'<path d="M12 3v18M5 21h14M3 7h18M6 7l-3 7a3 3 0 0 0 6 0zM18 7l-3 7a3 3 0 0 0 6 0z"/>',
+  monitor:'<rect x="2" y="3" width="20" height="14" rx="2.5"/><path d="M8 21h8M12 17v4"/>',
+  archive:'<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/>',
+  ruler:'<path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0zM14.5 12.5l2-2M11.5 9.5l2-2M8.5 6.5l2-2M17.5 15.5l2-2"/>',
+  chev:'<path d="m9 18 6-6-6-6"/>', bolt:'<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>', ban:'<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+  grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  phone:'<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
+  clock:'<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>', pause:'<circle cx="12" cy="12" r="10"/><path d="M10 9v6M14 9v6"/>',
+  gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  heart:'<path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z"/>',
+  chat:'<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/>', lock:'<rect x="3" y="11" width="18" height="11" rx="2.5"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  mega:'<path d="m3 11 18-5v12L3 14zM11.6 16.8a3 3 0 1 1-5.8-1.6"/>'
+};
+const SF_E = { '✓':'check','✔':'check','✅':'checkc','✕':'x','✗':'x','❌':'x','✖':'x','✨':'spark','🎉':'spark','⚠':'warn','📷':'cam','📸':'cam','🎁':'gift','✎':'pen','✍':'pen','✏':'pen','📝':'pen',
+  '🔍':'search','🔎':'search','⬆':'up','📤':'up','⬇':'down','📥':'down','📦':'box','🚚':'truck','🚛':'truck','💰':'money','💵':'money','📖':'book','📚':'book','📜':'book','📈':'trend','📊':'bars',
+  '🧾':'receipt','🔁':'refresh','🔄':'refresh','💡':'bulb','📅':'cal','🗓':'cal','☀':'sun','🌙':'moon','☾':'moon','👁':'eye','✈':'plane','🛎':'bell','🔔':'bell','➕':'plus','➖':'minus','🏷':'tag',
+  '★':'star','⭐':'star','🔗':'link','🟢':'dotg','⚪':'dotw','🛟':'buoy','☁':'cloud','🔑':'key','🌐':'globe','🔥':'flame','🏆':'trophy','🕸':'net','👥':'people','👤':'people','💳':'card','☰':'menu',
+  '🏬':'store','🏪':'store','🛒':'cart','🛍':'bag','📨':'mail','✉':'mail','📧':'mail','🗑':'trash','📋':'clip','⚖':'scale','📟':'monitor','🖥':'monitor','🗄':'archive','📏':'ruler','👉':'chev','⚡':'bolt',
+  '🚫':'ban','🧩':'grid','📞':'phone','🕐':'clock','⏰':'clock','⏳':'clock','✋':'pause','⚙':'gear','💛':'heart','❤':'heart','🤖':'chat','💬':'chat','🔒':'lock','📣':'mega','📢':'mega' };
+const SF_RE = new RegExp('(' + Object.keys(SF_E).map(k => k.replace(/[*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')\\uFE0F?', 'g');
+const SF_TONE = { checkc:'ok', dotg:'', warn:'warn', x:'', ban:'bad', flame:'warn', star:'warn', heart:'bad' };
+const sfSvg = n => `<svg class="sf${SF_TONE[n]?' sf-'+SF_TONE[n]:''}" viewBox="0 0 24 24" aria-hidden="true">${SF_P[n]}</svg>`;
+function sfScan(root){ if(!root || root.nodeType!==1) return; const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: t => { const p = t.parentElement; if(!p || p.closest('textarea,input,select,option,script,style,svg,[contenteditable],.no-sf,title')) return NodeFilter.FILTER_REJECT; SF_RE.lastIndex = 0; return SF_RE.test(t.data) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP; } });
+  const list = []; while(w.nextNode()) list.push(w.currentNode);
+  for(const t of list){ const span = document.createElement('span'); span.className = 'sf-t'; span.innerHTML = esc(t.data).replace(SF_RE, (m, e) => sfSvg(SF_E[e])); t.replaceWith(span); } }
+let sfQ = 0; const sfPend = new Set();
+new MutationObserver(ms => { for(const m of ms) for(const n of m.addedNodes) if(n.nodeType===1) sfPend.add(n); else if(n.nodeType===3 && n.parentElement) sfPend.add(n.parentElement);
+  if(!sfQ) sfQ = requestAnimationFrame(() => { sfQ = 0; const a = [...sfPend]; sfPend.clear(); for(const n of a) if(n.isConnected) sfScan(n); }); }).observe(document.documentElement, { childList:true, subtree:true });
+document.addEventListener('DOMContentLoaded', () => sfScan(document.body));
 const brCls = p => p && p.brand==='moon' ? ' br-moon' : p && p.brand==='sunshine' ? ' br-sun' : p && p.brand==='both' ? ' br-both' : '';
 const thumb = p => p.photo_url ? `<img class="thumb${brCls(p)}" referrerpolicy="no-referrer" src="${esc(thumbUrl(p.photo_url))}" data-full="${esc(p.photo_url)}" alt="" loading="lazy" decoding="async" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full">` : `<span class="thumb${brCls(p)}"></span>`;
 function errText(e){ return (e && (e.message || e.error_description)) || String(e); }
@@ -3620,8 +3689,6 @@ function pulseHtml(P){
 </details>
     <h3 style="margin:16px 0 6px">Где застряла работа <span class="meta">— только просрочки и то, что не в списках команды</span></h3>
     ${stuck.length?`<div class="stack" style="gap:6px">${stuck.map(([n,t,v])=>`<div class="card row" style="flex-wrap:wrap;gap:8px;padding:8px 12px"><span style="flex:1;min-width:200px">${t}</span><span class="chip warn">${(+n).toLocaleString('ru-RU')}</span><button class="btn small" data-pulsego="${v}">Открыть →</button></div>`).join('')}</div>`:'<div class="card">✅ Ничего не застряло</div>'}
-    <h3 style="margin:16px 0 6px">Ходовые товары закончились <span class="meta">— продавались за 30 дней, на остатке 0</span></h3>
-    ${(P.hot_out||[]).length?`<div class="scroll"><table><tbody>${P.hot_out.map(p=>`<tr><td>${thumb(p)}</td><td>${esc(p.name)}<br><span class="meta num">${esc(p.barcode||'')}</span></td><td class="num">продано ${p.sold30} шт.</td></tr>`).join('')}</tbody></table></div><button class="btn small" data-pulsego="po:suggest" style="margin-top:6px">Открыть «Что дозаказать» →</button>`:'<div class="card">✅ Все ходовые в наличии</div>'}
     <h3 style="margin:16px 0 6px">Команда: что сделано за вчера и сегодня</h3>
     ${(P.team||[]).length?`<div class="scroll"><table><tbody>${P.team.map(m=>`<tr><td><b>${esc(m.name)}</b><br><span class="meta">${esc(ROLE[m.role]||m.role||'')}</span></td><td>${Object.entries(m.acts||{}).map(([a,c])=>`<span class="chip">${esc(a)}: ${c}</span>`).join(' ')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="card meta">За вчера и сегодня действий в Silver не было (приёмки, перемещения, списания, заказы). Продажи идут через Wipon и видны в таблице магазинов выше.</div>'}
     <p class="meta" style="margin-top:10px">Обновлено ${new Date(P.at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}. Задачи сотрудников — переключите «Посмотреть как» выше.</p>`;
