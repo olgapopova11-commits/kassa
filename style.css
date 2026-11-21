@@ -373,3 +373,18 @@ h2{color:#2f4a3c}
 @keyframes ld-drip{0%{transform:translateY(0);opacity:0}15%{opacity:1}100%{transform:translateY(14px);opacity:0}}
 @keyframes ld-perk{from{transform:rotate(28deg)}to{transform:rotate(-12deg)}}
 @media (prefers-reduced-motion:reduce){.ld *{animation:none!important}}
+
+/* «Сильвер» — талисман на загрузках */
+.ld.ld-pose{position:relative;width:104px;height:104px;margin:6px auto 4px}
+.ld-pose img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;transform-origin:50% 100%;animation:ld-sil 2.6s ease-in-out infinite;-webkit-user-drag:none}
+.ld-pose .ld-sh{position:absolute;left:50%;bottom:0;width:64px;height:10px;margin-left:-32px;border-radius:50%;background:radial-gradient(closest-side,rgba(120,95,55,.22),rgba(120,95,55,0));animation:ld-silsh 2.6s ease-in-out infinite}
+.ld-pose .ld-sp{position:absolute;width:7px;height:7px;background:#e9b949;clip-path:polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%);opacity:0;animation:ld-silsp 2.4s ease-in-out infinite}
+.ld-pose .ld-sp:nth-of-type(1){left:6%;top:22%}
+.ld-pose .ld-sp:nth-of-type(2){right:4%;top:10%;animation-delay:.8s;width:9px;height:9px}
+.ld-pose .ld-sp:nth-of-type(3){right:12%;top:58%;animation-delay:1.6s}
+@keyframes ld-sil{0%,100%{transform:translateY(0) rotate(-1.5deg)}50%{transform:translateY(-6px) rotate(1.5deg)}}
+@keyframes ld-silsh{0%,100%{transform:scaleX(1);opacity:1}50%{transform:scaleX(.82);opacity:.7}}
+@keyframes ld-silsp{0%,100%{opacity:0;transform:scale(.3)}45%{opacity:1;transform:scale(1)}}
+@media (prefers-reduced-motion: reduce){ .ld-pose img,.ld-pose .ld-sh,.ld-pose .ld-sp{animation:none} }
+.wu-one.wu-ok{border-left:4px solid var(--ok,#5e8f6a)}
+.wu-one.wu-bad{border-left:4px solid var(--bad,#c0623b)}

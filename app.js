@@ -318,7 +318,9 @@ var LD_SVG=(function(){
   return sc;
 })();
 
-function ldHtml(){return '<span class="ld">'+LD_SVG[Math.floor(Math.random()*LD_SVG.length)]+'</span>'}
+/* «Сильвер» — талисман Olga: 45 поз (Storage product-photos/silver-mascot), на загрузке случайная поза покачивается, рядом искорки */
+const LD_POSES = 'basket_fly fly_leaf_glow goggles_fly hug_glow_leaf jump_swirl leaf_umbrella loupe_jewelry magician magnifier_hat p01_polish_ring p02_breathe_ring p03_magnifier p04_try_ring p05_mirror p06_earrings_pillow p07_jewelry_box p08_gift_bow p09_shopping_bag p19_chest_light p20_catch_ring p21_mill p22_balloon_pump p23_progress_pull p24_hourglass p25_pocket_watch p26_knitting p27_typewriter p28_write_book p29_big_book p30_card_drawer p31_water_sprout p32_stir_pot p33_big_coin p34_blocks p35_wind_toy p36_bicycle polish_bracelet read_book ride_leaf ride_leaf_happy sit_leaf_boat sleep thinking waiter_tray wipe_glass'.split(' ');
+function ldHtml(){ const p = LD_POSES[Math.floor(Math.random()*LD_POSES.length)]; return '<span class="ld ld-pose" aria-hidden="true"><i class="ld-sh"></i><img src="https://ottuadjdksxipfjytlyv.supabase.co/storage/v1/object/public/product-photos/silver-mascot/'+p+'.webp" alt="" decoding="async"><b class="ld-sp"></b><b class="ld-sp"></b><b class="ld-sp"></b></span>' }
 const LD_RE = /(Загруж|загруж|Считаем|Собираем|Ищем|Проверяю|Проверяем|Готовим|Обновляем)[^.!?]*…\s*$/;
 let ldQ = 0;
 function ldScan(){ ldQ = 0; if(document.body) ldDefs(); document.querySelectorAll('.empty:not([data-ld]), p.meta:not([data-ld])').forEach(el => {
@@ -2323,18 +2325,40 @@ function wuSrvLine(){ const v = WU.srv; if(!v) return '';
   if(v.active) return `<span class="chip ok" title="${esc(v.last_error||'')}">🟢 Обновляется сервером · последнее обновление ${hm(v.last_ok_at)}</span>${v.last_error?` <span class="chip warn" title="${esc(v.last_error)}">была ошибка ${hm(v.last_error_at)}</span>`:''}${wuBfLine(v)}`;
   return ''; }
 /* блок «Обновление данных из Wipon» для «Моего дня» владельца: когда последний раз пришли чеки и остатки + закладка */
-function wiponSyncHtml(){
-  if(S.me && S.me.role!=='owner' && S.me.role!=='consultant'){ const v = WU.srv; return v && (v.expired || (!v.active && v.set_at)) ? wuSrvLine() : ''; }
-  if(!S.me || S.me.role!=='owner') return '';
-  const sv = WU.srv, srvWarn = sv && (sv.expired || (!sv.active && sv.set_at));
-  const L = WU.last || {}, ago = t => { if(!t) return '<span class="chip zero">нет</span>'; const h = (Date.now() - new Date(t)) / 36e5; return `<span class="chip ${h>3?'warn':'ok'}">${wuDt(t)}</span>`; };
-  return `<details class="card" style="margin-top:14px" ${WU.dopen?'open':''} id="wu-day"><summary style="cursor:pointer"><b>🔄 Обновление данных из Wipon</b> <span class="meta">— ${sv&&sv.active?'сервер сам забирает чеки каждые 15 мин и остатки раз в час, вкладку Wipon держать открытой не нужно':'чеки каждые 15 мин, остатки раз в час'}</span> ${sv&&sv.active?wuSrvLine():''}</summary>
-    ${srvWarn?wuSrvLine():''}
-    <div class="scroll" style="margin-top:8px"><table><thead><tr><th>Магазин</th><th>Чеки обновлены</th><th>Остатки обновлены</th></tr></thead><tbody>
-    ${S.allStores.map(x=>`<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td>${ago((L['sales:'+x.id]||{}).at)}</td><td>${ago((L['stock:'+x.id]||{}).at)}</td></tr>`).join('')}</tbody></table></div>
-    <div class="cust stack" style="gap:6px;margin-top:8px"><span class="meta">${sv&&sv.set_at?'':'<b>Обновите закладку: нажмите «Получить закладку» и замените старую</b> — новая один раз передаёт сеанс Wipon серверу, и дальше Silver обновляется сам, даже когда вкладка Wipon закрыта. '}Как включить: 1) «Получить закладку» и перетащите кнопку на панель закладок Chrome (старую удалите). 2) Откройте console.wipon.kz и нажмите закладку. 3) Переключитесь внизу кабинета по очереди на каждое ИП — включая старое ИП «Луна» (MOON Курмангазы 33 до января 2026) — и на каждом нажмите закладку ещё раз: сервер будет обновлять текущие ИП и загрузит историю продаж за 2025 год. Когда Wipon завершит сеанс (выход из кабинета, смена пароля), Silver покажет предупреждение — тогда войдите в Wipon и нажмите закладку снова.</span>
-      <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">${WU.bm?`<a class="btn small primary" href="${esc(WU.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Wipon</a><span class="meta">← перетащите на панель закладок</span>`:`<button class="btn small" id="wu-bm">Получить закладку</button>`}</div></div></details>`;
+/* Wipon — одна кнопка и одна галочка: «Все данные получены» / «Получены не все» + причина простыми словами */
+function wuState(){ const v = WU.srv; if(!v) return null;
+  const hm = t => t ? new Date(t).toLocaleString('ru-RU',{ day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Asia/Almaty' }) : '—';
+  const sn = ids => (ids||[]).map(i => { const x = S.allStores.find(s => s.id===i); return x ? (BRAND[x.brand]||'')+' '+x.address : ''; }).filter(Boolean).join(', ');
+  const why = []; let bm = false;
+  if(v.expired || !v.active){ why.push(v.set_at ? 'сеанс Wipon закончился — чеки не приходят. Откройте console.wipon.kz и нажмите закладку «Silver ← Wipon»' : 'Wipon ещё не подключён — откройте console.wipon.kz и нажмите закладку «Silver ← Wipon»'); bm = true; }
+  else {
+    const old = !v.last_ok_at || Date.now() - new Date(v.last_ok_at) > 45*6e4;
+    if(old) why.push('сервер давно не получал данные (последний раз '+hm(v.last_ok_at)+') — нажмите «Обновить сейчас»');
+    for(const c of (v.cabs||[])){ if(c.legacy) continue; const w = sn(c.stores) || ('кабинет '+(c.company||c.emp));
+      if(!c.ok) why.push(w+': Wipon ответил ошибкой'+(c.err?' ('+c.err+')':''));
+      else if(c.noitems) why.push(w+': суммы чеков пришли, но Wipon не показывает, какие товары проданы ('+c.noitems+' чек.) — выручка верная, а остатки и аналитика по товарам неполные. Обычно это права пользователя в Wipon (раздел «Продажи») или старый сеанс — нажмите закладку в кабинете Wipon этого ИП'); }
+  }
+  return { ok: !why.length, why, bm, at: hm(v.last_ok_at) };
 }
+function wiponSyncHtml(){
+  if(!S.me || !['owner','manager','purchaser'].includes(S.me.role)) return '';
+  const st = wuState(), busy = WU.pulling;
+  const btn = `<button class="btn small${st&&!st.ok?' primary':''}" id="wu-pull" ${busy?'disabled':''}>${busy?'⏳ Обновляем…':'🔄 Обновить сейчас'}</button>`;
+  if(!st) return `<div class="card wu-one" style="margin:12px 0"><div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap"><span><b>Данные Wipon</b> <span class="meta">проверяем…</span></span>${btn}</div></div>`;
+  return `<div class="card wu-one ${st.ok?'wu-ok':'wu-bad'}" style="margin:12px 0"><div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap">
+    <span style="font-size:1.05em">${st.ok?`✅ <b>Все данные получены</b> <span class="meta">· обновлено ${st.at} · дальше сервер обновляет сам каждые 15 мин</span>`:`⚠️ <b>Получены не все данные</b>`}</span>${btn}</div>
+    ${st.ok?'':`<ul class="meta" style="margin:8px 0 0 18px;padding:0">${st.why.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>`}
+    ${WU.pmsg?`<div class="meta" style="margin-top:6px">${esc(WU.pmsg)}</div>`:''}
+    ${st.bm&&S.me.role==='owner'?`<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:8px">${WU.bm?`<a class="btn small primary" href="${esc(WU.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Wipon</a><span class="meta">← перетащите на панель закладок (старую удалите)</span>`:`<button class="btn small" id="wu-bm">Получить закладку</button>`}</div>`:''}</div>`;
+}
+document.addEventListener('click', async e => { const t = e.target.closest && e.target.closest('#wu-pull'); if(!t || WU.pulling) return;
+  WU.pulling = true; WU.pmsg = ''; render();
+  const { data, error } = await sb.functions.invoke('wipon_srv', { body:{ action:'pull_now' } }).catch(err => ({ error:err }));
+  WU.pulling = false;
+  if(error || !data) WU.pmsg = 'Не получилось: ' + errText(error || 'нет ответа');
+  else if(data.error && !data.sales) WU.pmsg = data.error;
+  else WU.pmsg = 'Новых чеков: ' + (data.sales||0) + (data.refunds ? ', возвратов: ' + data.refunds : '') + ' · ' + new Date().toLocaleTimeString('ru-RU',{ hour:'2-digit', minute:'2-digit' });
+  await wuLoadSrv(); if(S.view==='day' && typeof loadPulse==='function' && S.me.role==='owner') loadPulse(); render(); });
 document.addEventListener('toggle', e => { if(e.target && e.target.id==='wu-day') WU.dopen = e.target.open; }, true);
 const wuDt = v => v ? new Date(v).toLocaleString('ru-RU',{ day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Asia/Almaty' }) : '—';
 const wiponOk = () => S.me && (['owner','manager','purchaser'].includes(S.me.role));
@@ -3674,7 +3698,7 @@ function renderDay(){
   const today = new Date().toLocaleDateString('ru-RU',{timeZone:'Asia/Almaty',weekday:'long',day:'numeric',month:'long'});
   if(r==='own'){ $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="help-open">📖 Инструкции</button><button class="btn small" id="day-ref">Обновить</button></div>
     <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><span class="meta">Посмотреть как:</span><div class="seg" style="display:inline-flex">${DAY_ROLES.map(([k,t])=>`<button data-dayrole="${k}" aria-pressed="${k===r}">${t}</button>`).join('')}</div></div>
-    ${anHtml()}${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${DAY.pulse?bkRemind():''}${S.canAttn?attnHtml(true,'own'):''}${wiponSyncHtml()}`; DAY.items = []; return; }
+    ${wiponSyncHtml()}${anHtml()}${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${DAY.pulse?bkRemind():''}${S.canAttn?attnHtml(true,'own'):''}`; DAY.items = []; return; }
   let items = D ? [...(D[r]||[])] : [];
   if(r==='buy'){ const sg = DAY.sug && DAY.sug!=='wait' ? DAY.sug : null;
     items.unshift({ k:'sug', t:'Дозаказать — товар заканчивается', n: sg ? sg.n : 1, wait: !sg, h: sg ? (sg.n ? `Всего ${sg.units.toLocaleString('ru-RU')} шт. Удобно формировать заказ сразу по поставщику.` : '') : 'Считаем…', go:'po', mode:'suggest', lvl:'warn' }); }
