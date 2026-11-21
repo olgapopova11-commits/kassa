@@ -544,3 +544,8 @@ nav.subtabs.lg-on>button[aria-selected="true"]{color:#fff}
 /* меню «Ещё» внутри нижней панели: стекло панели не должно запирать затемнение и лист внутри себя */
 nav.tabs:has(.more-sheet){-webkit-backdrop-filter:none!important;backdrop-filter:none!important;background:rgba(255,255,255,.94)!important}
 nav.tabs .more-bg{border-radius:0}
+/* нижнее меню на телефоне: своё слой-окно, чтобы не «ползало» при прокрутке и повороте экрана */
+nav.tabs{-webkit-transform:translate3d(0,0,0);transform:translate3d(0,0,0);left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right))}
+nav.tabs:has(.more-sheet){-webkit-transform:none;transform:none}
+@media (hover:none){ body{background-attachment:scroll} }
+@media (max-width:760px){ nav.tabs{left:max(8px,env(safe-area-inset-left));right:max(8px,env(safe-area-inset-right))} }

@@ -43,7 +43,7 @@ function storeFilterHtml(){
   return `<div class="filters" style="align-items:center">
     ${groups.map(([k,t])=>`<button class="btn small" data-sgroup="${k}">${t}</button>`).join('')}
     ${S.stores.map(st=>`<label class="chip ${sel.includes(st.id)?'ok':''}" style="cursor:pointer;padding:4px 10px"><input type="checkbox" data-sone="${st.id}" ${sel.includes(st.id)?'checked':''} style="margin-right:4px">${esc(BRAND[st.brand]+' · '+st.address)}</label>`).join('')}
-    <span class="meta">${all?'выбраны все магазины':'выбрано: '+sel.length}</span></div>`;
+    <span class="meta">${all?'выбраны все магазины — нажмите на магазин, чтобы смотреть только его':'выбрано: '+sel.length+' · нажатие добавляет или убирает магазин'}</span></div>`;
 }
 async function onSelChange(){
   ls.set('kassa_sel', S.sel);
@@ -3917,7 +3917,8 @@ document.addEventListener('click', async e => {
   else if(d.eoff){ updEmp(d.eoff, { official:t.checked }); }
   else if(d.estores){ const [eid, sid] = d.estores.split(':'); const e = S.emps.find(x=>x.id===eid); if(e){ const cur = new Set(e.store_ids||(e.home_store_id?[e.home_store_id]:[])); t.checked ? cur.add(+sid) : cur.delete(+sid); e.store_ids=[...cur].sort((a,b)=>a-b); updEmp(eid, { store_ids: e.store_ids }); const sm=t.closest('details.dd'); if(sm) sm.querySelector('summary').textContent=ddSummary(e.store_ids); } }
   else if(d.sgroup){ const g=d.sgroup; S.sel = S.stores.filter(st => g==='all' || st.brand===g || st.city===g).map(st=>st.id); onSelChange(); }
-  else if(d.sone){ const id=+d.sone; selStores(); S.sel = t.checked ? [...new Set([...S.sel, id])] : S.sel.filter(x=>x!==id); if(!S.sel.length) S.sel=[id]; onSelChange(); }
+  else if(d.sone){ const id=+d.sone; const wasAll = selStores().length === S.stores.length; // были выбраны все — нажатие на магазин оставляет только его; дальше нажатия добавляют/убирают
+    S.sel = wasAll ? [id] : t.checked ? [...new Set([...S.sel, id])] : S.sel.filter(x=>x!==id); if(!S.sel.length) S.sel=[id]; onSelChange(); }
   else if(t.id==='nm-new'){ nmOpen({}); }
   else if(d.nmsort){ const f = S.nm, k = d.nmsort; if(f.sort===k) f.desc = !f.desc; else { f.sort = k; f.desc = ['cost','price','stock','site'].includes(k); } f.off = 0; render(); await loadNom(); render(); }
   else if(t.id==='nm-close') nmClose();
@@ -4827,4 +4828,4 @@ function lgSync(){
 }
 let lgQ = 0;
 new MutationObserver(() => { if(!lgQ) lgQ = requestAnimationFrame(() => { lgQ = 0; lgSync(); }); }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-pressed', 'aria-selected'] });
-addEventListener('resize', () => { for(const b of document.querySelectorAll('.lg-blob')) delete b.dataset.g; lgSync(); });
+let lgW = innerWidth; addEventListener('resize', () => { if(innerWidth === lgW) return; lgW = innerWidth; for(const b of document.querySelectorAll('.lg-blob')) delete b.dataset.g; lgSync(); }); // высота меняется при прокрутке на телефоне (панель браузера) — каплю не трогаем
