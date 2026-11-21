@@ -2405,7 +2405,7 @@ function wuState(){ const v = WU.srv; if(!v) return null;
     if(old) why.push('сервер давно не получал данные (последний раз '+hm(v.last_ok_at)+') — нажмите «Обновить сейчас»');
     for(const c of (v.cabs||[])){ if(c.legacy) continue; const w = sn(c.stores) || ('кабинет '+(c.company||c.emp));
       if(!c.ok) why.push(w+': Wipon ответил ошибкой'+(c.err?' ('+c.err+')':''));
-      else if(c.noitems) why.push(w+': суммы чеков пришли, но Wipon не показывает, какие товары проданы ('+c.noitems+' чек.) — выручка верная, а остатки и аналитика по товарам неполные. Обычно это права пользователя в Wipon (раздел «Продажи») или старый сеанс — нажмите закладку в кабинете Wipon этого ИП'); }
+      else if(c.noitems) why.push(w+': суммы чеков пришли, а список проданных товаров — нет ('+c.noitems+' чек.). Выручка верная. Wipon отдаёт товары только по тому ИП, которое выбрано при входе: откройте Wipon, переключитесь на это ИП и нажмите закладку «Silver ← Wipon» — дальше Silver запомнит сеанс этого ИП'); }
   }
   return { ok: !why.length, why, bm, at: hm(v.last_ok_at) };
 }
