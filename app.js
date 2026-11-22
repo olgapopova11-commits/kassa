@@ -2434,7 +2434,7 @@ const syncKinds = () => ['owner','purchaser'].includes(S.me && S.me.role) ? ['wi
 async function syncAll(auto){
   if(SYNC.busy) return; SYNC.busy = true; if(!auto) render();
   try{
-    for(const k of syncKinds()){
+    for(const k of syncKinds().filter(k => !auto || k !== 'wipon')){   // авто — только Китай и Alibaba (Wipon сервер обновляет сам каждые 15 мин)
       SYNC.step = k; if(!auto) render();
       if(k === 'wipon'){
         const st0 = wuState();
@@ -2443,13 +2443,13 @@ async function syncAll(auto){
         await wuLoadSrv();
       } else if(extOn()){
         const key = await sb.rpc('po_sync_key'); const r = key.data ? await extRun(k, key.data) : { ok:false, text:errText(key.error||'нет доступа') };
-        syncSave(k, !!r.ok, r.text); CHN.last = null;
+        syncSave(k, !!r.ok, !r.ok && /не дождалась/.test(r.text||'') ? (k==='china'?'1688':'Alibaba') + ' просит проверку «сдвиньте ползунок»: откройте сайт, пройдите её и нажмите «Обновить сейчас»' : r.text); CHN.last = null;
       }
     }
     try{ localStorage.setItem('silver_auto_at', String(Date.now())); }catch(_){ }
   } finally { SYNC.busy = false; SYNC.step = null; if(S.view==='day'){ if(typeof loadPulse==='function' && S.me.role==='owner') loadPulse(); render(); } }
 }
-function syncAuto(){ if(!extOn() || SYNC.busy) return; let t = 0; try{ t = +localStorage.getItem('silver_auto_at') || 0; }catch(_){ } if(Date.now() - t > 36e5) setTimeout(() => syncAll(true), 3000); }
+function syncAuto(){ if(!extOn() || SYNC.busy) return; let t = 0; try{ t = +localStorage.getItem('silver_auto_at') || 0; }catch(_){ } if(Date.now() - t > 216e5) setTimeout(() => syncAll(true), 3000); }   // авто раз в 6 часов: чаще 1688 начинает просить проверку
 document.addEventListener('click', e => { if(e.target.closest && e.target.closest('#sync-all')) syncAll(false); });
 function dataHtml(){
   if(!S.me || !['owner','manager','purchaser'].includes(S.me.role)) return '';
