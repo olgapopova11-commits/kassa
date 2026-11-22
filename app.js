@@ -2409,6 +2409,20 @@ function wuState(){ const v = WU.srv; if(!v) return null;
   }
   return { ok: !why.length, why, bm, at: hm(v.last_ok_at) };
 }
+/* заказы Китай (1688) и Alibaba на главной: загрузка выгрузки одной кнопкой + дата последнего заказа в Silver */
+const CHN = { last:null, loading:false };
+async function cnLoad(){ if(CHN.loading) return; CHN.loading = true;
+  const { data } = await sb.from('purchase_orders').select('created_at,source').in('source',['1688','alibaba']).order('created_at',{ ascending:false }).limit(1);
+  CHN.last = (data||[])[0] || { none:true }; CHN.loading = false; if(S.view==='day') render(); }
+function chinaHtml(){
+  if(!S.me || !['owner','purchaser'].includes(S.me.role)) return '';
+  if(!CHN.last) cnLoad();
+  const L = CHN.last && !CHN.last.none ? new Date(CHN.last.created_at).toLocaleDateString('ru-RU',{ day:'2-digit', month:'2-digit', timeZone:'Asia/Almaty' }) : null;
+  return `<div class="card" style="margin:12px 0"><div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap">
+    <span><b>Заказы Китай и Alibaba</b> <span class="meta">${L ? '· последний заказ в Silver от '+L : CHN.last ? '· заказов ещё нет' : ''}</span></span>
+    <label class="btn small primary" style="cursor:pointer">⬆ Загрузить выгрузку<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label></div>
+    ${PO.imp?`<div class="meta" style="margin-top:6px">${esc(PO.imp)}</div>`:`<div class="meta" style="margin-top:6px">1688: «已买到的货品» → «导出». Alibaba: My Orders → Export. Файл можно загрузить любой — повторы Silver пропустит.</div>`}</div>`;
+}
 function wiponSyncHtml(){
   if(!S.me || !['owner','manager','purchaser'].includes(S.me.role)) return '';
   const st = wuState(), busy = WU.pulling;
@@ -2418,7 +2432,7 @@ function wiponSyncHtml(){
     <span style="font-size:1.05em">${st.ok?`✅ <b>Все данные получены</b> <span class="meta">· последнее обновление ${st.at} · сервер обновляет сам каждые 15 мин</span>`:`⚠️ <b>Получены не все данные</b> <span class="meta">· последнее обновление ${st.at}</span>`}</span>${btn}</div>
     ${st.ok?'':`<ul class="meta" style="margin:8px 0 0 18px;padding:0">${st.why.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>`}
     ${WU.pmsg?`<div class="meta" style="margin-top:6px">${esc(WU.pmsg)}</div>`:''}
-    ${st.bm&&S.me.role==='owner'?`<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:8px">${WU.bm?`<a class="btn small primary" href="${esc(WU.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Wipon</a><span class="meta">← перетащите на панель закладок (старую удалите)</span>`:`<button class="btn small" id="wu-bm">Получить закладку</button>`}</div>`:''}</div>`;
+    ${st.bm&&['owner','manager','purchaser'].includes(S.me.role)?`<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:8px">${WU.bm?`<a class="btn small primary" href="${esc(WU.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Wipon</a><span class="meta">← перетащите на панель закладок (старую удалите)</span>`:`<button class="btn small" id="wu-bm">Получить закладку</button>`}</div>`:''}</div>`;
 }
 document.addEventListener('click', async e => { const t = e.target.closest && e.target.closest('#wu-pull'); if(!t || WU.pulling) return;
   WU.pulling = true; WU.pmsg = ''; render();
@@ -2441,7 +2455,7 @@ function wiponUpHtml(kind){
     <div class="scroll" style="margin-top:8px"><table><thead><tr><th>Магазин</th><th>Последняя загрузка</th>${kind==='sales'?'<th>Продажи в Silver по</th>':''}<th>Кто загрузил</th></tr></thead><tbody>
       ${S.allStores.map(x=>{ const l = last(x.id); return `<tr><td>${esc(BRAND[x.brand]+' · '+x.address)}</td><td class="num">${l?wuDt(l.at):'—'}</td>${kind==='sales'?`<td class="num">${l&&l.to?wuDt(l.to):'—'}</td>`:''}<td>${l&&l.by?esc(l.by):'<span class="meta">—</span>'}</td></tr>`; }).join('')}</tbody></table></div>
     <div class="stack" style="margin-top:8px">
-      ${kind==='sales'&&S.me.role==='owner'?`<div class="cust stack" style="gap:6px"><b>⚡ Автозагрузка прямо из кабинета Wipon — без Excel</b>
+      ${kind==='sales'&&['owner','manager','purchaser'].includes(S.me.role)?`<div class="cust stack" style="gap:6px"><b>⚡ Автозагрузка прямо из кабинета Wipon — без Excel</b>
         <span class="meta">1) Нажмите «Получить закладку» и перетащите появившуюся кнопку на панель закладок Chrome. 2) Откройте console.wipon.kz и нажмите эту закладку. Чеки и возвраты за последние 3 дня сразу попадут в Silver, дальше — каждые 15 минут, а остатки по всем складам — раз в час, пока вкладка Wipon открыта. Внизу справа в Wipon видно время последней загрузки. Переключитесь в кабинете на второе ИП (внизу) хотя бы раз, пока работает закладка, — дальше оба ИП обновляются вместе. Если закладку обновили — перезагрузите страницу Wipon и нажмите её снова.</span>
         <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">${WU.bm?`<a class="btn small primary" href="${esc(WU.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Wipon</a><span class="meta">← перетащите на панель закладок</span>`:`<button class="btn small" id="wu-bm">Получить закладку</button>`}</div></div>`:''}
       <span class="meta">${kind==='sales'?'Выгрузите продажи магазина из Wipon за любой период и загрузите файл. Дубликатов не будет: Silver проверяет номер каждого чека Wipon и добавляет только те, которых ещё нет. Даже если тот же файл или пересекающийся период загрузят случайно ещё раз — повторные чеки просто пропустятся.':'Выгрузите остатки магазина из Wipon и загрузите файл. Остатки этого магазина в Silver станут такими же, как в файле. Новые штрихкоды добавятся в базу товаров.'}</span>
@@ -3795,7 +3809,7 @@ function renderDay(){
   const today = new Date().toLocaleDateString('ru-RU',{timeZone:'Asia/Almaty',weekday:'long',day:'numeric',month:'long'});
   if(r==='own'){ $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="help-open">📖 Инструкции</button><button class="btn small" id="day-ref">Обновить</button></div>
     <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><span class="meta">Посмотреть как:</span><div class="seg" style="display:inline-flex">${DAY_ROLES.map(([k,t])=>`<button data-dayrole="${k}" aria-pressed="${k===r}">${t}</button>`).join('')}</div></div>
-    ${wiponSyncHtml()}${anHtml()}${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${DAY.pulse?bkRemind():''}${S.canAttn?attnHtml(true,'own'):''}`; DAY.items = []; return; }
+    ${wiponSyncHtml()}${chinaHtml()}${anHtml()}${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${DAY.pulse?bkRemind():''}${S.canAttn?attnHtml(true,'own'):''}`; DAY.items = []; return; }
   let items = D ? [...(D[r]||[])] : [];
   if(r==='buy'){ const sg = DAY.sug && DAY.sug!=='wait' ? DAY.sug : null;
     items.unshift({ k:'sug', t:'Дозаказать — товар заканчивается', n: sg ? sg.n : 1, wait: !sg, h: sg ? (sg.n ? `Всего ${sg.units.toLocaleString('ru-RU')} шт. Удобно формировать заказ сразу по поставщику.` : '') : 'Считаем…', go:'po', mode:'suggest', lvl:'warn' }); }
@@ -3807,13 +3821,15 @@ function renderDay(){
   $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="help-open">📖 Инструкции</button><button class="btn small" id="day-ref">Обновить</button></div>
     ${own?`<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><span class="meta">Посмотреть как:</span><div class="seg" style="display:inline-flex">${DAY_ROLES.map(([k,t])=>`<button data-dayrole="${k}" aria-pressed="${k===r}">${t}</button>`).join('')}</div>
       ${r==='sell'?`<select id="day-store" aria-label="Магазин">${(S.stores||[]).map(s=>`<option value="${s.id}" ${s.id===st?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select>`:''}</div>`:''}
+    ${r!=='sell'?wiponSyncHtml():''}
     <p class="meta" style="margin:4px 0 12px">${r==='sell'?'Дела по магазину '+esc(storeName(st)):r==='buy'?'Дела по закупу, по всем магазинам':'Дела по вашим магазинам'}. Нажмите «Открыть» — попадёте сразу туда, где это делается. Сделанное уходит вниз само.</p>
     ${!D?'<div class="empty">Собираем дела…</div>':`${todo.length?`<div class="stack" style="gap:8px">${todo.map(i=>`<div class="card row" style="flex-wrap:wrap;gap:10px;border-left:4px solid ${col[i.lvl]||col['']}"><div style="flex:1;min-width:220px"><b>${esc(i.t)}</b>${i.wait||i.k==='open'||i.k==='close'?'':` <span class="chip ${i.lvl==='bad'?'zero':'warn'}">${(+i.n).toLocaleString('ru-RU')}</span>`}${i.h?`<br><span class="meta">${esc(i.h)}</span>`:''}</div><button class="btn small primary" data-daygo="${esc(i.k)}" ${i.wait?'disabled':''}>Открыть →</button></div>`).join('')}</div>`
       :'<div class="card" style="text-align:center;padding:24px">✅ На сегодня всё сделано</div>'}
     ${done.length?`<details style="margin-top:14px"><summary class="meta" style="cursor:pointer">Сделано: ${done.length}</summary><div class="stack" style="gap:4px;margin-top:6px">${done.map(i=>`<div class="meta">✓ ${esc(i.t)}</div>`).join('')}</div></details>`:''}`}
+    ${r==='buy' ? chinaHtml() : ''}
     ${r!=='sell' && DAY.spulse ? storesHtml(DAY.spulse, true) : r!=='sell' && DAY.spulseWait ? '<div class="empty">Собираем продажи…</div>' : ''}
     ${S.canAttn && r!=='sell' ? attnHtml(true, r) : ''}
-    ${wiponSyncHtml()}`;
+`;
 }
 document.addEventListener('click', async e => { if(S.view!=='day') return; const t = e.target.closest('button'); if(!t) return;
   if(t.id==='day-ref'){ DAY.data = null; DAY.sug = null; DAY.pulse = null; DAY.ai = null; S.attn = null; render(); await loadDay(); render(); }
@@ -4723,7 +4739,7 @@ async function import1688(file){
       const { data, error } = await sb.rpc('po_import_1688', { p: orders.slice(i, i+80) });
       if(error) throw error; for(const k in tot) tot[k] += +(data||{})[k]||0;
     }
-    PO.imp = `Готово: новых заказов ${tot.new}, обновлено ${tot.updated}. Позиций ${tot.items}, из них сразу связано с базой ${tot.linked}. Остальные свяжите при приёмке — Silver запомнит связь для следующих заказов.`;
+    CHN.last = null; PO.imp = `Готово: новых заказов ${tot.new}, обновлено ${tot.updated}. Позиций ${tot.items}, из них сразу связано с базой ${tot.linked}. Остальные свяжите при приёмке — Silver запомнит связь для следующих заказов.`;
     PO.mode = 'orders'; PO.filter = 'open'; PO.list = null; await loadPo(); render();
     if('Translator' in self) translate1688();   // сразу переводим новые названия на русский
   }catch(e){ PO.imp = 'Не загрузилось: '+errText(e); render(); }
@@ -4740,7 +4756,7 @@ async function importAlibaba(A, h){
   const tot = { new:0, updated:0, items:0, linked:0 };
   for(let i=0; i<orders.length; i+=10){ PO.imp = `Загружаем заказы Alibaba: ${i} из ${orders.length}…`; render();
     const { data, error } = await sb.rpc('po_import_alibaba', { p: orders.slice(i, i+10) }); if(error) throw error; for(const k in tot) tot[k] += +(data||{})[k]||0; }
-  PO.imp = `Alibaba: новых заказов ${tot.new}, обновлено ${tot.updated}. Позиций ${tot.items}, сразу связано с базой ${tot.linked}. Остальные свяжите при приёмке — Silver запомнит связь.`;
+  CHN.last = null; PO.imp = `Alibaba: новых заказов ${tot.new}, обновлено ${tot.updated}. Позиций ${tot.items}, сразу связано с базой ${tot.linked}. Остальные свяжите при приёмке — Silver запомнит связь.`;
   PO.mode = 'orders'; PO.filter = 'open'; PO.list = null; await loadPo(); render();
 }
 // перевод китайских названий на русский — встроенным переводчиком Chrome (бесплатно, прямо на компьютере)
