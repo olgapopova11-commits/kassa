@@ -2399,13 +2399,13 @@ function wuState(){ const v = WU.srv; if(!v) return null;
   const hm = t => t ? new Date(t).toLocaleString('ru-RU',{ day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Asia/Almaty' }) : '—';
   const sn = ids => (ids||[]).map(i => { const x = S.allStores.find(s => s.id===i); return x ? (BRAND[x.brand]||'')+' '+x.address : ''; }).filter(Boolean).join(', ');
   const why = []; let bm = false;
-  if(v.expired || !v.active){ why.push(v.set_at ? 'сеанс Wipon закончился — чеки не приходят. Откройте console.wipon.kz и нажмите закладку «Silver ← Wipon»' : 'Wipon ещё не подключён — откройте console.wipon.kz и нажмите закладку «Silver ← Wipon»'); bm = true; }
+  if(v.expired || !v.active){ why.push(v.set_at ? 'Сеанс Wipon закончился — нажмите закладку в Wipon' : 'Wipon не подключён — нажмите закладку в Wipon'); bm = true; }
   else {
     const old = !v.last_ok_at || Date.now() - new Date(v.last_ok_at) > 45*6e4;
-    if(old) why.push('сервер давно не получал данные (последний раз '+hm(v.last_ok_at)+') — нажмите «Обновить сейчас»');
-    for(const c of (v.cabs||[])){ if(c.legacy) continue; const w = sn(c.stores) || ('кабинет '+(c.company||c.emp));
-      if(!c.ok) why.push(w+': Wipon ответил ошибкой'+(c.err?' ('+c.err+')':''));
-      else if(c.noitems) why.push(w+': суммы чеков пришли, а список проданных товаров — нет ('+c.noitems+' чек.). Выручка верная. Wipon отдаёт товары только по тому ИП, которое выбрано при входе: откройте Wipon, переключитесь на это ИП и нажмите закладку «Silver ← Wipon» — дальше Silver запомнит сеанс этого ИП'); }
+    if(old) why.push('Давно не обновлялось — нажмите «Обновить сейчас»');
+    for(const c of (v.cabs||[])){ if(c.legacy) continue; const cs = [...new Set((c.stores||[]).map(i => [4,5,7].includes(+i) ? 'Астана' : 'Алматы'))]; const w = cs.join(', ') || ('кабинет '+(c.company||c.emp));
+      if(!c.ok) why.push(w+': ошибка Wipon');
+      else if(c.noitems) why.push(w+': без списка товаров ('+c.noitems+' чек.) — выберите это ИП в Wipon и нажмите закладку'); }
   }
   return { ok: !why.length, why, bm, at: hm(v.last_ok_at) };
 }
@@ -3566,14 +3566,18 @@ const DAY_ROLES = [['own','Владелец'],['mgr','Менеджер мага�
 const dayDefRole = () => ({ owner:'own', viewer:'own', purchaser:'buy', consultant:'sell' })[S.me.role] || 'mgr';
 async function loadDay(){
   if(!DAY.role) DAY.role = dayDefRole();
+  // сводку показываем сразу из прошлого раза, свежую грузим параллельно с делами (раньше шло по очереди и долго)
+  if(DAY.role==='own'){ if(!DAY.pulse){ const c = ls.get('silver_pulse', null); if(c){ DAY.pulse = c; render(); } } loadPulse(); }
+  else if(DAY.role!=='sell' && S.me.role!=='consultant') loadSPulse();
   const { data, error } = await sb.rpc('my_day', { p_store: DAY.store || S.store || null });
   if(error){ toast(errText(error)); DAY.data = { mgr:[], buy:[], sell:[] }; } else DAY.data = data;
   if(DAY.role==='buy') loadDaySug();
   if(S.me.role==='owner') wuLoadLast(); else if(S.me.role!=='consultant' && !WU.srv) wuLoadSrv();
-  if(DAY.role==='own') loadPulse();
   if(S.canAttn && !S.attn) loadAttn().then(() => { if(S.view==='day') render(); });
 }
-async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; if(S.view==='day') render(); if(!data.ai) loadAiSpend(); loadCashStat(); anStatus(); bkInfo(); }
+async function loadSPulse(){ if(!DAY.spulse){ DAY.spulse = ls.get('silver_spulse', null); DAY.spulseWait = !DAY.spulse; }
+  const { data, error } = await sb.rpc('sales_pulse'); DAY.spulseWait = false; if(!error && data){ DAY.spulse = data; ls.set('silver_spulse', data); } if(S.view==='day') render(); }
+async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; ls.set('silver_pulse', data); if(S.view==='day') render(); if(!data.ai) loadAiSpend(); loadCashStat(); anStatus(); bkInfo(); }
 /* наличные в кассе: остаток по тетради + наличные продажи Wipon с тех пор − расходы, внесённые в Silver */
 async function loadCashStat(){ const { data, error } = await sb.rpc('cash_status'); if(error) return; DAY.cash = {}; (data||[]).forEach(c => DAY.cash[c.store] = c); if(['day','cash'].includes(S.view)) render(); }
 function cashCell(x){ const c = (DAY.cash||{})[x.id]; if(!c) return '<span class="meta">…</span>'; if(c.est_kzt == null) return '<span class="meta">нет данных</span>';
@@ -3659,23 +3663,12 @@ document.addEventListener('click', async e => { if(S.view!=='day') return; const
 document.addEventListener('click', e => { const t = e.target.closest && e.target.closest('button[data-pday]'); if(!t || S.view!=='day') return; DAY.pday = t.dataset.pday; render(); });
 document.addEventListener('click', e => { const t = e.target.closest && e.target.closest('button[data-pgrp]'); if(!t || S.view!=='day') return; DAY.pgrp = t.dataset.pgrp; try{ localStorage.setItem('silver_pgrp', DAY.pgrp); }catch(_){} render(); });
 try{ DAY.pgrp = localStorage.getItem('silver_pgrp') || 'all'; }catch(_){}
-function pulseHtml(P){
-  if(!P) return '<div class="empty">Собираем картину по сети…</div>';
+/* сводка по магазинам: владельцу — с наличными в кассе; менеджеру и закупу (lite) — только продажи */
+function storesHtml(P, lite){
   const St = P.stores || [], sum = k => St.reduce((a,x)=>a+(+x[k]||0),0), pct = (a,b) => b>0 ? Math.round((a-b)/b*100) : null;
   const chip = v => v==null ? '<span class="meta">—</span>' : `<span class="chip ${v>=0?'ok':'zero'}">${v>0?'+':''}${v}%</span>`;
-  const T = sum('today'), W = sum('week_ago'), M = sum('mtd'), MP = sum('mtd_prev'), C = sum('chk_today');
   const yd = DAY.pday==='y' && St.some(x => 'yday' in x);
-  const fresh = t => { if(!t) return '<span class="chip zero">нет</span>'; const h = (Date.now()-new Date(t))/36e5; return `<span class="chip ${h>3?'warn':'ok'}">${h<1?'<1 ч':Math.round(h)+' ч'} назад</span>`; };
-  // владельцу — только просрочки и то, что не входит ни в чей список; обычные дела менеджера и закупа не дублируем
-  const k = P.stuck || {}, stuck = [
-    [k.transit_old, 'Просрочено у менеджера: товар в пути не принят дольше 4 дней', 'wh'], [k.transfers_old, 'Просрочено у менеджера: перемещения не приняты дольше 3 дней', 'wh'],
-    [k.writeoffs_old, 'Ваше решение: списания ждут дольше 2 дней', 'wh'], [k.negative, 'Отрицательные остатки — проверить пересортицу (ни в чьём списке)', 'wh:stock'] ].filter(x => +x[0] > 0);
-  const tile = (t, v, sub) => `<div class="card" style="flex:1;min-width:170px;padding:10px 12px"><div class="meta">${t}</div><div style="font-size:22px;font-weight:700" class="num">${v}</div><div class="meta">${sub}</div></div>`;
-  return `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:stretch">
-      ${tile('Выручка сегодня', fmt(T), `${chip(pct(T,W))} к прошлой неделе на это время`)}
-      ${tile('Чеков сегодня', C.toLocaleString('ru-RU'), T&&C?'средний чек '+fmt(Math.round(T/C)):'')}
-      ${tile('С начала месяца', fmt(M), `${chip(pct(M,MP))} к тому же периоду прошлого месяца`)}${aiTile(P)}</div>
-    <div class="row" style="margin:16px 0 6px;gap:10px;flex-wrap:wrap;justify-content:flex-start"><h3 style="margin:0">Магазины</h3><div class="seg" role="group" aria-label="День">${[['t','Сегодня'],['y','Вчера']].map(([k,t])=>`<button data-pday="${k}" aria-pressed="${(DAY.pday||'t')===k}">${t}</button>`).join('')}</div>${yd?`<span class="meta">вчера всего ${fmt(sum('yday'))} · чеков ${sum('chk_yday').toLocaleString('ru-RU')}</span>`:''}</div>
+  return `    <div class="row" style="margin:16px 0 6px;gap:10px;flex-wrap:wrap;justify-content:flex-start"><h3 style="margin:0">Магазины</h3><div class="seg" role="group" aria-label="День">${[['t','Сегодня'],['y','Вчера']].map(([k,t])=>`<button data-pday="${k}" aria-pressed="${(DAY.pday||'t')===k}">${t}</button>`).join('')}</div>${yd?`<span class="meta">вчера всего ${fmt(sum('yday'))} · чеков ${sum('chk_yday').toLocaleString('ru-RU')}</span>`:''}</div>
     ${(()=>{ // коротко: выручка + % к прошлой неделе, месяц в млн + %, наличные одной цифрой; группировка: все / по городам / по брендам, с итогами
       const mln = v => (+v||0) >= 1e6 ? ((+v)/1e6).toLocaleString('ru-RU',{maximumFractionDigits:2})+' млн ₸' : fmt(v);
       const cashV = x => { const c = (DAY.cash||{})[x.id]; return c && c.est_kzt!=null ? +c.est_kzt : null; };
@@ -3693,14 +3686,32 @@ function pulseHtml(P){
         const card = x => { const [v,w] = dv(x); return `<div class="pc"><div class="pc-h">${nm(x)}</div><div class="pc-g">
           <div><span class="pc-l">${yd?'Вчера':'Сегодня'}</span><b class="num">${fmt(v)}</b> ${chip(pct(v,w))}</div>
           <div><span class="pc-l">Месяц</span><b class="num">${mln(x.mtd)}</b> ${chip(pct(+x.mtd,+x.mtd_prev))}</div>
-          <div><span class="pc-l">В кассе</span><b class="num">${cashN(x)}</b></div></div></div>`; };
-        const sumLine = (t, d) => `<div class="pc st-tot"><div class="pc-h"><b>${esc(t)}</b></div><div class="pc-g"><div><span class="pc-l">${yd?'Вчера':'Сегодня'}</span><b class="num">${fmt(d[0])}</b> ${chip(pct(d[0],d[1]))}</div><div><span class="pc-l">Месяц</span><b class="num">${mln(d[2])}</b> ${chip(pct(d[2],d[3]))}</div><div><span class="pc-l">В кассе</span><b class="num">${fmt(d[4])}</b></div></div></div>`;
+          ${lite?'':`<div><span class="pc-l">В кассе</span><b class="num">${cashN(x)}</b></div>`}</div></div>`; };
+        const sumLine = (t, d) => `<div class="pc st-tot"><div class="pc-h"><b>${esc(t)}</b></div><div class="pc-g"><div><span class="pc-l">${yd?'Вчера':'Сегодня'}</span><b class="num">${fmt(d[0])}</b> ${chip(pct(d[0],d[1]))}</div><div><span class="pc-l">Месяц</span><b class="num">${mln(d[2])}</b> ${chip(pct(d[2],d[3]))}</div>${lite?'':`<div><span class="pc-l">В кассе</span><b class="num">${fmt(d[4])}</b></div>`}</div></div>`;
         return seg + `<div class="pc-list">${groups.map(([k,L]) => (k?sumLine(k, tot(L)):'') + L.map(card).join('')).join('')}${sumLine('Итого по сети', T0)}</div>`;
       }
-      const row = x => { const [v,w] = dv(x); return `<tr><td>${nm(x)}</td><td class="num"><b style="font-size:16px">${fmt(v)}</b> ${chip(pct(v,w))}</td><td class="num">${mln(x.mtd)} ${chip(pct(+x.mtd,+x.mtd_prev))}</td><td class="num">${cashN(x)}</td></tr>`; };
-      const trow = (t, d, cls) => `<tr class="${cls}"><td><b>${esc(t)}</b></td><td class="num"><b style="font-size:16px">${fmt(d[0])}</b> ${chip(pct(d[0],d[1]))}</td><td class="num"><b>${mln(d[2])}</b> ${chip(pct(d[2],d[3]))}</td><td class="num"><b>${fmt(d[4])}</b></td></tr>`;
-      return seg + `<div class="scroll"><table class="st-sum"><thead><tr><th>Магазин</th><th>${yd?'Вчера':'Сегодня'} <span class="meta">к прошл. неделе</span></th><th>Месяц <span class="meta">к прошл. месяцу</span></th><th title="Остаток по последней странице тетради + наличные продажи Wipon после неё − расходы, внесённые в Silver">В кассе</th></tr></thead><tbody>
-        ${groups.map(([k,L]) => (k?trow(k, tot(L), 'st-grp'):'') + L.map(row).join('')).join('')}${trow('Итого по сети', T0, 'st-total')}</tbody></table></div>`; })()}
+      const row = x => { const [v,w] = dv(x); return `<tr><td>${nm(x)}</td><td class="num"><b style="font-size:16px">${fmt(v)}</b> ${chip(pct(v,w))}</td><td class="num">${mln(x.mtd)} ${chip(pct(+x.mtd,+x.mtd_prev))}</td>${lite?'':`<td class="num">${cashN(x)}</td>`}</tr>`; };
+      const trow = (t, d, cls) => `<tr class="${cls}"><td><b>${esc(t)}</b></td><td class="num"><b style="font-size:16px">${fmt(d[0])}</b> ${chip(pct(d[0],d[1]))}</td><td class="num"><b>${mln(d[2])}</b> ${chip(pct(d[2],d[3]))}</td>${lite?'':`<td class="num"><b>${fmt(d[4])}</b></td>`}</tr>`;
+      return seg + `<div class="scroll"><table class="st-sum"><thead><tr><th>Магазин</th><th>${yd?'Вчера':'Сегодня'} <span class="meta">к прошл. неделе</span></th><th>Месяц <span class="meta">к прошл. месяцу</span></th>${lite?'':'<th title="Остаток по последней странице тетради + наличные продажи Wipon после неё − расходы, внесённые в Silver">В кассе</th>'}</tr></thead><tbody>
+        ${groups.map(([k,L]) => (k?trow(k, tot(L), 'st-grp'):'') + L.map(row).join('')).join('')}${trow('Итого по сети', T0, 'st-total')}</tbody></table></div>`; })()}`;
+}
+function pulseHtml(P){
+  if(!P) return '<div class="empty">Собираем картину по сети…</div>';
+  const St = P.stores || [], sum = k => St.reduce((a,x)=>a+(+x[k]||0),0), pct = (a,b) => b>0 ? Math.round((a-b)/b*100) : null;
+  const chip = v => v==null ? '<span class="meta">—</span>' : `<span class="chip ${v>=0?'ok':'zero'}">${v>0?'+':''}${v}%</span>`;
+  const T = sum('today'), W = sum('week_ago'), M = sum('mtd'), MP = sum('mtd_prev'), C = sum('chk_today');
+  const yd = DAY.pday==='y' && St.some(x => 'yday' in x);
+  const fresh = t => { if(!t) return '<span class="chip zero">нет</span>'; const h = (Date.now()-new Date(t))/36e5; return `<span class="chip ${h>3?'warn':'ok'}">${h<1?'<1 ч':Math.round(h)+' ч'} назад</span>`; };
+  // владельцу — только просрочки и то, что не входит ни в чей список; обычные дела менеджера и закупа не дублируем
+  const k = P.stuck || {}, stuck = [
+    [k.transit_old, 'Просрочено у менеджера: товар в пути не принят дольше 4 дней', 'wh'], [k.transfers_old, 'Просрочено у менеджера: перемещения не приняты дольше 3 дней', 'wh'],
+    [k.writeoffs_old, 'Ваше решение: списания ждут дольше 2 дней', 'wh'], [k.negative, 'Отрицательные остатки — проверить пересортицу (ни в чьём списке)', 'wh:stock'] ].filter(x => +x[0] > 0);
+  const tile = (t, v, sub) => `<div class="card" style="flex:1;min-width:170px;padding:10px 12px"><div class="meta">${t}</div><div style="font-size:22px;font-weight:700" class="num">${v}</div><div class="meta">${sub}</div></div>`;
+  return `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:stretch">
+      ${tile('Выручка сегодня', fmt(T), `${chip(pct(T,W))} к прошлой неделе на это время`)}
+      ${tile('Чеков сегодня', C.toLocaleString('ru-RU'), T&&C?'средний чек '+fmt(Math.round(T/C)):'')}
+      ${tile('С начала месяца', fmt(M), `${chip(pct(M,MP))} к тому же периоду прошлого месяца`)}${aiTile(P)}</div>
+    ${storesHtml(P)}
     ${(()=>{ const C = Object.values(DAY.cash||{}).filter(c=>c.est_kzt!=null); if(!C.length) return ''; const k = C.reduce((a,c)=>a+(+c.est_kzt||0),0), u = C.reduce((a,c)=>a+(+c.snap_usd||0),0);
       return `<p style="margin:8px 0 0"><b>Наличных по сети ≈ ${fmt(k)}${u?' и $'+u.toLocaleString('ru-RU'):''}</b></p>`; })()}
     <details style="margin:6px 0 0"><summary class="meta" style="cursor:pointer">Как считается?</summary>
@@ -3800,12 +3811,13 @@ function renderDay(){
     ${!D?'<div class="empty">Собираем дела…</div>':`${todo.length?`<div class="stack" style="gap:8px">${todo.map(i=>`<div class="card row" style="flex-wrap:wrap;gap:10px;border-left:4px solid ${col[i.lvl]||col['']}"><div style="flex:1;min-width:220px"><b>${esc(i.t)}</b>${i.wait||i.k==='open'||i.k==='close'?'':` <span class="chip ${i.lvl==='bad'?'zero':'warn'}">${(+i.n).toLocaleString('ru-RU')}</span>`}${i.h?`<br><span class="meta">${esc(i.h)}</span>`:''}</div><button class="btn small primary" data-daygo="${esc(i.k)}" ${i.wait?'disabled':''}>Открыть →</button></div>`).join('')}</div>`
       :'<div class="card" style="text-align:center;padding:24px">✅ На сегодня всё сделано</div>'}
     ${done.length?`<details style="margin-top:14px"><summary class="meta" style="cursor:pointer">Сделано: ${done.length}</summary><div class="stack" style="gap:4px;margin-top:6px">${done.map(i=>`<div class="meta">✓ ${esc(i.t)}</div>`).join('')}</div></details>`:''}`}
+    ${r!=='sell' && DAY.spulse ? storesHtml(DAY.spulse, true) : r!=='sell' && DAY.spulseWait ? '<div class="empty">Собираем продажи…</div>' : ''}
     ${S.canAttn && r!=='sell' ? attnHtml(true, r) : ''}
     ${wiponSyncHtml()}`;
 }
 document.addEventListener('click', async e => { if(S.view!=='day') return; const t = e.target.closest('button'); if(!t) return;
   if(t.id==='day-ref'){ DAY.data = null; DAY.sug = null; DAY.pulse = null; DAY.ai = null; S.attn = null; render(); await loadDay(); render(); }
-  else if(t.dataset.dayrole){ DAY.role = t.dataset.dayrole; render(); if(DAY.role==='buy') loadDaySug(); if(DAY.role==='own' && !DAY.pulse) loadPulse(); }
+  else if(t.dataset.dayrole){ DAY.role = t.dataset.dayrole; render(); if(DAY.role==='buy') loadDaySug(); if(DAY.role==='own' && !DAY.pulse) loadPulse(); if(['mgr','buy'].includes(DAY.role) && !DAY.spulse) loadSPulse(); }
   else if(t.dataset.daygo){ const i0 = (DAY.items||[]).find(x => x.k===t.dataset.daygo); if(!i0) return;
     const i = i0.go==='stock' ? { ...i0, go:'wh', mode:'stock' } : i0.go==='attn' ? { ...i0, go:'day' } : i0;
     if(!(S.tabs||[]).some(x => x[0]===i.go)) return toast('У вас нет доступа к этой вкладке');
