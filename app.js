@@ -2414,18 +2414,31 @@ const CHN = { last:null, loading:false, bm:null };
 async function cnLoad(){ if(CHN.loading) return; CHN.loading = true;
   const { data } = await sb.from('purchase_orders').select('created_at,source').in('source',['1688','alibaba']).order('created_at',{ ascending:false }).limit(1);
   CHN.last = (data||[])[0] || { none:true }; CHN.loading = false; if(S.view==='day') render(); }
+/* расширение Chrome «Silver»: открывает вкладку 1688 / Alibaba / Wipon, само обновляет и закрывает её */
+const extOn = () => document.documentElement.dataset.silverExt === '1';
+function extRun(kind, key){ return new Promise(res => { const id = Math.random().toString(36).slice(2);
+  const h = e => { if(e.source===window && e.data && e.data.silverExt==='done' && e.data.id===id){ window.removeEventListener('message', h); res(e.data); } };
+  window.addEventListener('message', h); window.postMessage({ silverExt:'run', id, kind, key }, '*');
+  setTimeout(() => { window.removeEventListener('message', h); res({ ok:false, text:'нет ответа от расширения' }); }, 300000); }); }
+const EXT_HINT = 'Один раз: скачайте silver-ext.zip, распакуйте → Chrome → chrome://extensions → включите «Режим разработчика» → «Загрузить распакованное» → папка silver-ext.';
+function extLink(){ return extOn() ? '' : `<div class="meta" style="margin-top:6px">Чтобы обновлялось одной кнопкой: <a href="silver-ext.zip" download onclick="toast(EXT_HINT)">установить расширение Silver</a> (один раз).</div>`; }
+document.addEventListener('click', async e => { const t = e.target.closest && e.target.closest('[data-cnrun]'); if(!t) return;
+  const kind = t.dataset.cnrun; if(!extOn()) return;   // без расширения работает как ссылка
+  e.preventDefault(); if(CHN.busy) return; CHN.busy = kind; PO.imp = 'Обновляю ' + (kind==='china'?'Китай':'Alibaba') + '…'; render();
+  const { data:key, error } = await sb.rpc('po_sync_key'); if(error || !key){ CHN.busy = null; PO.imp = errText(error||'нет доступа'); return render(); }
+  const r = await extRun(kind, key); CHN.busy = null; PO.imp = String(r.text||'').replace(/^Silver:?\s*/,'').replace(/ Вкладку можно закрыть\./,''); CHN.last = null; render(); });
 function chinaHtml(){
   if(!S.me || !['owner','purchaser'].includes(S.me.role)) return '';
   if(!CHN.last) cnLoad();
   const L = CHN.last && !CHN.last.none ? new Date(CHN.last.created_at).toLocaleDateString('ru-RU',{ day:'2-digit', month:'2-digit', timeZone:'Asia/Almaty' }) : null;
   let had = false; try{ had = !!localStorage.getItem('silver_cn_bm'); }catch(_){ }
-  const bm = CHN.bm ? `<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:8px"><a class="btn small primary" href="${esc(CHN.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Китай</a><span class="meta">← перетащите на панель закладок (один раз)</span></div>`
+  const bm = extOn() ? '' : CHN.bm ? `<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:8px"><a class="btn small primary" href="${esc(CHN.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Китай</a><span class="meta">← перетащите на панель закладок (один раз)</span></div>`
     : had ? `<div class="meta" style="margin-top:6px">Откроется страница заказов — нажмите там закладку «Silver ← Китай». <button class="btn small" id="cn-bm" style="padding:2px 8px">Закладка заново</button></div>`
     : `<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn small" id="cn-bm">Получить закладку «Silver ← Китай»</button><span class="meta">нужна один раз</span></div>`;
   return `<div class="card" style="margin:12px 0"><div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap">
       <span><b>Заказы Китай и Alibaba</b> <span class="meta">${L ? '· последний заказ в Silver от '+L : CHN.last ? '· заказов ещё нет' : ''}</span></span>
-      <span class="row" style="gap:8px;flex-wrap:wrap"><a class="btn small primary" href="https://trade.1688.com/order/buyer_order_list.htm" target="_blank" rel="noopener">⟳ Обновить Китай</a><a class="btn small primary" href="https://biz.alibaba.com/order/list.htm" target="_blank" rel="noopener">⟳ Обновить Alibaba</a></span></div>
-    ${bm}${PO.imp?`<div class="meta" style="margin-top:6px">${esc(PO.imp)}</div>`:''}
+      <span class="row" style="gap:8px;flex-wrap:wrap"><a class="btn small primary" data-cnrun="china" href="https://trade.1688.com/order/buyer_order_list.htm" target="_blank" rel="noopener" style="text-decoration:none">${CHN.busy==='china'?'⏳ Обновляю…':'⟳ Обновить Китай'}</a><a class="btn small primary" data-cnrun="alibaba" href="https://biz.alibaba.com/order/list.htm" target="_blank" rel="noopener" style="text-decoration:none">${CHN.busy==='alibaba'?'⏳ Обновляю…':'⟳ Обновить Alibaba'}</a></span></div>
+    ${bm}${extLink()}${PO.imp?`<div class="meta" style="margin-top:6px">${esc(PO.imp)}</div>`:''}
     <label class="meta" style="display:inline-block;margin-top:6px;cursor:pointer;text-decoration:underline">или загрузить файл выгрузки<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label></div>`;
 }
 function wiponSyncHtml(){
@@ -2437,10 +2450,14 @@ function wiponSyncHtml(){
     <span style="font-size:1.05em">${st.ok?`✅ <b>Все данные получены</b> <span class="meta">· последнее обновление ${st.at} · сервер обновляет сам каждые 15 мин</span>`:`⚠️ <b>Получены не все данные</b> <span class="meta">· последнее обновление ${st.at}</span>`}</span>${btn}</div>
     ${st.ok?'':`<ul class="meta" style="margin:8px 0 0 18px;padding:0">${st.why.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>`}
     ${WU.pmsg?`<div class="meta" style="margin-top:6px">${esc(WU.pmsg)}</div>`:''}
-    ${st.bm&&['owner','manager','purchaser'].includes(S.me.role)?`<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:8px">${WU.bm?`<a class="btn small primary" href="${esc(WU.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Wipon</a><span class="meta">← перетащите на панель закладок (старую удалите)</span>`:`<button class="btn small" id="wu-bm">Получить закладку</button>`}</div>`:''}</div>`;
+    ${st.ok?'':extLink()}${st.bm&&!extOn()&&['owner','manager','purchaser'].includes(S.me.role)?`<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-top:8px">${WU.bm?`<a class="btn small primary" href="${esc(WU.bm)}" title="Перетащите на панель закладок" onclick="event.preventDefault();toast('Перетащите эту кнопку на панель закладок Chrome')">⬆ Silver ← Wipon</a><span class="meta">← перетащите на панель закладок (старую удалите)</span>`:`<button class="btn small" id="wu-bm">Получить закладку</button>`}</div>`:''}</div>`;
 }
 document.addEventListener('click', async e => { const t = e.target.closest && e.target.closest('#wu-pull'); if(!t || WU.pulling) return;
   WU.pulling = true; WU.pmsg = ''; render();
+  const st0 = wuState();
+  if(extOn() && !(st0 && st0.ok)){   // сеанс Wipon истёк или не все ИП — расширение откроет Wipon и обновит само
+    const k = await sb.rpc('wipon_sync_key'); const r = k.data ? await extRun('wipon', k.data) : { text:errText(k.error||'нет доступа') };
+    WU.pulling = false; WU.pmsg = String(r.text||'').replace(/^Silver:?\s*/,'').slice(0,160); await wuLoadSrv(); if(S.view==='day' && typeof loadPulse==='function' && S.me.role==='owner') loadPulse(); return render(); }
   const { data, error } = await sb.functions.invoke('wipon_srv', { body:{ action:'pull_now' } }).catch(err => ({ error:err }));
   WU.pulling = false;
   if(error || !data) WU.pmsg = 'Не получилось: ' + errText(error || 'нет ответа');
@@ -2476,7 +2493,7 @@ function wiponUpHtml(kind){
 function silverWiponSync(K){
   if(window.__ss){ window.__ss.run(); return; }
   const F = 'https://ottuadjdksxipfjytlyv.supabase.co/functions/v1/ingest?action=';
-  const b = document.createElement('div');
+  const b = document.createElement('div'); b.id = 'silver-wu';
   b.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:99999;background:#1d2b4f;color:#fff;padding:8px 12px;border-radius:10px;font:13px sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:420px';
   document.body.appendChild(b);
   const S = t => { t = ' ' + String(t || '').toLowerCase().replace(/ё/g, 'е').replace(/[_.,;:()"«»\-]+/g, ' ').replace(/\s+/g, ' ') + ' '; const W = '(?![а-яa-z])';
