@@ -2427,6 +2427,48 @@ document.addEventListener('click', async e => { const t = e.target.closest && e.
   e.preventDefault(); if(CHN.busy) return; CHN.busy = kind; PO.imp = 'Обновляю ' + (kind==='china'?'Китай':'Alibaba') + '…'; render();
   const { data:key, error } = await sb.rpc('po_sync_key'); if(error || !key){ CHN.busy = null; PO.imp = errText(error||'нет доступа'); return render(); }
   const r = await extRun(kind, key); CHN.busy = null; PO.imp = String(r.text||'').replace(/^Silver:?\s*/,'').replace(/ Вкладку можно закрыть\./,''); CHN.last = null; render(); });
+/* один блок «Данные» на главной: Wipon + Китай + Alibaba, одна кнопка, короткие статусы; с расширением — автообновление раз в час */
+const SYNC = { busy:false, res:(() => { try{ return JSON.parse(localStorage.getItem('silver_sync_res')) || {}; }catch(_){ return {}; } })() };
+const syncSave = (k, ok, text) => { SYNC.res[k] = { ok, at:Date.now(), text:String(text||'').replace(/^Silver:?\s*/,'').slice(0,140) }; try{ localStorage.setItem('silver_sync_res', JSON.stringify(SYNC.res)); }catch(_){ } };
+const syncKinds = () => ['owner','purchaser'].includes(S.me && S.me.role) ? ['wipon','china','alibaba'] : ['wipon'];
+async function syncAll(auto){
+  if(SYNC.busy) return; SYNC.busy = true; if(!auto) render();
+  try{
+    for(const k of syncKinds()){
+      SYNC.step = k; if(!auto) render();
+      if(k === 'wipon'){
+        const st0 = wuState();
+        if(extOn() && !(st0 && st0.ok)){ const key = await sb.rpc('wipon_sync_key'); const r = key.data ? await extRun('wipon', key.data) : { ok:false, text:errText(key.error||'нет доступа') }; syncSave('wipon', !!r.ok, r.text); }
+        else { const { data, error } = await sb.functions.invoke('wipon_srv', { body:{ action:'pull_now' } }).catch(err => ({ error:err })); syncSave('wipon', !!data && !error && !(data.error && !data.sales), error ? errText(error) : data && data.error || ''); }
+        await wuLoadSrv();
+      } else if(extOn()){
+        const key = await sb.rpc('po_sync_key'); const r = key.data ? await extRun(k, key.data) : { ok:false, text:errText(key.error||'нет доступа') };
+        syncSave(k, !!r.ok, r.text); CHN.last = null;
+      }
+    }
+    try{ localStorage.setItem('silver_auto_at', String(Date.now())); }catch(_){ }
+  } finally { SYNC.busy = false; SYNC.step = null; if(S.view==='day'){ if(typeof loadPulse==='function' && S.me.role==='owner') loadPulse(); render(); } }
+}
+function syncAuto(){ if(!extOn() || SYNC.busy) return; let t = 0; try{ t = +localStorage.getItem('silver_auto_at') || 0; }catch(_){ } if(Date.now() - t > 36e5) setTimeout(() => syncAll(true), 3000); }
+document.addEventListener('click', e => { if(e.target.closest && e.target.closest('#sync-all')) syncAll(false); });
+function dataHtml(){
+  if(!S.me || !['owner','manager','purchaser'].includes(S.me.role)) return '';
+  syncAuto();
+  const hm = t => new Date(t).toLocaleTimeString('ru-RU',{ hour:'2-digit', minute:'2-digit' });
+  const st = wuState(), N = { wipon:'Wipon', china:'Китай', alibaba:'Alibaba' };
+  const chip = k => {
+    if(SYNC.busy && SYNC.step===k) return `<span class="chip">⏳ ${N[k]}</span>`;
+    if(k==='wipon'){ if(!st) return `<span class="chip">${N[k]} …</span>`; return st.ok ? `<span class="chip ok">✓ ${N[k]} ${esc(String(st.at||'').split(', ').pop())}</span>` : `<span class="chip warn" title="${esc(st.why.join('; '))}">⚠ ${N[k]}: ${esc(st.why.map(w => w.split(' — ')[0].replace(/\s*\(\d+ чек\.\)/,'')).join('; '))}</span>`; }
+    const r = SYNC.res[k]; if(!extOn() && !r) return `<span class="chip zero">${N[k]} —</span>`;
+    return !r ? `<span class="chip zero">${N[k]} —</span>` : r.ok ? `<span class="chip ok">✓ ${N[k]} ${hm(r.at)}</span>` : `<span class="chip warn" title="${esc(r.text)}">⚠ ${N[k]}</span>`;
+  };
+  const bad = syncKinds().map(k => k!=='wipon' && SYNC.res[k] && !SYNC.res[k].ok ? SYNC.res[k].text : '').filter(Boolean);
+  return `<div class="card" style="margin:12px 0;padding:10px 14px"><div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap">
+    <span class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-start"><b>Данные</b> ${syncKinds().map(chip).join(' ')}</span>
+    <button class="btn small primary" id="sync-all" ${SYNC.busy?'disabled':''}>${SYNC.busy?'⏳ Обновляю…':'🔄 Обновить сейчас'}</button></div>
+    ${bad.length?`<div class="meta" style="margin-top:6px">${esc(bad[0])}</div>`:''}
+    ${extOn()?'':`<div class="meta" style="margin-top:6px"><a href="silver-ext.zip" download onclick="toast(EXT_HINT)">Установить расширение Silver</a> — один раз, чтобы всё обновлялось само.</div>`}</div>`;
+}
 function chinaHtml(){
   if(!S.me || !['owner','purchaser'].includes(S.me.role)) return '';
   if(!CHN.last) cnLoad();
@@ -3906,7 +3948,7 @@ function renderDay(){
   const today = new Date().toLocaleDateString('ru-RU',{timeZone:'Asia/Almaty',weekday:'long',day:'numeric',month:'long'});
   if(r==='own'){ $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="help-open">📖 Инструкции</button><button class="btn small" id="day-ref">Обновить</button></div>
     <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><span class="meta">Посмотреть как:</span><div class="seg" style="display:inline-flex">${DAY_ROLES.map(([k,t])=>`<button data-dayrole="${k}" aria-pressed="${k===r}">${t}</button>`).join('')}</div></div>
-    ${wiponSyncHtml()}${chinaHtml()}${anHtml()}${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${DAY.pulse?bkRemind():''}${S.canAttn?attnHtml(true,'own'):''}`; DAY.items = []; return; }
+    ${dataHtml()}${anHtml()}${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${DAY.pulse?bkRemind():''}${S.canAttn?attnHtml(true,'own'):''}`; DAY.items = []; return; }
   let items = D ? [...(D[r]||[])] : [];
   if(r==='buy'){ const sg = DAY.sug && DAY.sug!=='wait' ? DAY.sug : null;
     items.unshift({ k:'sug', t:'Дозаказать — товар заканчивается', n: sg ? sg.n : 1, wait: !sg, h: sg ? (sg.n ? `Всего ${sg.units.toLocaleString('ru-RU')} шт. Удобно формировать заказ сразу по поставщику.` : '') : 'Считаем…', go:'po', mode:'suggest', lvl:'warn' }); }
@@ -3918,7 +3960,7 @@ function renderDay(){
   $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="help-open">📖 Инструкции</button><button class="btn small" id="day-ref">Обновить</button></div>
     ${own?`<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><span class="meta">Посмотреть как:</span><div class="seg" style="display:inline-flex">${DAY_ROLES.map(([k,t])=>`<button data-dayrole="${k}" aria-pressed="${k===r}">${t}</button>`).join('')}</div>
       ${r==='sell'?`<select id="day-store" aria-label="Магазин">${(S.stores||[]).map(s=>`<option value="${s.id}" ${s.id===st?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select>`:''}</div>`:''}
-    ${r!=='sell'?wiponSyncHtml():''}${r==='buy' ? chinaHtml() : ''}
+    ${r!=='sell'?dataHtml():''}
     <p class="meta" style="margin:4px 0 12px">${r==='sell'?'Дела по магазину '+esc(storeName(st)):r==='buy'?'Дела по закупу, по всем магазинам':'Дела по вашим магазинам'}. Нажмите «Открыть» — попадёте сразу туда, где это делается. Сделанное уходит вниз само.</p>
     ${!D?'<div class="empty">Собираем дела…</div>':`${todo.length?`<div class="stack" style="gap:8px">${todo.map(i=>`<div class="card row" style="flex-wrap:wrap;gap:10px;border-left:4px solid ${col[i.lvl]||col['']}"><div style="flex:1;min-width:220px"><b>${esc(i.t)}</b>${i.wait||i.k==='open'||i.k==='close'?'':` <span class="chip ${i.lvl==='bad'?'zero':'warn'}">${(+i.n).toLocaleString('ru-RU')}</span>`}${i.h?`<br><span class="meta">${esc(i.h)}</span>`:''}</div><button class="btn small primary" data-daygo="${esc(i.k)}" ${i.wait?'disabled':''}>Открыть →</button></div>`).join('')}</div>`
       :'<div class="card" style="text-align:center;padding:24px">✅ На сегодня всё сделано</div>'}
