@@ -2310,7 +2310,7 @@ function renderExp(){
   const C = (DAY.cash||{});
   $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap"><h2 style="margin:0">Расходы</h2>${(S.tabs||[]).some(x=>x[0]==='profit')?'<button class="btn small" data-goprofit>Аренда и постоянные расходы → «Рентабельность»</button>':''}</div>
   <h3 style="margin:14px 0 6px">Наличные в кассах <span class="meta">— по последней странице тетради + наличные продажи Wipon после неё</span></h3>
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px">${ids.map(id => { const c = C[id]; return `<div class="card" style="padding:10px 12px"><div class="meta">${esc(storeName(id))}</div><div style="font-size:20px;font-weight:700" class="num">${!c||c.est_kzt==null?(DAY.cash?'нет данных':'…'):fmt(c.est_kzt)}${c&&+c.snap_usd?' · $'+(+c.snap_usd).toLocaleString('ru-RU'):''}</div></div>`; }).join('')}</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px">${ids.filter(cashStore).map(id => { const c = C[id]; return `<div class="card" style="padding:10px 12px"><div class="meta">${esc(storeName(id))}</div><div style="font-size:20px;font-weight:700" class="num">${!c||c.est_kzt==null?(DAY.cash?'нет данных':'…'):fmt(c.est_kzt)}${c&&+c.snap_usd?' · $'+(+c.snap_usd).toLocaleString('ru-RU'):''}</div></div>`; }).join('')}</div>
   <h3 style="margin:16px 0 6px">Журнал расходов магазинов <span class="meta">— хозрасходы из тетрадей (файл «Расходы магазинов»)</span></h3>
   <div class="filters">${[['month','Этот месяц'],['prev','Прошлый месяц'],['q','3 месяца']].map(([k,v])=>`<button class="btn small ${EX.per===k?'primary':''}" data-exper="${k}">${v}</button>`).join('')}<span class="meta" style="align-self:center">${new Date(f).toLocaleDateString('ru-RU')} — ${new Date(t).toLocaleDateString('ru-RU')}</span></div>
   ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">За этот период расходов нет</div>':`
@@ -3688,8 +3688,10 @@ async function loadSPulse(){ if(!DAY.spulse){ DAY.spulse = ls.get('silver_spulse
   const { data, error } = await sb.rpc('sales_pulse'); DAY.spulseWait = false; if(!error && data){ DAY.spulse = data; ls.set('silver_spulse', data); } if(S.view==='day') render(); }
 async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; ls.set('silver_pulse', data); if(S.view==='day') render(); if(!data.ai) loadAiSpend(); loadCashStat(); anStatus(); bkInfo(); }
 /* наличные в кассе: остаток по тетради + наличные продажи Wipon с тех пор − расходы, внесённые в Silver */
-async function loadCashStat(){ const { data, error } = await sb.rpc('cash_status'); if(error) return; DAY.cash = {}; (data||[]).forEach(c => DAY.cash[c.store] = c); if(['day','cash'].includes(S.view)) render(); }
-function cashCell(x){ const c = (DAY.cash||{})[x.id]; if(!c) return '<span class="meta">…</span>'; if(c.est_kzt == null) return '<span class="meta">нет данных</span>';
+// наличные считаем только по Алматы — по Астане владельцу не нужны (22.11.2026)
+const cashStore = id => { const z = (S.allStores||S.stores||[]).find(q => q.id===+id); return z && z.city ? z.city !== 'Астана' : ![4,5,7].includes(+id); };
+async function loadCashStat(){ const { data, error } = await sb.rpc('cash_status'); if(error) return; DAY.cash = {}; (data||[]).filter(c => cashStore(c.store)).forEach(c => DAY.cash[c.store] = c); if(['day','cash'].includes(S.view)) render(); }
+function cashCell(x){ const c = (DAY.cash||{})[x.id]; if(!cashStore(x.id)) return ''; if(!c) return '<span class="meta">…</span>'; if(c.est_kzt == null) return '<span class="meta">нет данных</span>';
   const dd = String(c.snap_day||'').slice(8,10)+'.'+String(c.snap_day||'').slice(5,7);
   const tip = `Остаток по тетради на конец ${dd}: ${fmt(c.snap_kzt)}${+c.snap_usd?' и $'+(+c.snap_usd).toLocaleString('ru-RU'):''}. Плюс наличные продажи по Wipon с тех пор: ${fmt(c.cash_since)}.${+c.moves_since?' Минус расходы и сдача денег, внесённые в Silver: '+fmt(c.moves_since)+'.':''} Расходы после этой даты учтены, только если внесены в Silver, — реальная сумма может быть меньше.${c.snap_note?' Источник: '+c.snap_note:''}`;
   return `<span title="${esc(tip)}"><b class="num">${fmt(c.est_kzt)}</b>${+c.snap_usd?` <b class="num">· $${(+c.snap_usd).toLocaleString('ru-RU')}</b>`:''}<br><span class="meta" style="font-size:11px">по тетради на ${dd}: ${fmt(c.snap_kzt)} + наличные продажи с тех пор ${fmt(c.cash_since)}${+c.moves_since?' − расходы '+fmt(c.moves_since):''}</span></span>`; }
@@ -3781,7 +3783,7 @@ function storesHtml(P, lite){
     ${(()=>{ // коротко: выручка + % к прошлой неделе, месяц в млн + %, наличные одной цифрой; группировка: все / по городам / по брендам, с итогами
       const mln = v => (+v||0) >= 1e6 ? ((+v)/1e6).toLocaleString('ru-RU',{maximumFractionDigits:2})+' млн ₸' : fmt(v);
       const cashV = x => { const c = (DAY.cash||{})[x.id]; return c && c.est_kzt!=null ? +c.est_kzt : null; };
-      const cashN = x => { const c = (DAY.cash||{})[x.id]; return !c?'…':c.est_kzt==null?'—':fmt(c.est_kzt)+(+c.snap_usd?' · $'+(+c.snap_usd).toLocaleString('ru-RU'):''); };
+      const cashN = x => { const c = (DAY.cash||{})[x.id]; return !cashStore(x.id)?'':!c?'…':c.est_kzt==null?'—':fmt(c.est_kzt)+(+c.snap_usd?' · $'+(+c.snap_usd).toLocaleString('ru-RU'):''); };
       const city = x => { const z = (S.allStores||[]).find(q => q.id===x.id); return (z && z.city) || x.city || ([4,5,7].includes(+x.id) ? 'Астана' : 'Алматы'); };
       const g = DAY.pgrp || 'all';
       const dv = x => yd ? [+x.yday||0, +x.yday_week_ago||0] : [+x.today||0, +x.week_ago||0];
@@ -3795,12 +3797,12 @@ function storesHtml(P, lite){
         const card = x => { const [v,w] = dv(x); return `<div class="pc"><div class="pc-h">${nm(x)}</div><div class="pc-g">
           <div><span class="pc-l">${yd?'Вчера':'Сегодня'}</span><b class="num">${fmt(v)}</b> ${chip(pct(v,w))}</div>
           <div><span class="pc-l">Месяц</span><b class="num">${mln(x.mtd)}</b> ${chip(pct(+x.mtd,+x.mtd_prev))}</div>
-          ${lite?'':`<div><span class="pc-l">В кассе</span><b class="num">${cashN(x)}</b></div>`}</div></div>`; };
+          ${lite||!cashStore(x.id)?'':`<div><span class="pc-l">В кассе</span><b class="num">${cashN(x)}</b></div>`}</div></div>`; };
         const sumLine = (t, d) => `<div class="pc st-tot"><div class="pc-h"><b>${esc(t)}</b></div><div class="pc-g"><div><span class="pc-l">${yd?'Вчера':'Сегодня'}</span><b class="num">${fmt(d[0])}</b> ${chip(pct(d[0],d[1]))}</div><div><span class="pc-l">Месяц</span><b class="num">${mln(d[2])}</b> ${chip(pct(d[2],d[3]))}</div>${lite?'':`<div><span class="pc-l">В кассе</span><b class="num">${fmt(d[4])}</b></div>`}</div></div>`;
         return seg + `<div class="pc-list">${groups.map(([k,L]) => (k?sumLine(k, tot(L)):'') + L.map(card).join('')).join('')}${sumLine('Итого по сети', T0)}</div>`;
       }
       const row = x => { const [v,w] = dv(x); return `<tr><td>${nm(x)}</td><td class="num"><b style="font-size:16px">${fmt(v)}</b> ${chip(pct(v,w))}</td><td class="num">${mln(x.mtd)} ${chip(pct(+x.mtd,+x.mtd_prev))}</td>${lite?'':`<td class="num">${cashN(x)}</td>`}</tr>`; };
-      const trow = (t, d, cls) => `<tr class="${cls}"><td><b>${esc(t)}</b></td><td class="num"><b style="font-size:16px">${fmt(d[0])}</b> ${chip(pct(d[0],d[1]))}</td><td class="num"><b>${mln(d[2])}</b> ${chip(pct(d[2],d[3]))}</td>${lite?'':`<td class="num"><b>${fmt(d[4])}</b></td>`}</tr>`;
+      const trow = (t, d, cls) => `<tr class="${cls}"><td><b>${esc(t)}</b></td><td class="num"><b style="font-size:16px">${fmt(d[0])}</b> ${chip(pct(d[0],d[1]))}</td><td class="num"><b>${mln(d[2])}</b> ${chip(pct(d[2],d[3]))}</td>${lite?'':`<td class="num"><b>${d[4]?fmt(d[4]):''}</b></td>`}</tr>`;
       return seg + `<div class="scroll"><table class="st-sum"><thead><tr><th>Магазин</th><th>${yd?'Вчера':'Сегодня'} <span class="meta">к прошл. неделе</span></th><th>Месяц <span class="meta">к прошл. месяцу</span></th>${lite?'':'<th title="Остаток по последней странице тетради + наличные продажи Wipon после неё − расходы, внесённые в Silver">В кассе</th>'}</tr></thead><tbody>
         ${groups.map(([k,L]) => (k?trow(k, tot(L), 'st-grp'):'') + L.map(row).join('')).join('')}${trow('Итого по сети', T0, 'st-total')}</tbody></table></div>`; })()}`;
 }
@@ -3822,7 +3824,7 @@ function pulseHtml(P){
       ${tile('С начала месяца', fmt(M), `${chip(pct(M,MP))} к тому же периоду прошлого месяца`)}${aiTile(P)}</div>
     ${storesHtml(P)}
     ${(()=>{ const C = Object.values(DAY.cash||{}).filter(c=>c.est_kzt!=null); if(!C.length) return ''; const k = C.reduce((a,c)=>a+(+c.est_kzt||0),0), u = C.reduce((a,c)=>a+(+c.snap_usd||0),0);
-      return `<p style="margin:8px 0 0"><b>Наличных по сети ≈ ${fmt(k)}${u?' и $'+u.toLocaleString('ru-RU'):''}</b></p>`; })()}
+      return `<p style="margin:8px 0 0"><b>Наличных в кассах Алматы ≈ ${fmt(k)}${u?' и $'+u.toLocaleString('ru-RU'):''}</b></p>`; })()}
     <details style="margin:6px 0 0"><summary class="meta" style="cursor:pointer">Как считается?</summary>
     <p class="meta" style="margin:6px 0 0">Наличные в кассе = остаток по последней странице тетради + наличные продажи Wipon после неё − расходы и сдача денег, внесённые в Silver. Расходы учтены, только если внесены в Silver, — реальная сумма может быть меньше.</p>
 </details>
