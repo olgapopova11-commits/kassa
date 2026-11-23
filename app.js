@@ -1892,11 +1892,23 @@ function invProdHtml(e, f){
 
 /* ---------- номенклатура ---------- */
 const NM_EMPTY = () => ({ id:null, is_group:false, barcode:'', sku:'', name:'', price:'', cost:'', brand:'', category_id:'', material:'', color:'', supplier:'', purchase_url:'', photo_url:'', is_basic:false, archived:false, sites:[] });
+// фильтры номенклатуры: статус запаса, наличие, фото, бренд, сайт, чего не хватает, архив
+const NM_FX = [['status','Статус',[['ходовой','Ходовой'],['норма','Норма'],['залежь','Залежь'],['мёртвый','Мёртвый'],['новый','Новый']]],
+  ['stock','Наличие',[['in','В наличии'],['out','Нет в наличии']]], ['photo','Фото',[['y','С фото'],['n','Без фото']]],
+  ['brand','Бренд',[['moon','MOON'],['sunshine','Sunshine'],['both','MOON и Sunshine']]], ['site','Сайт',[['y','На сайте'],['n','Не на сайте']]],
+  ['miss','Не хватает',[['price','Без цены'],['cost','Без себестоимости'],['url','Без ссылки на закуп'],['supplier','Без поставщика']]],
+  ['arch','Архив',[['all','С архивными'],['only','Только архив']]]];
+function nmFx(f){ const x = { ...(f.fx||{}) }; if(x.arch!=='only') delete x.arch; Object.keys(x).forEach(k => { if(!x[k]) delete x[k]; }); return Object.keys(x).length ? x : null; }
+function nmFxHtml(f){ const x = f.fx || {}, on = Object.keys(x).filter(k => x[k]).length;
+  return `<div class="filters" style="margin-top:6px">${NM_FX.map(([k,t,o])=>`<select data-nmfx="${k}" ${x[k]?'style="border-color:var(--accent);font-weight:600"':''}><option value="">${t}: ${k==='arch'?'без архива':'все'}</option>${o.map(([v,l])=>`<option value="${v}" ${x[k]===v?'selected':''}>${l}</option>`).join('')}</select>`).join('')}${on?'<button class="btn small" id="nm-fx-x">✕ Сбросить фильтры</button>':''}</div>`; }
+document.addEventListener('change', async e => { const t = e.target; if(S.view!=='nom' || !t.dataset || !t.dataset.nmfx) return; const f = S.nm; (f.fx ||= {})[t.dataset.nmfx] = t.value;
+  if(t.dataset.nmfx==='arch') f.arch = !!t.value; f.off = 0; f.data = null; render(); await loadNom(); render(); });
+document.addEventListener('click', async e => { if(S.view!=='nom' || !e.target.closest('#nm-fx-x')) return; const f = S.nm; f.fx = {}; f.arch = false; f.off = 0; f.data = null; render(); await loadNom(); render(); });
 async function loadNom(){
   const f = S.nm; f.data = null;
   if(!f.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); f.cats = data || []; }
   sb.rpc('po_incoming').then(({data}) => { S.inc = data || {}; });
-  const { data, error } = await sb.rpc('product_list2', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:f.lim||50, p_sort:f.sort||'stale', p_desc:f.sort?!!f.desc:true, p_flag:f.flag||null });  // по умолчанию — самые дорогие залежи сверху
+  const { data, error } = await sb.rpc('product_list3', { p_f:nmFx(f), p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch||(f.fx||{}).arch==='only', p_offset:f.off, p_limit:f.lim||50, p_sort:f.sort||'stale', p_desc:f.sort?!!f.desc:true, p_flag:f.flag||null });  // по умолчанию — самые дорогие залежи сверху
   if(error){ toast(errText(error)); f.data = { rows:[], total:0 }; } else { f.data = data; S.nmNoPrice = data.noprice; }
   // статус запаса (ходовой / норма / залежь / мёртвый / новый) для строк списка — догружаем отдельно
   const ids = ((f.data||{}).rows||[]).map(p=>p.id); if(ids.length && invCan()) sb.rpc('inv_status_for', { p_ids: ids }).then(({ data:m }) => { if(m){ f.st = Object.assign(f.st||{}, m); if(S.view==='nom' && !f.ed) render(); } });
@@ -1907,7 +1919,8 @@ function renderNom(){
   $('#main').innerHTML = `<div class="row"><h2>Номенклатура</h2>${f.sort?'':'<span class="meta" style="flex:1">сначала самые дорогие залежи</span>'}<button class="btn primary" id="nm-new">+ Новый товар</button></div>
     <div class="filters"><input id="nm-q" placeholder="Штрихкод, артикул или название" value="${esc(f.q)}" style="flex:1;min-width:180px">
       <select id="nm-cat"><option value="">Все категории</option><option value="-1" ${String(f.cat)==='-1'?'selected':''}>⚠ Без категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
-      <label class="meta" style="align-self:center"><input type="checkbox" id="nm-arch" ${f.arch?'checked':''}> показать и архивные</label></div>
+</div>
+    ${nmFxHtml(f)}
     ${f.flag&&f.flag!=='photo'?`<div class="row" style="justify-content:flex-start;gap:8px;margin:8px 0"><span class="chip warn">Показаны только товары в наличии: ${NM_FLAG[f.flag]||f.flag}</span><button class="btn small" id="nm-flag-x">✕ Снять фильтр</button></div>`:''}
     ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}. Нажмите на название, чтобы открыть карточку. Категорию можно менять прямо в таблице.</p>
     ${nmCanEdit()&&Object.keys(f.sel||{}).length?`<div class="cust row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;margin-bottom:8px"><b>Выбрано: ${Object.keys(f.sel).length}</b>
