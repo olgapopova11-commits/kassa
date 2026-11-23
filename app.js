@@ -1886,7 +1886,8 @@ function invProdHtml(e, f){
   const line = r => `${invN(r.bal)} шт · ${r.cover==null?'не продаётся':'хватит на '+invN(r.cover)+' дн.'}${r.idle!=null?' · без продаж '+invN(r.idle)+' дн.':''}`;
   return `<div class="cust stack" style="gap:4px"><div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><b>Запас</b>
       ${net?chip(net.status):''}${net&&(net.abc||net.xyz)?`<span class="meta">ABC/XYZ: <b>${esc(net.abc||'—')}·${esc(net.xyz||'—')}</b></span>`:''}${net?`<span class="meta">${line(net)}</span>`:''}</div>
-    ${st.map(r=>`<div class="meta num">${esc(storeName(+r.store_id))}: ${line(r)} ${r.status&&r.status!==(net&&net.status)?chip(r.status):''}</div>`).join('')}</div>`;
+    ${st.map(r=>`<div class="meta num">${esc(storeName(+r.store_id))}: ${line(r)} ${r.status&&r.status!==(net&&net.status)?chip(r.status):''}</div>`).join('')}
+    ${net&&net.first_in?`<div class="meta">Первая приёмка: <b>${new Date(net.first_in).toLocaleDateString('ru-RU')}</b>${+net.n_in>1?' · последняя: '+new Date(net.last_in).toLocaleDateString('ru-RU')+' · всего приёмок: '+invN(net.n_in):''} <span class="chip" title="История приёмок загружена из Wipon только для аналитики. Остатки в Silver от неё не меняются.">импортировано из Wipon, для истории</span></div>`:''}</div>`;
 }
 
 /* ---------- номенклатура ---------- */
@@ -1897,6 +1898,8 @@ async function loadNom(){
   sb.rpc('po_incoming').then(({data}) => { S.inc = data || {}; });
   const { data, error } = await sb.rpc('product_list2', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:f.lim||50, p_sort:f.sort||null, p_desc:!!f.desc, p_flag:f.flag||null });
   if(error){ toast(errText(error)); f.data = { rows:[], total:0 }; } else { f.data = data; S.nmNoPrice = data.noprice; }
+  // статус запаса (ходовой / норма / залежь / мёртвый / новый) для строк списка — догружаем отдельно
+  const ids = ((f.data||{}).rows||[]).map(p=>p.id); if(ids.length && invCan()) sb.rpc('inv_status_for', { p_ids: ids }).then(({ data:m }) => { if(m){ f.st = Object.assign(f.st||{}, m); if(S.view==='nom' && !f.ed) render(); } });
 }
 function renderNom(){
   const f = S.nm, D = f.data, e = f.ed, cats = f.cats || [];
@@ -1913,7 +1916,7 @@ function renderNom(){
     <div class="scroll"><table class="nm-table mc"><thead><tr>${nmCanEdit()?`<th style="width:28px;padding-right:0"><input type="checkbox" id="nm-selall" title="Выбрать все на странице" ${D.rows.length&&D.rows.every(p=>(f.sel||{})[p.id])?'checked':''}></th>`:''}<th style="white-space:nowrap"><label class="meta" style="display:inline-flex;gap:4px;align-items:center;cursor:pointer;font-weight:400" title="Показать только товары с фото"><input type="checkbox" id="nm-withphoto" ${f.flag==='photo'?'checked':''}>с фото</label></th>${[['name','Название'],['category','Категория'],['barcode','Штрихкод'],['cost','Закуп'],['price','Цена'],['stock','Остаток'],['site','Сайт']].map(([k,v])=>`<th><button data-nmsort="${k}" style="border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;white-space:nowrap" title="Сортировать">${v} ${f.sort===k?(f.desc?'▼':'▲'):'<span class="meta">↕</span>'}</button></th>`).join('')}</tr></thead><tbody>
     ${D.rows.map(p=>{ const inc = (S.inc||{})[p.id], L = (p.sites||[]).filter(x=>x.url);
       return `<tr style="${e&&e.id===p.id?'background:var(--soft)':p.archived?'background:rgba(128,128,128,.18);color:var(--muted,#888)':''}">${nmCanEdit()?`<td class="mc-x" style="width:28px;padding-right:0;vertical-align:middle"><input type="checkbox" data-nmsel="${p.id}" ${(f.sel||{})[p.id]?'checked':''}></td>`:''}<td data-l="">${thumb(p)}</td>
-      <td class="mc-t" style="min-width:200px"><button class="linkbtn" data-nmopen="${p.id}" style="border:0;background:none;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit"><b>${esc(p.name)}</b></button>${p.archived?' <span class="chip zero">архив</span>':''}${p.is_group?' <span class="chip">общий штрихкод</span>':''}${p.is_service?' <span class="chip">услуга</span>':''}<br><span class="meta">${esc([{moon:'MOON',sunshine:'Sunshine',both:'MOON и Sunshine'}[p.brand]||'', p.color, p.material].filter(Boolean).join(' · '))}</span></td>
+      <td class="mc-t" style="min-width:200px"><button class="linkbtn" data-nmopen="${p.id}" style="border:0;background:none;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit"><b>${esc(p.name)}</b></button>${p.archived?' <span class="chip zero">архив</span>':''}${p.is_group?' <span class="chip">общий штрихкод</span>':''}${p.is_service?' <span class="chip">услуга</span>':''}${(()=>{ const z = (f.st||{})[p.id]; return z && z!=='нет' ? ` <span class="chip ${INV_ST[z]??''}">${esc(z)}</span>` : ''; })()}<br><span class="meta">${esc([{moon:'MOON',sunshine:'Sunshine',both:'MOON и Sunshine'}[p.brand]||'', p.color, p.material].filter(Boolean).join(' · '))}</span></td>
       <td data-l="Категория">${p.category_id?esc(p.category||'—'):'<span class="chip warn">без категории</span>'}</td>
       <td class="num" data-l="Штрихкод">${esc(p.barcode)}${p.sku?'<br><span class="meta">арт. '+esc(p.sku)+'</span>':''}</td>
       <td class="num" data-l="Закуп">${p.cost!=null&&p.cost!==''?fmt(p.cost):'<span class="meta">—</span>'}</td>
@@ -3889,7 +3892,7 @@ async function loadDay(){
 }
 async function loadSPulse(){ if(!DAY.spulse){ DAY.spulse = ls.get('silver_spulse', null); DAY.spulseWait = !DAY.spulse; }
   const { data, error } = await sb.rpc('sales_pulse'); DAY.spulseWait = false; if(!error && data){ DAY.spulse = data; ls.set('silver_spulse', data); } if(S.view==='day') render(); }
-async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; ls.set('silver_pulse', data); if(S.view==='day') render(); if(!data.ai) loadAiSpend(); loadCashStat(); anStatus(); bkInfo(); }
+async function loadPulse(){ const { data, error } = await sb.rpc('owner_pulse'); if(error) return toast(errText(error)); DAY.pulse = data; ls.set('silver_pulse', data); if(S.view==='day') render(); if(!data.ai) loadAiSpend(); loadCashStat(); loadTodo(); anStatus(); bkInfo(); }
 /* наличные в кассе: остаток по тетради + наличные продажи Wipon с тех пор − расходы, внесённые в Silver */
 // наличные считаем только по Алматы — по Астане владельцу не нужны (22.11.2026)
 const cashStore = id => { const z = (S.allStores||S.stores||[]).find(q => q.id===+id); return z && z.city ? z.city !== 'Астана' : ![4,5,7].includes(+id); };
@@ -4021,22 +4024,33 @@ function pulseHtml(P){
     [k.transit_old, 'Просрочено у менеджера: товар в пути не принят дольше 4 дней', 'wh'], [k.transfers_old, 'Просрочено у менеджера: перемещения не приняты дольше 3 дней', 'wh'],
     [k.writeoffs_old, 'Ваше решение: списания ждут дольше 2 дней', 'wh'], [k.negative, 'Отрицательные остатки — проверить пересортицу (ни в чьём списке)', 'wh:stock'] ].filter(x => +x[0] > 0);
   const tile = (t, v, sub) => `<div class="card" style="flex:1;min-width:170px;padding:10px 12px"><div class="meta">${t}</div><div style="font-size:22px;font-weight:700" class="num">${v}</div><div class="meta">${sub}</div></div>`;
-  return `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:stretch">
+  return `${todoHtml(stuck)}<div class="row" style="gap:8px;flex-wrap:wrap;align-items:stretch">
       ${tile('Выручка сегодня', fmt(T), `${chip(pct(T,W))} к прошлой неделе на это время`)}
       ${tile('Чеков сегодня', C.toLocaleString('ru-RU'), T&&C?'средний чек '+fmt(Math.round(T/C)):'')}
       ${tile('С начала месяца', fmt(M), `${chip(pct(M,MP))} к тому же периоду прошлого месяца`)}${aiTile(P)}</div>
-    ${storesHtml(P)}
+    ${dayFold('stores', 'Магазины', fmt(T)+' сегодня', storesHtml(P))}
     ${(()=>{ const C = Object.values(DAY.cash||{}).filter(c=>c.est_kzt!=null); if(!C.length) return ''; const k = C.reduce((a,c)=>a+(+c.est_kzt||0),0), u = C.reduce((a,c)=>a+(+c.snap_usd||0),0);
-      return `<p style="margin:8px 0 0"><b>Наличных в кассах Алматы ≈ ${fmt(k)}${u?' и $'+u.toLocaleString('ru-RU'):''}</b></p>`; })()}
-    <details style="margin:6px 0 0"><summary class="meta" style="cursor:pointer">Как считается?</summary>
-    <p class="meta" style="margin:6px 0 0">Наличные в кассе = остаток по последней странице тетради + наличные продажи Wipon после неё − расходы и сдача денег, внесённые в Silver. Расходы учтены, только если внесены в Silver, — реальная сумма может быть меньше.</p>
-</details>
-    <h3 style="margin:16px 0 6px">Где застряла работа <span class="meta">— только просрочки и то, что не в списках команды</span></h3>
-    ${stuck.length?`<div class="stack" style="gap:6px">${stuck.map(([n,t,v])=>`<div class="card row" style="flex-wrap:wrap;gap:8px;padding:8px 12px"><span style="flex:1;min-width:200px">${t}</span><span class="chip warn">${(+n).toLocaleString('ru-RU')}</span><button class="btn small" data-pulsego="${v}">Открыть →</button></div>`).join('')}</div>`:'<div class="card">✅ Ничего не застряло</div>'}
-    <h3 style="margin:16px 0 6px">Команда: что сделано за вчера и сегодня</h3>
-    ${(P.team||[]).length?`<div class="scroll"><table><tbody>${P.team.map(m=>`<tr><td><b>${esc(m.name)}</b><br><span class="meta">${esc(ROLE[m.role]||m.role||'')}</span></td><td>${Object.entries(m.acts||{}).map(([a,c])=>`<span class="chip">${esc(a)}: ${c}</span>`).join(' ')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="card meta">За вчера и сегодня действий в Silver не было (приёмки, перемещения, списания, заказы). Продажи идут через Wipon и видны в таблице магазинов выше.</div>'}
+      return dayFold('cash', 'Наличные в кассах Алматы', '≈ '+fmt(k)+(u?' и $'+u.toLocaleString('ru-RU'):''), `<p class="meta" style="margin:6px 0 0">Наличные в кассе = остаток по последней странице тетради + наличные продажи Wipon после неё − расходы и сдача денег, внесённые в Silver. Расходы учтены, только если внесены в Silver, — реальная сумма может быть меньше. По магазинам — в блоке «Магазины».</p>`); })()}
+    ${dayFold('team', 'Команда: что сделано за вчера и сегодня', (P.team||[]).length+' чел.', (P.team||[]).length?`<div class="scroll"><table><tbody>${P.team.map(m=>`<tr><td><b>${esc(m.name)}</b><br><span class="meta">${esc(ROLE[m.role]||m.role||'')}</span></td><td>${Object.entries(m.acts||{}).map(([a,c])=>`<span class="chip">${esc(a)}: ${c}</span>`).join(' ')}</td></tr>`).join('')}</tbody></table></div>`:'<div class="meta">За вчера и сегодня действий в Silver не было (приёмки, перемещения, списания, заказы).</div>')}
     <p class="meta" style="margin-top:10px">Обновлено ${new Date(P.at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}. Задачи сотрудников — переключите «Посмотреть как» выше.</p>`;
 }
+/* сворачиваемый блок «Моего дня»: заголовок + одна цифра, детали по нажатию (состояние помним до перезагрузки) */
+function dayFold(k, title, num, body){ const o = (DAY.fold ||= {})[k];
+  return `<details class="card" data-dayfold="${k}" style="margin:10px 0 0;padding:10px 12px" ${o?'open':''}><summary class="row" style="cursor:pointer;list-style:none;gap:8px"><b style="flex:1">${o?'▾':'▸'} ${title}</b><b class="num">${num}</b></summary><div style="margin-top:8px">${body}</div></details>`; }
+document.addEventListener('toggle', e => { const d = e.target; if(d && d.dataset && d.dataset.dayfold){ (DAY.fold ||= {})[d.dataset.dayfold] = d.open; const b = d.querySelector('summary b'); if(b) b.textContent = (d.open?'▾':'▸') + b.textContent.slice(1); } }, true);
+/* «Что сделать сегодня» для владельца: просрочки + товарные дела (уценка, перемещение залежей, дозаказ, упущенные продажи) */
+async function loadTodo(){ const { data, error } = await sb.rpc('owner_todo'); if(error || !data) return; DAY.todo = data; if(S.view==='day') render(); }
+function todoHtml(stuck){ const T = DAY.todo || {}, n = v => (+v||0).toLocaleString('ru-RU');
+  const rows = stuck.map(([c,t,v]) => ({ t, n:c, lvl:'bad', btn:`data-pulsego="${v}"` }));
+  if(+T.buy) rows.push({ t:'Дозаказать ходовые товары', h:'продаются хорошо, а запаса меньше чем на 3 недели', n:T.buy, btn:'data-todo="buy"' });
+  if(+T.move) rows.push({ t:'Переместить залежи туда, где они продаются', h:'в одном магазине лежит больше 90 дней, в соседнем продаётся', n:T.move, btn:'data-todo="move"' });
+  if(+T.md) rows.push({ t:'Уценить залежи', h:'не продаются больше 90 дней · в рознице на '+fmt(T.md_sum), n:T.md, btn:'data-todo="md"' });
+  if(+T.lost) rows.push({ t:'Посмотреть упущенные продажи', h:'товара не было, а спрос был · за 30 дней −'+fmt(T.lost_sum), n:T.lost, btn:'data-todo="lost"' });
+  return `<h3 style="margin:4px 0 6px">Что сделать сегодня</h3>${rows.length ? `<div class="stack" style="gap:6px;margin-bottom:12px">${rows.map(r=>`<div class="card row" style="flex-wrap:wrap;gap:8px;padding:8px 12px;border-left:4px solid ${r.lvl==='bad'?'var(--bad)':'var(--warn,#d90)'}"><span style="flex:1;min-width:200px"><b>${r.t}</b>${r.h?`<br><span class="meta">${r.h}</span>`:''}</span><span class="chip ${r.lvl==='bad'?'zero':'warn'}">${n(r.n)}</span><button class="btn small primary" ${r.btn}>Открыть →</button></div>`).join('')}</div>` : '<div class="card" style="margin-bottom:12px">✅ На сегодня всё сделано</div>'}`; }
+document.addEventListener('click', async e => { const t = e.target.closest('button[data-todo]'); if(!t || S.view!=='day') return; const k = t.dataset.todo;
+  const v = k==='buy' ? 'po' : k==='move' ? 'wh' : 'analytics'; if(!(S.tabs||[]).some(x=>x[0]===v)) return toast('Нет доступа к этой вкладке');
+  if(k==='buy'){ PO.mode = 'suggest'; PO.list = null; } else if(k==='move'){ S.wmode = 'transfer'; TC.on = true; } else { S.anMode = 'inv'; INV.mdOpen = k==='md'; INV.lostOpen = k==='lost'; }
+  S.view = v; (S.lastView ||= {})[groupOf(S.view)[0]] = S.view; render(); scrollTo(0,0); await loadView(); });
 document.addEventListener('click', async e => { const t = e.target.closest('button[data-pulsego]'); if(!t || S.view!=='day') return; const [v, m] = t.dataset.pulsego.split(':');
   if(!(S.tabs||[]).some(x=>x[0]===v)) return toast('Нет доступа к этой вкладке'); if(v==='po'){ PO.mode = m || 'orders'; PO.list = null; } if(v==='wh' && m) S.wmode = m;
   S.view = v; (S.lastView ||= {})[groupOf(v)[0]] = v; render(); scrollTo(0,0); await loadView(); });
@@ -4109,7 +4123,7 @@ function renderDay(){
   const today = new Date().toLocaleDateString('ru-RU',{timeZone:'Asia/Almaty',weekday:'long',day:'numeric',month:'long'});
   if(r==='own'){ $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px;justify-content:flex-start"><h2 style="margin:0">Мой день</h2><span class="meta">${today}</span><span style="flex:1"></span><button class="btn small" id="help-open">📖 Инструкции</button><button class="btn small" id="day-ref">Обновить</button></div>
     <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><span class="meta">Посмотреть как:</span><div class="seg" style="display:inline-flex">${DAY_ROLES.map(([k,t])=>`<button data-dayrole="${k}" aria-pressed="${k===r}">${t}</button>`).join('')}</div></div>
-    ${dataHtml()}${anHtml()}${pulseHtml(DAY.pulse)}${DAY.pulse?teamLine(D):''}${DAY.pulse?bkRemind():''}${S.canAttn?attnHtml(true,'own'):''}`; DAY.items = []; return; }
+    ${pulseHtml(DAY.pulse)}<div style="height:12px"></div>${dataHtml()}${anHtml()}${DAY.pulse?teamLine(D):''}${DAY.pulse?bkRemind():''}${S.canAttn?attnHtml(true,'own'):''}`; DAY.items = []; return; }
   let items = D ? [...(D[r]||[])] : [];
   if(r==='buy'){ const sg = DAY.sug && DAY.sug!=='wait' ? DAY.sug : null;
     items.unshift({ k:'sug', t:'Дозаказать — товар заканчивается', n: sg ? sg.n : 1, wait: !sg, h: sg ? (sg.n ? `Всего ${sg.units.toLocaleString('ru-RU')} шт. Удобно формировать заказ сразу по поставщику.` : '') : 'Считаем…', go:'po', mode:'suggest', lvl:'warn' }); }
