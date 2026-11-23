@@ -22,7 +22,7 @@ const S = {
 /* ---------- утилиты ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const INV = { key:null, data:null };  // кэш «Управления запасами» (inv_dashboard) — по набору магазинов
+const INV = { key:null, data:null, mdOpen:false, mdPage:0, lostOpen:false, lostPage:0, cell:null, cellRows:null, cellPage:0, sup:null, supRows:null };  // кэш «Управления запасами» (inv_dashboard) — по набору магазинов
 const fmt = n => Math.round(Number(n)||0).toLocaleString('ru-RU').replace(/ |,/g,' ') + ' ₸';
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c=='x'?r:(r&3|8)).toString(16)}));
 const isBoss = () => S.me && ['owner','manager','viewer','accountant'].includes(S.me.role);  // видит всё; viewer — без изменений
@@ -1740,7 +1740,7 @@ function renderStockAn(){
 async function loadInvAn(){
   const key = JSON.stringify(selStores());
   if(INV.data && INV.key===key) return;  // тот же набор магазинов — берём из кэша
-  INV.data = null; INV.key = key;
+  INV.data = null; INV.key = key; INV.cell = null; INV.sup = null;
   const { data, error } = await sb.rpc('inv_dashboard', { p_stores: selStores() });
   if(INV.key!==key) return;  // пока грузили, выбор магазинов сменился
   if(error){ toast(errText(error)); INV.data = { err:errText(error) }; return; }
@@ -1758,32 +1758,53 @@ function invTilesHtml(T){
     ${tile('Деньги в залежах', fmt(T.frozen_cost), `по себест. · в рознице ${fmt(T.frozen_retail)} · ${invN(T.frozen_units)} шт.`)}
     ${tile('Упущено за 30 дней', fmt(T.lost30), 'товар был в нуле, а спрос был')}
     ${tile('Ходовые', invN(T.n_hot), 'артикулов')}${tile('Норма', invN(T.n_norm), 'артикулов')}
-    ${tile('Залежь', invN(T.n_stale), 'артикулов')}${tile('Мёртвые', invN(T.n_dead), 'артикулов')}
+    ${tile('Залежь', invN(T.n_stale), 'артикулов')}${tile('Мёртвые', invN(T.n_dead), 'артикулов')}${tile('Новые', invN(T.n_new), 'пришли < 60 дн., не уцениваем')}
   </div>`;
 }
 function invMatrixHtml(M){
   const cell = (a, x) => { const r = (M||[]).find(m=>m.abc===a && m.xyz===x) || {}, k = a+x;
     const bg = ['AX','AY','BX'].includes(k) ? 'rgba(52,199,89,.12)' : ['CZ','CY','BZ'].includes(k) ? 'rgba(255,59,48,.08)' : 'transparent';
-    return `<td style="background:${bg};text-align:center"><b>${k}</b><br><span class="num">${invN(r.skus)} арт.</span><br><span class="meta num">${fmt(r.stock_retail)}</span></td>`; };
+    return `<td data-invcell="${k}" style="background:${bg};text-align:center;cursor:pointer;${INV.cell===k?'outline:2px solid var(--accent,#5b7cfa);outline-offset:-2px':''}"><b>${k}</b><br><span class="num">${invN(r.skus)} арт.</span><br><span class="meta num">${fmt(r.stock_retail)}</span></td>`; };
   return `<div class="card" style="margin-top:12px"><div class="label">ABC × XYZ</div>
     <div class="scroll" style="margin-top:8px"><table><thead><tr><th></th><th>X</th><th>Y</th><th>Z</th></tr></thead><tbody>
       ${['A','B','C'].map(a=>`<tr><th>${a}</th>${['X','Y','Z'].map(x=>cell(a,x)).join('')}</tr>`).join('')}
     </tbody></table></div>
-    <div class="meta" style="margin-top:6px">A — 80% выручки, X — стабильный спрос. AX/AY держать всегда, CZ — не заказывать.</div></div>`;
+    <div class="meta" style="margin-top:6px">A — 80% выручки, X — стабильный спрос. AX/AY держать всегда, CZ — не заказывать. Нажмите на клетку, чтобы увидеть товары.</div>${INV.cell?invCellHtml():''}</div>`;
 }
+function invCellHtml(){
+  const R = INV.cellRows, k = INV.cell;
+  const head = `<div class="row" style="margin-top:10px"><b>${k}: товары</b><button class="btn small" data-invcell="${k}">Скрыть</button></div>`;
+  if(!R) return head+'<div class="meta">Загружаем товары…</div>';
+  if(R.err) return head+`<div class="meta">${esc(R.err)}</div>`;
+  if(!R.length) return head+'<div class="meta">Нет товаров</div>';
+  const pg = Math.min(INV.cellPage, Math.ceil(R.length/15)-1);
+  return head+`<div class="meta" style="margin:2px 0 6px">${k[0]==='C'?'Сначала — где больше денег в остатке.':'Сначала — самые продаваемые за 90 дней.'}</div><div class="stack" style="gap:4px">${R.slice(pg*15, pg*15+15).map(p=>`<div class="row" style="justify-content:flex-start;gap:8px">${p.photo_url?thumb(p):''}<div style="min-width:0;flex:1">${pcl(p.id, esc(p.name))}<br>
+    <span class="meta num">${invN(p.bal)} шт · на ${fmt(p.stock_retail)} · продано 30 дн.: ${invN(p.sold30)} · выручка 90 дн.: ${fmt(p.rev90)}</span></div>
+    <span class="chip ${INV_ST[p.status]??''}">${esc(p.status||'—')}</span></div>`).join('')}</div>${invPages(R.length, pg, 'data-invcellpg')}`;
+}
+// вкладки по 15 позиций для длинных списков
+const invPages = (n, pg, attr) => { const per = 15, pages = Math.ceil(n/per); if(pages <= 1) return '';
+  if(pages <= 10) return `<div class="seg" style="display:inline-flex;flex-wrap:wrap;margin-top:8px">${Array.from({length:pages},(_,i)=>`<button ${attr}="${i}" aria-pressed="${i===pg}">${i*per+1}–${Math.min((i+1)*per, n)}</button>`).join('')}</div>`;
+  return `<div class="row" style="justify-content:flex-start;gap:8px;margin-top:8px"><button class="btn small" ${attr}="0" ${pg?'':'disabled'}>«</button><button class="btn small" ${attr}="${Math.max(pg-1,0)}" ${pg?'':'disabled'}>‹</button>
+    <span class="meta num">${pg*per+1}–${Math.min((pg+1)*per, n)} из ${invN(n)}</span><button class="btn small" ${attr}="${Math.min(pg+1,pages-1)}" ${pg<pages-1?'':'disabled'}>›</button><button class="btn small" ${attr}="${pages-1}" ${pg<pages-1?'':'disabled'}>»</button></div>`; };
 function invLostHtml(L){
-  return `<div class="card" style="margin-top:12px"><div class="label">Упущенные продажи</div>
-    ${(L||[]).length ? `<div class="stack" style="gap:6px;margin-top:8px">${L.map(p=>`<div class="row" style="justify-content:flex-start;gap:10px">${p.photo_url?thumb(p):''}
+  L = L || []; const pg = Math.min(INV.lostPage, Math.max(0, Math.ceil(L.length/15)-1)), rows = L.slice(pg*15, pg*15+15);
+  const sum = L.reduce((a,p)=>a+(+p.lost30||0),0);
+  return `<div class="card" style="margin-top:12px"><div class="row" style="cursor:pointer" data-invlosttog="1"><div class="label">${INV.lostOpen?'▾':'▸'} Упущенные продажи · ${invN(L.length)} поз. · −${fmt(sum)}</div></div>
+    ${!INV.lostOpen ? '' : L.length ? `<div class="stack" style="gap:6px;margin-top:8px">${rows.map(p=>`<div class="row" style="justify-content:flex-start;gap:10px">${p.photo_url?thumb(p):''}
       <div style="min-width:0;flex:1">${pcl(p.id, esc(p.name))}<br><span class="meta num">${esc(p.barcode||'')} · ${(+p.speed||0).toFixed(1)} шт./день · в нуле ${invN(p.zero30)} дн.</span></div>
-      <b class="num" style="color:var(--bad);white-space:nowrap">−${fmt(p.lost30)}</b></div>`).join('')}</div>` : '<div class="meta">Упущенных продаж нет</div>'}</div>`;
+      <b class="num" style="color:var(--bad);white-space:nowrap">−${fmt(p.lost30)}</b></div>`).join('')}</div>${invPages(L.length, pg, 'data-invlostpg')}` : '<div class="meta">Упущенных продаж нет</div>'}</div>`;
 }
 function invMarkHtml(K, R){
   const rules = (R||[]).map(r=>`${r.d} дн. → −${r.p}%`).join(', ');
-  return `<div class="card" style="margin-top:12px"><div class="row"><div class="label">Уценить</div>${(K||[]).length?'<button class="btn small" id="inv-copy">Скопировать список</button>':''}</div>
-    <div class="meta" style="margin:4px 0 8px">${rules?esc(rules)+', ':''}ниже себестоимости не опускаем. Цены меняются вручную в Wipon.</div>
-    ${invTbl(['Товар','Дней без продаж','Шт','Цена → новая',''], (K||[]).map(p=>`<tr><td>${pcl(p.id, esc(p.name))}<br><span class="meta num">${esc(p.barcode||'')}</span></td>
+  K = K || []; const per = 15, pages = Math.max(1, Math.ceil(K.length/per)), pg = Math.min(INV.mdPage, pages-1);
+  const rows = K.slice(pg*per, pg*per+per);
+  const tabs = invPages(K.length, pg, 'data-invmdpg');
+  return `<div class="card" style="margin-top:12px"><div class="row" style="cursor:pointer" data-invmdtog="1"><div class="label">${INV.mdOpen?'▾':'▸'} Уценить · ${invN(K.length)} поз.</div>${INV.mdOpen&&K.length?'<button class="btn small" id="inv-copy">Скопировать список</button>':''}</div>
+    ${!INV.mdOpen ? '' : `<div class="meta" style="margin:4px 0 8px">${rules?esc(rules)+', ':''}ниже себестоимости не опускаем. Новые товары (пришли меньше 60 дней назад) не уцениваем. Цены меняются вручную в Wipon.</div>
+    ${invTbl(['Товар','Дней без продаж','Шт','Цена → новая',''], rows.map(p=>`<tr><td>${pcl(p.id, esc(p.name))}<br><span class="meta num">${esc(p.barcode||'')}</span></td>
       <td class="num">${invN(p.idle)}</td><td class="num">${invN(p.qty)}</td><td class="num" style="white-space:nowrap">${fmt(p.price)} → <b>${fmt(p.new_price)}</b></td>
-      <td class="num" style="color:var(--warn);font-weight:600">−${Math.round(+p.pct||0)}%</td></tr>`).join(''), 'Уценять нечего')}</div>`;
+      <td class="num" style="color:var(--warn);font-weight:600">−${Math.round(+p.pct||0)}%</td></tr>`).join(''), 'Уценять нечего')}${tabs}`}</div>`;
 }
 function invBatchHtml(B){
   return `<div class="card" style="margin-top:12px"><div class="label">Продаваемость партий из Китая</div>
@@ -1799,10 +1820,22 @@ function invOtbHtml(O){
     <div class="meta" style="margin-top:6px">Всё по себестоимости. «Можно закупить» = целевой запас − остаток − в пути.</div></div>`;
 }
 function invGmroiHtml(C, P){
-  const t = (title, rows) => `<div><div class="meta" style="margin-bottom:4px">${title}</div>${invTbl(['','Маржа за год','Запас','GMROI'], (rows||[]).slice(0,15).map(r=>`<tr><td>${esc(r.name||'—')}</td><td class="num">${fmt(r.margin_year)}</td><td class="num">${fmt(r.stock_cost)}</td><td class="num">${invGm(r.gmroi)}</td></tr>`).join(''))}</div>`;
+  const t = (title, rows, sup) => `<div><div class="meta" style="margin-bottom:4px">${title}</div>${invTbl(['','Маржа за год','Запас','GMROI'], (rows||[]).slice(0,15).map(r=>{
+      const click = sup && r.id!=null, open = click && INV.sup===r.id;
+      return `<tr ${click?`data-invsup="${r.id}" style="cursor:pointer"`:''}><td>${click?(open?'▾ ':'▸ '):''}${esc(r.name||'—')}</td><td class="num">${fmt(r.margin_year)}</td><td class="num">${fmt(r.stock_cost)}</td><td class="num">${invGm(r.gmroi)}</td></tr>${open?`<tr><td colspan="4">${invSupHtml()}</td></tr>`:''}`;
+    }).join(''))}</div>`;
   return `<div class="card" style="margin-top:12px"><div class="label">Отдача на вложенный тенге (GMROI)</div>
-    <div class="grid2" style="gap:12px;margin-top:8px">${t('По категориям', C)}${t('По поставщикам (топ-15)', P)}</div>
+    <div class="grid2" style="gap:12px;margin-top:8px">${t('По категориям', C)}${t('По поставщикам (топ-15) — нажмите, чтобы увидеть товары', P, true)}</div>
     <div class="meta" style="margin-top:6px">Сколько тенге валовой прибыли за год приносит каждый тенге в запасе (по себестоимости).</div></div>`;
+}
+function invSupHtml(){
+  const R = INV.supRows;
+  if(!R) return '<div class="meta">Загружаем товары…</div>';
+  if(R.err) return `<div class="meta">${esc(R.err)}</div>`;
+  if(!R.length) return '<div class="meta">Нет товаров</div>';
+  return `<div class="stack" style="gap:4px;max-height:420px;overflow:auto">${R.map(p=>`<div class="row" style="justify-content:flex-start;gap:8px">${p.photo_url?thumb(p):''}<div style="min-width:0;flex:1">${pcl(p.id, esc(p.name))}<br>
+    <span class="meta num">${invN(p.bal)} шт · продано 30 дн.: ${invN(p.sold30)} · выручка 90 дн.: ${fmt(p.rev90)}${p.last_order?' · заказ '+invDm(p.last_order):''}</span></div>
+    <span class="chip ${INV_ST[p.status]??''}">${esc(p.status||'—')}</span></div>`).join('')}</div>`;
 }
 function renderInvAn(){
   const D = INV.data;
@@ -1811,6 +1844,22 @@ function renderInvAn(){
     ${invTilesHtml(D.tiles||{})}${invMatrixHtml(D.matrix)}${invLostHtml(D.lost)}${invMarkHtml(D.markdown, D.rules)}
     ${invBatchHtml(D.batches)}${invOtbHtml(D.otb)}${invGmroiHtml(D.gmroi_cat, D.gmroi_sup)}`}`;
 }
+document.addEventListener('click', async e => {
+  const c = e.target.closest && e.target.closest('[data-invmdtog],[data-invmdpg],[data-invlosttog],[data-invlostpg],[data-invcellpg],[data-invcell],[data-invsup]'); if(!c || e.target.closest('#inv-copy,a,[data-pcl]')) return;
+  if(c.dataset.invmdtog){ INV.mdOpen = !INV.mdOpen; renderInvAn(); return; }
+  if(c.dataset.invlosttog){ INV.lostOpen = !INV.lostOpen; renderInvAn(); return; }
+  if(c.dataset.invlostpg){ INV.lostPage = +c.dataset.invlostpg; renderInvAn(); return; }
+  if(c.dataset.invcellpg){ INV.cellPage = +c.dataset.invcellpg; renderInvAn(); return; }
+  if(c.dataset.invcell){ const k = c.dataset.invcell; if(INV.cell===k){ INV.cell = null; renderInvAn(); return; }
+    INV.cell = k; INV.cellRows = null; INV.cellPage = 0; renderInvAn();
+    const { data, error } = await sb.rpc('inv_cell', { p_abc:k[0], p_xyz:k[1], p_stores: selStores() });
+    if(INV.cell!==k) return; INV.cellRows = error ? { err:errText(error) } : (data||[]); renderInvAn(); return; }
+  if(c.dataset.invmdpg){ INV.mdPage = +c.dataset.invmdpg; renderInvAn(); return; }
+  const id = +c.dataset.invsup; if(INV.sup===id){ INV.sup = null; renderInvAn(); return; }
+  INV.sup = id; INV.supRows = null; renderInvAn();
+  const { data, error } = await sb.rpc('inv_supplier', { p_sup:id, p_stores: selStores() });
+  if(INV.sup!==id) return; INV.supRows = error ? { err:errText(error) } : (data||[]); renderInvAn();
+});
 // «Скопировать список» уценки: название, штрихкод, новая цена — для ручной смены цен в Wipon
 document.addEventListener('click', async e => { const t = e.target.closest && e.target.closest('#inv-copy'); if(!t) return;
   const txt = ((INV.data||{}).markdown||[]).map(p=>`${p.name}\t${p.barcode||''}\t${Math.round(+p.new_price||0)}`).join('\n');
@@ -1819,7 +1868,7 @@ document.addEventListener('click', async e => { const t = e.target.closest && e.
 
 /* статус запаса в карточке товара (inv_product): сеть + по магазинам */
 const invCan = () => S.me && ['owner','manager','purchaser','viewer','accountant'].includes(S.me.role);
-const INV_ST = { 'ходовой':'ok', 'норма':'', 'залежь':'warn', 'мёртвый':'zero', 'нет':'zero' };
+const INV_ST = { 'новый':'ok', 'ходовой':'ok', 'норма':'', 'залежь':'warn', 'мёртвый':'zero', 'нет':'zero' };
 function invProdLoad(id, f){
   if(!id || !invCan() || (f.inv ||= {})[id]) return;
   f.inv[id] = 'wait';
