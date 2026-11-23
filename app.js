@@ -545,6 +545,7 @@ function renderShell(){
   // остальные вкладки: владельцу все, остальным — по настройке «Какие вкладки видит каждая роль» (или по умолчанию)
   for(const [v,t] of EXTRA_TABS){ if(S.me.role==='owner' || v==='day' || (Array.isArray(acc) ? acc.includes(v) : (EXTRA_DEF[v]||[]).includes(S.me.role))) tabs.push([v, v==='pay' && !isBoss() ? 'Моя зарплата' : t]); }
   if(S.me.role==='owner') tabs.push(['adm','Административный штат'], ['audit','Журнал']);
+  else if(['manager','purchaser'].includes(S.me.role) && Array.isArray(acc) && acc.includes('audit')) tabs.push(['audit','Журнал']);  // только просмотр, в пределах своего доступа
   // касса Silver (продажа, смены, расходы) пока не используется — чеки пробиваются в Wipon; включается настройкой pos_enabled
   if(!S.posOn){ const off = ['pos','shifts', ...(isBoss() ? [] : ['cash'])]; tabs.splice(0, tabs.length, ...tabs.filter(([v]) => !off.includes(v)));
     // без кассы Silver «Расходы» — это журнал расходов магазинов (из тетрадей), он живёт в «Аналитике» рядом с «Рентабельностью»
@@ -2786,6 +2787,7 @@ document.addEventListener('toggle', e => { const d = e.target; if(d.dataset && d
 const CT = { brand:'moon', list:null, ai:null, busy:'', add:false, ig:null, sure:'' };
 const IG_NAME = { moon:'moon.collection.kz', sunshine:'sunshine_jewelry_kz' };
 const CT_FMT = { reels:'Рилс', carousel:'Карусель', stories:'Сторис', photo:'Фото' };
+const ctPub = () => !!(CT.ig && CT.ig.can_publish);
 const ctEdit = () => S.me && ['owner','manager','purchaser'].includes(S.me.role);
 const ctLocal = v => v ? new Date(v).toLocaleString('sv-SE',{ timeZone:'Asia/Almaty' }).slice(0,16).replace(' ','T') : '';
 const ctNice = v => v ? new Date(v).toLocaleString('ru-RU',{ timeZone:'Asia/Almaty', weekday:'short', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : 'дата не выбрана';
@@ -2858,7 +2860,7 @@ function ctCard(c){
     <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
       <label class="meta">Формат <select data-ctf="${c.id}:format">${Object.entries(CT_FMT).map(([k,v])=>`<option value="${k}" ${c.format===k?'selected':''}>${v}</option>`).join('')}</select></label>
       <label class="meta">Дата и время выкладки <input type="datetime-local" data-ctf="${c.id}:publish_at" value="${ctLocal(c.publish_at)}"></label>
-      <label class="meta" style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" data-ctauto="${c.id}" ${c.auto_publish?'checked':''}>выложить в Instagram автоматически в эту дату</label></div>
+      <label class="meta" style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" data-ctauto="${c.id}" ${c.auto_publish?'checked':''} ${ctPub()?'':'disabled title="Выкладывать в Instagram может владелец, закуп или менеджер с правом публикации"'}>выложить в Instagram автоматически в эту дату</label></div>
     <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
       <button class="btn small primary" data-ctok="${c.id}">✅ Утвердить и поставить в план</button>
       <button class="btn small" data-ctgen="${c.id}" ${CT.ai?'':'disabled title="Нужен ключ ИИ"'}>${CT.busy===c.id?'Пишем…':(c.caption?'✨ Переписать ИИ':'✨ Написать ИИ')}</button>
@@ -2887,8 +2889,8 @@ function renderContent(){
     <h3>📅 План выкладки</h3>
     ${plan.length?`<div class="scroll"><table><tbody>${plan.map(c=>`<tr><td class="num" style="white-space:nowrap">${ctNice(c.publish_at)}</td><td><b>${esc(c.title)}</b> <span class="chip">${CT_FMT[c.format]||c.format}</span><br>
       <span class="meta">${esc((c.caption||'').slice(0,120))}${(c.caption||'').length>120?'…':''}</span>${(c.media||[]).length?`<br>${(c.media||[]).slice(0,5).map(m=>`<img src="${esc(m.url)}" alt="" style="width:36px;height:45px;object-fit:cover;border-radius:4px;margin:4px 2px 0 0">`).join('')}`:''}${c.posted_url?`<br><a href="${esc(c.posted_url)}" target="_blank" rel="noopener">пост в Instagram ↗</a>`:''}${c.ig_status==='error'&&c.ig_error?`<br><span class="meta" style="color:var(--bad)">${esc(c.ig_error)}</span>`:''}</td>
-      <td>${ctIgChip(c)}<br>${ctEdit()?`<button class="btn small" data-ctcopy="${c.id}">Текст</button>${c.status!=='posted'&&c.ig_status!=='posted'?`${((CT.ig||{}).brands||{})[CT.brand]&&CT.ig.brands[CT.brand].connected&&c.ig_status!=='publishing'?` <button class="btn small primary" data-ctpub="${c.id}">${CT.busy==='p'+c.id?'Выкладываем…':CT.sure===c.id?'Точно выложить?':'📤 Выложить сейчас'}</button>`:''}
-        <label class="meta" style="display:inline-flex;gap:4px;align-items:center;margin-top:4px"><input type="checkbox" data-ctauto="${c.id}" ${c.auto_publish?'checked':''}>авто в дату</label>
+      <td>${ctIgChip(c)}<br>${ctEdit()?`<button class="btn small" data-ctcopy="${c.id}">Текст</button>${c.status!=='posted'&&c.ig_status!=='posted'?`${((CT.ig||{}).brands||{})[CT.brand]&&CT.ig.brands[CT.brand].connected&&c.ig_status!=='publishing'&&ctPub()?` <button class="btn small primary" data-ctpub="${c.id}">${CT.busy==='p'+c.id?'Выкладываем…':CT.sure===c.id?'Точно выложить?':'📤 Выложить сейчас'}</button>`:''}
+        <label class="meta" style="display:inline-flex;gap:4px;align-items:center;margin-top:4px"><input type="checkbox" data-ctauto="${c.id}" ${c.auto_publish?'checked':''} ${ctPub()?'':'disabled title="Выкладывать в Instagram может владелец, закуп или менеджер с правом публикации"'}>авто в дату</label>
         <br><button class="btn small" data-ctdone="${c.id}">✓ Выложено вручную</button> <button class="btn small" data-ctst="${c.id}:draft">Править</button>`:''}`:''}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Утверждённых постов пока нет</div>'}
   </div></div>`}`;
 }
@@ -4576,8 +4578,8 @@ async function loadAudit(more){
 function renderAudit(){
   const L = AU.rows, A = AU.actors || {};
   $('#main').innerHTML = `<h2>Журнал действий</h2>
-  <p class="meta" style="margin:2px 0 10px">Кто и что менял: цены и себестоимость, сотрудников и права, склад вручную (приёмка, списание, ревизия, оприходование, перемещение), возвраты, настройки, ключи, Instagram. Загрузки из Wipon не пишутся. Хранится 400 дней, видите только вы.</p>
-  <div class="filters">${AU_GROUPS.map(([k,v])=>`<button class="btn small ${AU.ent===k?'primary':''}" data-auent="${k}">${v}</button>`).join('')}</div>
+  <p class="meta" style="margin:2px 0 10px">Кто и что менял: цены и себестоимость, сотрудников и права, склад вручную (приёмка, списание, ревизия, оприходование, перемещение), возвраты, настройки, ключи, Instagram. Загрузки из Wipon не пишутся. Хранится 400 дней${S.me.role==='owner' ? ', видите только вы' : ' — только просмотр, в пределах вашего доступа'}.</p>
+  <div class="filters">${AU_GROUPS.filter(([k]) => S.me.role==='owner' || !/employee|settings|instagram/.test(k) && (S.me.role==='manager' || !/sales|certificate/.test(k))).map(([k,v])=>`<button class="btn small ${AU.ent===k?'primary':''}" data-auent="${k}">${v}</button>`).join('')}</div>
   <div class="filters"><select id="au-actor" aria-label="Сотрудник"><option value="">Все сотрудники</option>${Object.entries(A).map(([id,n])=>`<option value="${id}" ${AU.actor===id?'selected':''}>${esc(n||'—')}</option>`).join('')}</select>
     <input id="au-q" placeholder="Поиск: товар, сотрудник, значение" value="${esc(AU.q)}" style="flex:1;min-width:180px" inputmode="search"></div>
   ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Записей пока нет — журнал ведётся с 20.11.2026</div>':`<div class="scroll"><table class="mc"><thead><tr><th>Когда</th><th>Кто</th><th>Что</th><th>Было → стало</th></tr></thead><tbody>
