@@ -81,12 +81,23 @@ function silverWiponAll(K){
     const cur = L.find(c => c.employee_id === me) || L[0]; if(!cur) throw Error('нет списка ИП');
     const order = [...L.filter(c => c !== cur), cur];   // текущее ИП — последним, чтобы в Wipon осталось как было
     let active = cur, n = 0, sales = 0;
+    // история приёмок (только для аналитики Silver): дозагружаем новые строки по каждому ИП
+    const SBR = 'https://ottuadjdksxipfjytlyv.supabase.co/rest/v1/rpc/';
+    const sbr = async (fn, body) => { const r = await fetch(SBR + fn, { method:'POST', headers:{ 'Content-Type':'application/json', apikey:'sb_publishable_OyN1810CuHrR9Ys0VTSExA_XY-nO7zo' }, body:JSON.stringify(body) }); if(!r.ok) throw Error('Silver ' + r.status); return r.json(); };
+    const LAST = await sbr('wipon_arrivals_last', { p_key:K }).catch(() => ({}));
+    const amap = x => ({ id:x.id, c:x.item && x.item.company_id, s:x.stock && x.stock.id, sn:x.stock_name, i:x.item && x.item.id, b:x.item && x.item.barcode, n:(x.item_name||'').slice(0,120), q:x.quantity, p:x.purchase_price, d:x.date, k:x.invoice && x.invoice.kind_id, r:x.invoice && x.invoice.reason_id, st:x.invoice && x.invoice.status });
+    const arrPull = async c => { const since = LAST[c.id] ? new Date(LAST[c.id]).getTime() - 2*864e5 : Date.now() - 30*864e5;
+      for(let pg = 1; pg <= 60; pg++){ const a = await W(tk, '/v1/employee/' + c.employee_id + '/arrival?page=' + pg + '&per_page=100'); const D = a.data || []; if(!D.length) break;
+        await sbr('wipon_arrivals_ingest', { p_key:K, p:D.map(amap) }); arr += D.length;
+        if(new Date(D[D.length-1].date).getTime() < since || pg >= ((a.meta||{}).last_page || 1)) break; } };
+    let arr = 0;
     try{
       for(const c of order){
         say('Silver: ИП «' + c.name + '» (' + (++n) + ' из ' + order.length + ')…');
         if(c !== active){ const j = await W(tk, '/v1/switch', { method:'POST', body:JSON.stringify({ company_id:c.id }) }); const nt = j.access_token || (j.data && j.data.access_token); if(!nt) throw Error('Wipon не переключил ИП'); tk = nt; active = c; }
         await call({ action:'set_token', token:tk, emps:[c.employee_id], cos:{ [c.employee_id]:c.name } });
         const p = await call({ action:'pull_one', emp:c.employee_id }).catch(() => null); if(p && p.sales) sales += +p.sales;
+        await arrPull(c).catch(() => null);
       }
     } finally {
       try{ const v = V(); v.user.token = tk; localStorage.setItem('vuex', JSON.stringify(v)); }catch(_){ }   // свежий сеанс — в эту вкладку Wipon
