@@ -22,6 +22,7 @@ const S = {
 /* ---------- утилиты ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const INV = { key:null, data:null };  // кэш «Управления запасами» (inv_dashboard) — по набору магазинов
 const fmt = n => Math.round(Number(n)||0).toLocaleString('ru-RU').replace(/ |,/g,' ') + ' ₸';
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c=='x'?r:(r&3|8)).toString(16)}));
 const isBoss = () => S.me && ['owner','manager','viewer','accountant'].includes(S.me.role);  // видит всё; viewer — без изменений
@@ -1377,7 +1378,7 @@ function periodRange(){
   const days = { today:0, '7':6, '30':29, '90':89, '365':364 }[S.period] ?? 29;
   const from = new Date(d0); from.setDate(from.getDate()-days); return [from, now];
 }
-async function loadAnalytics(){ return S.anMode==='stock' ? loadStockAn() : loadSalesAn(); }
+async function loadAnalytics(){ return S.anMode==='stock' ? loadStockAn() : S.anMode==='inv' ? loadInvAn() : loadSalesAn(); }
 async function loadSalesAn(){
   const [from, to] = periodRange(), ids = selStores();
   const len = to - from, pFrom = new Date(from - len - 1000), pTo = new Date(from - 1000);
@@ -1438,8 +1439,8 @@ function deltaHtml(cur, prev, dir, prevText){
   const col = r===0 || dir===0 ? 'var(--muted)' : ((r>0) === (dir>0) ? 'var(--ok)' : 'var(--bad)');
   return `<span title="Предыдущий период: ${esc(prevText)}" style="font-size:13px;font-weight:600;color:${col};white-space:nowrap">${r>0?'▲ +':r<0?'▼ ':''}${r}%</span>`;
 }
-function renderAnalytics(){ return S.anMode==='stock' ? renderStockAn() : renderSalesAn(); }
-const anModeHtml = () => `<div class="seg" style="display:inline-flex;margin-bottom:10px"><button data-anmode="sales" aria-pressed="${S.anMode==='sales'}">Продажи</button><button data-anmode="stock" aria-pressed="${S.anMode==='stock'}">Остатки</button></div>`;
+function renderAnalytics(){ return S.anMode==='stock' ? renderStockAn() : S.anMode==='inv' ? renderInvAn() : renderSalesAn(); }
+const anModeHtml = () => `<div class="seg" style="display:inline-flex;margin-bottom:10px"><button data-anmode="sales" aria-pressed="${S.anMode==='sales'}">Продажи</button><button data-anmode="stock" aria-pressed="${S.anMode==='stock'}">Остатки</button><button data-anmode="inv" aria-pressed="${S.anMode==='inv'}">Управление</button></div>`;
 /* праздники и выходные Казахстана (2026 — по производственному календарю с изменениями от 29.06.2026) */
 const KZ_EXACT = {
   2026: { '01-01':'Новый год','01-02':'Новый год','01-07':'Православное Рождество','03-08':'Международный женский день','03-09':'Выходной за 8 Марта',
@@ -1735,6 +1736,110 @@ function renderStockAn(){
     <p class="meta">Материал и цвет взяты из Google-таблицы товаров, а где их там нет — из названия. Товары без материала стоят в строке «Не указан».</p>`}`;
 }
 
+/* ---------- управление запасами (Аналитика → «Управление») ---------- */
+async function loadInvAn(){
+  const key = JSON.stringify(selStores());
+  if(INV.data && INV.key===key) return;  // тот же набор магазинов — берём из кэша
+  INV.data = null; INV.key = key;
+  const { data, error } = await sb.rpc('inv_dashboard', { p_stores: selStores() });
+  if(INV.key!==key) return;  // пока грузили, выбор магазинов сменился
+  if(error){ toast(errText(error)); INV.data = { err:errText(error) }; return; }
+  INV.data = data || {};
+}
+const invN = v => (+v||0).toLocaleString('ru-RU');
+const invDm = d => d ? new Date(d).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' }) : '—';
+const invTbl = (head, rows, empty) => `<div class="scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows || `<tr><td colspan="${head.length}" class="meta">${empty||'Нет данных'}</td></tr>`}</tbody></table></div>`;
+// процент продаваемости партии: зелёный — хорошо, оранжевый — средне, красный — плохо (норма растёт со сроком)
+const invSt = (v, goal) => v==null ? '<span class="meta">—</span>' : `<span style="font-weight:600;color:${v>=goal?'var(--ok)':v>=goal/2?'var(--warn)':'var(--bad)'}">${Math.round(v)}%</span>`;
+const invGm = v => v==null ? '—' : `<span style="font-weight:600;color:${v>=3?'var(--ok)':v<1?'var(--bad)':'inherit'}">${(+v).toFixed(1)}×</span>`;
+function invTilesHtml(T){
+  const tile = (k, v, m) => `<div class="card"><div class="label">${k}</div><div class="total num" style="font-size:20px">${v}</div>${m?`<div class="meta">${m}</div>`:''}</div>`;
+  return `<div class="pays" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr))">
+    ${tile('Деньги в залежах', fmt(T.frozen_cost), `по себест. · в рознице ${fmt(T.frozen_retail)} · ${invN(T.frozen_units)} шт.`)}
+    ${tile('Упущено за 30 дней', fmt(T.lost30), 'товар был в нуле, а спрос был')}
+    ${tile('Ходовые', invN(T.n_hot), 'артикулов')}${tile('Норма', invN(T.n_norm), 'артикулов')}
+    ${tile('Залежь', invN(T.n_stale), 'артикулов')}${tile('Мёртвые', invN(T.n_dead), 'артикулов')}
+  </div>`;
+}
+function invMatrixHtml(M){
+  const cell = (a, x) => { const r = (M||[]).find(m=>m.abc===a && m.xyz===x) || {}, k = a+x;
+    const bg = ['AX','AY','BX'].includes(k) ? 'rgba(52,199,89,.12)' : ['CZ','CY','BZ'].includes(k) ? 'rgba(255,59,48,.08)' : 'transparent';
+    return `<td style="background:${bg};text-align:center"><b>${k}</b><br><span class="num">${invN(r.skus)} арт.</span><br><span class="meta num">${fmt(r.stock_retail)}</span></td>`; };
+  return `<div class="card" style="margin-top:12px"><div class="label">ABC × XYZ</div>
+    <div class="scroll" style="margin-top:8px"><table><thead><tr><th></th><th>X</th><th>Y</th><th>Z</th></tr></thead><tbody>
+      ${['A','B','C'].map(a=>`<tr><th>${a}</th>${['X','Y','Z'].map(x=>cell(a,x)).join('')}</tr>`).join('')}
+    </tbody></table></div>
+    <div class="meta" style="margin-top:6px">A — 80% выручки, X — стабильный спрос. AX/AY держать всегда, CZ — не заказывать.</div></div>`;
+}
+function invLostHtml(L){
+  return `<div class="card" style="margin-top:12px"><div class="label">Упущенные продажи</div>
+    ${(L||[]).length ? `<div class="stack" style="gap:6px;margin-top:8px">${L.map(p=>`<div class="row" style="justify-content:flex-start;gap:10px">${p.photo_url?thumb(p):''}
+      <div style="min-width:0;flex:1">${pcl(p.id, esc(p.name))}<br><span class="meta num">${esc(p.barcode||'')} · ${(+p.speed||0).toFixed(1)} шт./день · в нуле ${invN(p.zero30)} дн.</span></div>
+      <b class="num" style="color:var(--bad);white-space:nowrap">−${fmt(p.lost30)}</b></div>`).join('')}</div>` : '<div class="meta">Упущенных продаж нет</div>'}</div>`;
+}
+function invMarkHtml(K, R){
+  const rules = (R||[]).map(r=>`${r.d} дн. → −${r.p}%`).join(', ');
+  return `<div class="card" style="margin-top:12px"><div class="row"><div class="label">Уценить</div>${(K||[]).length?'<button class="btn small" id="inv-copy">Скопировать список</button>':''}</div>
+    <div class="meta" style="margin:4px 0 8px">${rules?esc(rules)+', ':''}ниже себестоимости не опускаем. Цены меняются вручную в Wipon.</div>
+    ${invTbl(['Товар','Дней без продаж','Шт','Цена → новая',''], (K||[]).map(p=>`<tr><td>${pcl(p.id, esc(p.name))}<br><span class="meta num">${esc(p.barcode||'')}</span></td>
+      <td class="num">${invN(p.idle)}</td><td class="num">${invN(p.qty)}</td><td class="num" style="white-space:nowrap">${fmt(p.price)} → <b>${fmt(p.new_price)}</b></td>
+      <td class="num" style="color:var(--warn);font-weight:600">−${Math.round(+p.pct||0)}%</td></tr>`).join(''), 'Уценять нечего')}</div>`;
+}
+function invBatchHtml(B){
+  return `<div class="card" style="margin-top:12px"><div class="label">Продаваемость партий из Китая</div>
+    <div style="margin-top:8px">${invTbl(['Партия','Получена','Шт','2 нед','4 нед','8 нед'], (B||[]).map(b=>`<tr><td>${esc(b.note||'Заказ')}${b.supplier?`<br><span class="meta">${esc(b.supplier)}</span>`:''}</td>
+      <td class="num">${invDm(b.received_at)}</td><td class="num">${invN(b.units)}</td><td class="num">${invSt(b.st14,25)}</td><td class="num">${invSt(b.st28,45)}</td><td class="num">${invSt(b.st56,65)}</td></tr>`).join(''), 'Нет полученных партий')}</div>
+    <div class="meta" style="margin-top:6px">Какая доля партии продана через 2, 4 и 8 недель после приёмки. «—» — прошло ещё мало дней.</div></div>`;
+}
+function invOtbHtml(O){
+  return `<div class="card" style="margin-top:12px"><div class="label">Бюджет закупки на месяц</div>
+    <div style="margin-top:8px">${invTbl(['Категория','Продажи 30 дн.','Остаток','В пути','Можно закупить'], (O||[]).map(r=>`<tr><td>${esc(r.cat||'Без категории')}</td>
+      <td class="num">${fmt(r.sales_cost30)}</td><td class="num">${fmt(r.stock_cost)}</td><td class="num">${fmt(r.onorder_cost)}</td>
+      <td class="num">${+r.otb<0?`<span style="color:var(--warn);font-weight:600">перебор ${fmt(-r.otb)}</span>`:`<b>${fmt(r.otb)}</b>`}</td></tr>`).join(''))}</div>
+    <div class="meta" style="margin-top:6px">Всё по себестоимости. «Можно закупить» = целевой запас − остаток − в пути.</div></div>`;
+}
+function invGmroiHtml(C, P){
+  const t = (title, rows) => `<div><div class="meta" style="margin-bottom:4px">${title}</div>${invTbl(['','Маржа за год','Запас','GMROI'], (rows||[]).slice(0,15).map(r=>`<tr><td>${esc(r.name||'—')}</td><td class="num">${fmt(r.margin_year)}</td><td class="num">${fmt(r.stock_cost)}</td><td class="num">${invGm(r.gmroi)}</td></tr>`).join(''))}</div>`;
+  return `<div class="card" style="margin-top:12px"><div class="label">Отдача на вложенный тенге (GMROI)</div>
+    <div class="grid2" style="gap:12px;margin-top:8px">${t('По категориям', C)}${t('По поставщикам (топ-15)', P)}</div>
+    <div class="meta" style="margin-top:6px">Сколько тенге валовой прибыли за год приносит каждый тенге в запасе (по себестоимости).</div></div>`;
+}
+function renderInvAn(){
+  const D = INV.data;
+  $('#main').innerHTML = `<h2>Аналитика</h2>${anModeHtml()}
+    ${!D ? `<div class="empty">Считаем запасы…</div>`  /* лоадер ldHtml() добавит ldScan */ : D.err ? `<div class="empty">Не удалось загрузить: ${esc(D.err)}</div>` : `
+    ${invTilesHtml(D.tiles||{})}${invMatrixHtml(D.matrix)}${invLostHtml(D.lost)}${invMarkHtml(D.markdown, D.rules)}
+    ${invBatchHtml(D.batches)}${invOtbHtml(D.otb)}${invGmroiHtml(D.gmroi_cat, D.gmroi_sup)}`}`;
+}
+// «Скопировать список» уценки: название, штрихкод, новая цена — для ручной смены цен в Wipon
+document.addEventListener('click', async e => { const t = e.target.closest && e.target.closest('#inv-copy'); if(!t) return;
+  const txt = ((INV.data||{}).markdown||[]).map(p=>`${p.name}\t${p.barcode||''}\t${Math.round(+p.new_price||0)}`).join('\n');
+  try{ await navigator.clipboard.writeText(txt); toast('Список скопирован: '+((INV.data||{}).markdown||[]).length+' поз.'); }
+  catch(_){ toast('Не удалось скопировать — браузер не дал доступ к буферу'); } });
+
+/* статус запаса в карточке товара (inv_product): сеть + по магазинам */
+const invCan = () => S.me && ['owner','manager','purchaser','viewer','accountant'].includes(S.me.role);
+const INV_ST = { 'ходовой':'ok', 'норма':'', 'залежь':'warn', 'мёртвый':'zero', 'нет':'zero' };
+function invProdLoad(id, f){
+  if(!id || !invCan() || (f.inv ||= {})[id]) return;
+  f.inv[id] = 'wait';
+  sb.rpc('inv_product', { p_id:id }).then(({ data, error }) => { f.inv[id] = error ? { err:errText(error) } : (data || []);
+    if(S.view==='nom' && f.ed && f.ed.id===id) render(); });
+}
+function invProdHtml(e, f){
+  if(!e.id || !invCan()) return '';
+  const R = (f.inv||{})[e.id];
+  if(!R || R==='wait') return '<div class="meta">Считаем статус запаса…</div>';
+  if(R.err) return `<div class="meta">Статус запаса: ${esc(R.err)}</div>`;
+  const net = R.find(r=>+r.store_id===0), st = R.filter(r=>+r.store_id!==0);
+  if(!net && !st.length) return '';
+  const chip = s => `<span class="chip ${INV_ST[s]??''}" ${s==='мёртвый'?'style="font-weight:700"':''}>${esc(s||'—')}</span>`;
+  const line = r => `${invN(r.bal)} шт · ${r.cover==null?'не продаётся':'хватит на '+invN(r.cover)+' дн.'}${r.idle!=null?' · без продаж '+invN(r.idle)+' дн.':''}`;
+  return `<div class="cust stack" style="gap:4px"><div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><b>Запас</b>
+      ${net?chip(net.status):''}${net&&(net.abc||net.xyz)?`<span class="meta">ABC/XYZ: <b>${esc(net.abc||'—')}·${esc(net.xyz||'—')}</b></span>`:''}${net?`<span class="meta">${line(net)}</span>`:''}</div>
+    ${st.map(r=>`<div class="meta num">${esc(storeName(+r.store_id))}: ${line(r)} ${r.status&&r.status!==(net&&net.status)?chip(r.status):''}</div>`).join('')}</div>`;
+}
+
 /* ---------- номенклатура ---------- */
 const NM_EMPTY = () => ({ id:null, is_group:false, barcode:'', sku:'', name:'', price:'', cost:'', brand:'', category_id:'', material:'', color:'', supplier:'', purchase_url:'', photo_url:'', is_basic:false, archived:false, sites:[] });
 async function loadNom(){
@@ -1818,6 +1923,7 @@ function nmModalSync(e, f, cats, inp){
   const M = $('#modal'), has = !!M.querySelector('#nm-modal');
   if(!e){ if(has) M.innerHTML = ''; return; }
   if(e.id && !(f.gal ||= {})[e.id]) nmGalLoad(e.id);
+  invProdLoad(e.id, f);  // статус запаса — лениво, один раз на товар
   if(e.id && !(f.card ||= {})[e.id]){ f.card[e.id] = 'wait'; sb.rpc('product_card', { p_id:e.id }).then(({ data, error }) => { f.card[e.id] = error ? { err:errText(error) } : (data || { err:'нет данных' }); if(S.view==='nom' && f.ed && f.ed.id===e.id) render(); }); }
   if(e.id && !(f.hist ||= {})[e.id] && nmCanEdit()){ f.hist[e.id] = 'wait'; sb.rpc('product_price_history', { p_id:e.id }).then(({ data }) => { f.hist[e.id] = data || []; if(S.view==='nom' && f.ed && f.ed.id===e.id) render(); }); }
   const ae = document.activeElement, keep = ae && M.contains(ae) && ae.id ? { id:ae.id, s:ae.selectionStart, e:ae.selectionEnd } : null;
@@ -2086,6 +2192,7 @@ function nmEditorHtml(e, f, cats, inp){
          <label><input type="checkbox" data-nf="archived" ${e.archived?'checked':''}> В архиве</label></span>
        <span class="row" style="gap:8px">${e.id&&e.barcode?`<button class="btn small" data-labels='${esc(JSON.stringify([{n:e.name,b:e.barcode,p:+e.price,q:1}]))}'>Этикетка</button>`:''}
          <button class="btn primary" id="nm-save">${e.id?'Сохранить':'Создать товар'}</button></span></div>
+     ${invProdHtml(e, f)}
      ${e.id?nmCardHtml(e, f, op):''}
      ${e.id?nmHistHtml((f.hist||{})[e.id], op.hist):''}
      ${e.id&&ed?aiPhotoHtml(e):''}
@@ -4345,7 +4452,7 @@ document.addEventListener('click', async e => { const t = e.target.closest('butt
    Любое действие (кнопка, ссылка, поле), кроме переходов по меню, сбрасывает кэш — после записи данные всегда свежие. */
 const VC = {}, VC_TTL = 60e3;
 const VC_OK = { sales:() => Array.isArray(S.sales), day:() => !!DAY.data && (DAY.role!=='own' || !!DAY.pulse), nom:() => !!(S.nm && S.nm.data),
-  site:() => !!(S.st && S.st.data), analytics:() => S.anMode==='stock' ? !!S.sa : !!S.an, profit:() => !!PF.data, flow:() => !!FL.data, content:() => !!CT.list };
+  site:() => !!(S.st && S.st.data), analytics:() => S.anMode==='stock' ? !!S.sa : S.anMode==='inv' ? !!INV.data : !!S.an, profit:() => !!PF.data, flow:() => !!FL.data, content:() => !!CT.list };
 const vcKey = () => JSON.stringify([S.view, selStores(), S.store, S.anMode, DAY.role, DAY.store, CT.brand]);
 const vcDrop = () => { for(const k in VC) delete VC[k]; };
 document.addEventListener('click', e => { const t = e.target.closest && e.target.closest('button, a, input, label, select, [role=button]'); if(!t) return;
@@ -4383,7 +4490,7 @@ async function loadView0(){
   if(S.view==='nom'){ render(); await loadNom(); render(); }
   if(S.view==='bonus'){ render(); await loadBonus(); render(); }
   if(S.view==='cash'){ render(); await loadCash(); render(); }
-  if(S.view==='analytics'){ S.an=null; render(); await loadAnalytics(); render(); }
+  if(S.view==='analytics'){ S.an=null; INV.data=null; render(); await loadAnalytics(); render(); }
 }
 
 sb.auth.onAuthStateChange((ev) => { if(ev==='SIGNED_OUT') renderLogin(); });
