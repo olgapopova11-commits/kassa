@@ -1896,7 +1896,7 @@ async function loadNom(){
   const f = S.nm; f.data = null;
   if(!f.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); f.cats = data || []; }
   sb.rpc('po_incoming').then(({data}) => { S.inc = data || {}; });
-  const { data, error } = await sb.rpc('product_list2', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:f.lim||50, p_sort:f.sort||null, p_desc:!!f.desc, p_flag:f.flag||null });
+  const { data, error } = await sb.rpc('product_list2', { p_q:f.q.trim(), p_category:f.cat?+f.cat:null, p_archived:f.arch, p_offset:f.off, p_limit:f.lim||50, p_sort:f.sort||'stale', p_desc:f.sort?!!f.desc:true, p_flag:f.flag||null });  // по умолчанию — самые дорогие залежи сверху
   if(error){ toast(errText(error)); f.data = { rows:[], total:0 }; } else { f.data = data; S.nmNoPrice = data.noprice; }
   // статус запаса (ходовой / норма / залежь / мёртвый / новый) для строк списка — догружаем отдельно
   const ids = ((f.data||{}).rows||[]).map(p=>p.id); if(ids.length && invCan()) sb.rpc('inv_status_for', { p_ids: ids }).then(({ data:m }) => { if(m){ f.st = Object.assign(f.st||{}, m); if(S.view==='nom' && !f.ed) render(); } });
@@ -1904,7 +1904,7 @@ async function loadNom(){
 function renderNom(){
   const f = S.nm, D = f.data, e = f.ed, cats = f.cats || [];
   const inp = (k, label, extra='') => `<label class="stack" style="gap:4px"><span class="label">${label}</span><input data-nf="${k}" value="${esc(e[k]??'')}" ${extra}></label>`;
-  $('#main').innerHTML = `<div class="row"><h2>Номенклатура</h2><button class="btn primary" id="nm-new">+ Новый товар</button></div>
+  $('#main').innerHTML = `<div class="row"><h2>Номенклатура</h2>${f.sort?'':'<span class="meta" style="flex:1">сначала самые дорогие залежи</span>'}<button class="btn primary" id="nm-new">+ Новый товар</button></div>
     <div class="filters"><input id="nm-q" placeholder="Штрихкод, артикул или название" value="${esc(f.q)}" style="flex:1;min-width:180px">
       <select id="nm-cat"><option value="">Все категории</option><option value="-1" ${String(f.cat)==='-1'?'selected':''}>⚠ Без категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
       <label class="meta" style="align-self:center"><input type="checkbox" id="nm-arch" ${f.arch?'checked':''}> показать и архивные</label></div>
