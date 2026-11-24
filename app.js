@@ -4040,7 +4040,7 @@ function pulseHtml(P){
   return `${todoHtml(stuck)}<div class="row" style="gap:8px;flex-wrap:wrap;align-items:stretch">
       ${tile('Выручка сегодня', fmt(T), `${chip(pct(T,W))} к прошлой неделе на это время`)}
       ${tile('Чеков сегодня', C.toLocaleString('ru-RU'), T&&C?'средний чек '+fmt(Math.round(T/C)):'')}
-      ${tile('С начала месяца', fmt(M), `${chip(pct(M,MP))} к тому же периоду прошлого месяца`)}${aiTile(P)}</div>
+      ${tile('С начала месяца', fmt(M), `${chip(pct(M,MP))} к тому же периоду прошлого месяца${(()=>{ const Y = (P.stores||[]).filter(x=>+x.mtd_ly>0); if(!Y.length) return ''; const a = Y.reduce((q,x)=>q+(+x.mtd||0),0), b = Y.reduce((q,x)=>q+(+x.mtd_ly||0),0); return `<br>${chip(pct(a,b))} к тому же периоду прошлого года${Y.length<(P.stores||[]).length?` · по ${Y.length} из ${(P.stores||[]).length} магазинов, у остальных нет продаж за прошлый год`:''}`; })()}`)}${aiTile(P)}</div>
     ${dayFold('stores', 'Магазины', fmt(T)+' сегодня', storesHtml(P))}
     ${(()=>{ const C = Object.values(DAY.cash||{}).filter(c=>c.est_kzt!=null); if(!C.length) return ''; const k = C.reduce((a,c)=>a+(+c.est_kzt||0),0), u = C.reduce((a,c)=>a+(+c.snap_usd||0),0);
       return dayFold('cash', 'Наличные в кассах Алматы', '≈ '+fmt(k)+(u?' и $'+u.toLocaleString('ru-RU'):''), `<p class="meta" style="margin:6px 0 0">Наличные в кассе = остаток по последней странице тетради + наличные продажи Wipon после неё − расходы и сдача денег, внесённые в Silver. Расходы учтены, только если внесены в Silver, — реальная сумма может быть меньше. По магазинам — в блоке «Магазины».</p>`); })()}
