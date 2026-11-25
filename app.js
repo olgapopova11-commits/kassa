@@ -4951,6 +4951,31 @@ document.addEventListener('change', async e => {
 
 
 /* ---------- путь товара: инфографика цепочки и что где застряло ---------- */
+/* ---------- тёмная тема: включается сама после заката и выключается на рассвете ---------- */
+function sunDark(now){
+  let lat = 43.24, lng = 76.89;  // Алматы; если выбран магазин Астаны — считаем по Астане
+  try{ if(typeof S!=='undefined' && [4,5,7].includes(+S.store)){ lat = 51.13; lng = 71.43; } }catch(_){}
+  const R = Math.PI/180, n0 = Math.round(now/864e5 + 2440587.5 - 2451545 + lng/360), ev = [];
+  for(const n of [n0-1, n0, n0+1]){
+    const js = n - lng/360, M = (357.5291 + 0.98560028*js) % 360, C = 1.9148*Math.sin(M*R) + 0.02*Math.sin(2*M*R) + 0.0003*Math.sin(3*M*R);
+    const lam = (M + C + 180 + 102.9372) % 360, jt = 2451545 + js + 0.0053*Math.sin(M*R) - 0.0069*Math.sin(2*lam*R);
+    const dec = Math.asin(Math.sin(lam*R)*Math.sin(23.44*R)), cw = (Math.sin(-0.833*R) - Math.sin(lat*R)*Math.sin(dec)) / (Math.cos(lat*R)*Math.cos(dec));
+    if(cw > 1 || cw < -1) continue; const w = Math.acos(cw)/R/360, ms = j => (j - 2440587.5)*864e5;
+    ev.push([ms(jt - w), false], [ms(jt + w), true]);
+  }
+  const past = ev.filter(e => e[0] <= now).sort((a,b) => b[0]-a[0])[0];
+  return past ? past[1] : false;
+}
+function applyTheme(){
+  try{ const dark = sunDark(Date.now()), el = document.documentElement;
+    if(dark === (el.dataset.theme==='dark')) return;
+    if(dark) el.dataset.theme = 'dark'; else delete el.dataset.theme;
+    const m = document.querySelector('meta[name="theme-color"]'); if(m) m.content = dark ? '#0b0b0f' : '#F2F2F7';
+  }catch(_){}
+}
+applyTheme(); setInterval(applyTheme, 60000);
+document.addEventListener('visibilitychange', () => { if(!document.hidden) applyTheme(); });
+
 const FL = { days:30, data:null, mc:null };
 async function loadFlow(){ FL.data = null; const [a, b] = await Promise.all([sb.rpc('product_flow', { p_days:FL.days, p_stores:selStores() }), sb.rpc('money_cycle', { p_stores:selStores() })]);
   if(a.error) toast(errText(a.error)); FL.data = a.data || null; FL.mc = b.error ? null : (b.data || null); }

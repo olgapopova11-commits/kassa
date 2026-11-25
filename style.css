@@ -549,3 +549,59 @@ nav.tabs{-webkit-transform:translate3d(0,0,0);transform:translate3d(0,0,0);left:
 nav.tabs:has(.more-sheet){-webkit-transform:none;transform:none}
 @media (hover:none){ body{background-attachment:scroll} }
 @media (max-width:760px){ nav.tabs{left:max(8px,env(safe-area-inset-left));right:max(8px,env(safe-area-inset-right))} }
+
+/* ================= Тёмная тема: включается сама после заката (data-theme="dark" ставит app.js) ================= */
+:root[data-theme="dark"]{ color-scheme:dark;
+  --bg:#0b0b0f; --surface:rgba(44,44,46,.72); --ink:#fff; --head-ink:#fff; --muted:rgba(235,235,245,.62); --line:rgba(120,120,128,.36); --g-line:rgba(120,120,128,.28);
+  --soft:rgba(10,132,255,.20); --accent:#0A84FF; --ok:#30D158; --warn:#FF9F0A; --bad:#FF453A; --sun:#FF9F0A; --night:#000;
+  --g-fill:rgba(44,44,46,.60); --g-fill-strong:rgba(58,58,60,.80); --g-edge:rgba(255,255,255,.10);
+  --g-shadow:0 8px 32px rgba(0,0,0,.45),0 1.5px 4px rgba(0,0,0,.30); --g-hi:inset 0 1px 0 rgba(255,255,255,.08),inset 0 -1px 0 rgba(255,255,255,.02);
+  --moon-soft:rgba(169,155,232,.20); --sun-soft:rgba(245,184,48,.18) }
+[data-theme="dark"] body{color:#fff;background:
+    radial-gradient(800px 560px at 6% 0%, rgba(120,70,40,.30), transparent 60%),
+    radial-gradient(820px 600px at 100% 8%, rgba(30,70,140,.38), transparent 62%),
+    radial-gradient(900px 640px at 72% 100%, rgba(70,50,140,.30), transparent 62%),
+    radial-gradient(700px 520px at 0% 95%, rgba(20,90,80,.26), transparent 60%),
+    #0b0b0f;background-attachment:fixed}
+[data-theme="dark"] h2,[data-theme="dark"] h3{color:#fff}
+[data-theme="dark"] header{background:rgba(28,28,30,.62)!important;box-shadow:0 4px 24px rgba(0,0,0,.35),var(--g-hi)!important;color:#fff}
+[data-theme="dark"] header .who{color:var(--muted)}
+[data-theme="dark"] header select,[data-theme="dark"] header .who button{background:rgba(118,118,128,.28)!important}
+[data-theme="dark"] nav.tabs{background:rgba(28,28,30,.66)!important;box-shadow:0 10px 36px rgba(0,0,0,.55),var(--g-hi)!important}
+[data-theme="dark"] nav.tabs button{color:rgba(235,235,245,.6)}
+[data-theme="dark"] nav.tabs button[aria-selected="true"]{color:var(--accent);background:rgba(118,118,128,.30);box-shadow:none!important}
+[data-theme="dark"] nav.tabs .lg-blob{background:rgba(118,118,128,.34);box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 2px 12px rgba(0,0,0,.30)}
+[data-theme="dark"] nav.tabs:has(.more-sheet){background:rgba(28,28,30,.96)!important}
+[data-theme="dark"] nav.subtabs button{color:#fff}
+[data-theme="dark"] .seg{background:rgba(118,118,128,.24)!important}
+[data-theme="dark"] .seg button{color:#fff}
+[data-theme="dark"] .seg button[aria-pressed="true"]{background:rgba(99,99,102,.95)!important;color:#fff!important;box-shadow:0 3px 8px rgba(0,0,0,.35)!important}
+[data-theme="dark"] .seg.lg-on>button[aria-pressed="true"]{background:transparent!important;box-shadow:none!important}
+[data-theme="dark"] .seg .lg-blob{background:rgba(99,99,102,.95);box-shadow:0 3px 8px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.10)}
+[data-theme="dark"] .btn{background:rgba(118,118,128,.26);box-shadow:var(--g-hi)}
+[data-theme="dark"] .btn:hover{background:rgba(118,118,128,.40)}
+[data-theme="dark"] .btn.primary:hover{background:#409CFF!important}
+[data-theme="dark"] input,[data-theme="dark"] select,[data-theme="dark"] textarea{background:rgba(118,118,128,.20);border-color:rgba(120,120,128,.40);color:#fff;box-shadow:none}
+[data-theme="dark"] input::placeholder,[data-theme="dark"] textarea::placeholder{color:rgba(235,235,245,.35)}
+[data-theme="dark"] option{background:#2c2c2e;color:#fff}
+[data-theme="dark"] .chip{background:rgba(118,118,128,.26);color:rgba(235,235,245,.85)}
+[data-theme="dark"] .chip.ok{background:rgba(48,209,88,.18);color:#30D158}
+[data-theme="dark"] .chip.warn{background:rgba(255,159,10,.18);color:#FFB340}
+[data-theme="dark"] .chip.zero{background:rgba(255,69,58,.18);color:#FF6961}
+[data-theme="dark"] .net{background:rgba(48,209,88,.18)!important;color:#30D158!important}
+[data-theme="dark"] .net.off{background:rgba(255,69,58,.20)!important;color:#FF6961!important}
+[data-theme="dark"] .prod:hover{background:rgba(255,255,255,.06)}
+[data-theme="dark"] tr:hover td{background:rgba(10,132,255,.10)}
+[data-theme="dark"] .overlay,[data-theme="dark"] .more-bg{background:rgba(0,0,0,.55)!important}
+[data-theme="dark"] .dialog,[data-theme="dark"] .more-sheet{background:rgba(44,44,46,.90)!important;box-shadow:0 24px 60px rgba(0,0,0,.6),var(--g-hi)}
+[data-theme="dark"] .dialog-foot{background:rgba(44,44,46,.85)}
+[data-theme="dark"] .more-sheet button{background:rgba(118,118,128,.26)}
+[data-theme="dark"] .st-sum tr.st-grp td{background:rgba(118,118,128,.18)}
+[data-theme="dark"] .st-sum tr.st-total td{border-top-color:rgba(235,235,245,.30);background:rgba(10,132,255,.16)}
+[data-theme="dark"] .pc.st-tot{background:rgba(10,132,255,.16)}
+[data-theme="dark"] .fl-sa,[data-theme="dark"] .fl-sb,[data-theme="dark"] .fl-sc,[data-theme="dark"] .fl-sd{background:rgba(118,118,128,.14)}
+[data-theme="dark"] .fl-q{color:var(--accent)}
+[data-theme="dark"] a{color:#409CFF}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  [data-theme="dark"] .card,[data-theme="dark"] .list,[data-theme="dark"] .cust,[data-theme="dark"] header,[data-theme="dark"] nav.tabs,[data-theme="dark"] .dialog,[data-theme="dark"] .more-sheet{background:rgba(36,36,38,.97)!important} }
+@media print{ [data-theme="dark"] body{background:#fff;color:#000} }
