@@ -3762,7 +3762,6 @@ function renderProfit(){
     ${PF.per==='custom'?`<input type="date" id="pf-from" value="${f}"><input type="date" id="pf-to" value="${t}">`:''}<span class="meta" style="align-self:center">${new Date(f).toLocaleDateString('ru-RU')} — ${new Date(t).toLocaleDateString('ru-RU')}</span></div>
   ${!D?'<div class="empty">Считаем…</div>':`<p class="meta" style="margin:4px 0">Все суммы в таблице — в тысячах тенге.</p><div class="scroll"><table><thead><tr><th></th>${rows.map(r=>`<th>${esc(storeName(r.store))}</th>`).join('')}${rows.length>1?'<th>Итого</th>':''}</tr></thead><tbody>
     ${lines.map(([t,k,sign])=>`<tr ${['gross','net'].includes(k)?'style="font-weight:700"':''}><td>${t}</td>${rows.map(r=>k==='margin'?`<td class="num" style="font-weight:700;color:${r.margin<0?'var(--bad)':'var(--ok)'}">${r.margin.toFixed(1)}%</td>`:cell(sign?-r[k]:r[k], k==='net')).join('')}${rows.length>1?(k==='margin'?`<td class="num" style="font-weight:700">${T.margin.toFixed(1)}%</td>`:cell(sign?-T[k]:T[k], k==='net')):''}</tr>`).join('')}
-    <tr><td class="meta">Закуп по приёмке (справочно)</td>${rows.map(r=>`<td class="num meta">${pfK(r.purchases)}</td>`).join('')}${rows.length>1?`<td class="num meta">${pfK(T.purchases)}</td>`:''}</tr>
   </tbody></table></div>
   ${pfBeHtml()}
   <details style="margin:8px 0"><summary class="meta">Расшифровка расходов по магазинам</summary>
