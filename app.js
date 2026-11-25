@@ -529,7 +529,8 @@ async function boot(){
   }
   S.store = ls.get('kassa_store', null) || (me.store_ids||[])[0] || (S.stores[0]||{}).id;
   if(!S.stores.some(s=>s.id===S.store)) S.store = (S.stores[0]||{}).id;
-  { const [a, e, pe, py] = await Promise.all([sb.rpc('get_tab_access'), sb.rpc('get_tab_edit'), sb.from('settings').select('value').eq('key','pos_enabled').maybeSingle(), sb.from('settings').select('value').eq('key','pay_enabled').maybeSingle()]); S.tabAccess = a.data || {}; S.tabEdit = e.data || {}; S.posOn = !!(pe && pe.data && pe.data.value==='true'); S.payOn = !!(py && py.data && py.data.value==='true'); }
+  { const [a, e, pe, py] = await Promise.all([sb.rpc('get_tab_access'), sb.rpc('get_tab_edit'), sb.from('settings').select('value').eq('key','pos_enabled').maybeSingle(), sb.from('settings').select('value').eq('key','pay_enabled').maybeSingle()]); S.tabAccess = a.data || {}; S.tabEdit = e.data || {}; S.posOn = !!(pe && pe.data && pe.data.value==='true'); S.payOn = !!(py && py.data && py.data.value==='true');
+    const ft = await sb.from('settings').select('key,value').in('key',['bot_enabled','cons_enabled']); const fv = k => ((ft.data||[]).find(x=>x.key===k)||{}).value; S.botOn = fv('bot_enabled')!=='false'; S.consOn = fv('cons_enabled')==='true'; }
   const ph1688 = location.hash.startsWith('#ph=') ? location.hash.slice(4) : null; if(ph1688) try{ history.replaceState(null,'','#po'); }catch(_){}
   const sup1688 = location.hash.startsWith('#sup=') ? location.hash.slice(5) : null; if(sup1688) try{ history.replaceState(null,'','#po'); }catch(_){}
   renderShell(); await loadPosShift(); if(S.view!=='pos') render(); if(ph1688) importPhotos1688(ph1688); if(sup1688) importSuppliers(sup1688); await loadCatalog(); loadPromos().then(()=>{ if(S.view==='pos') render(); }); render(); flushQueue(); subscribeReqs(); if(S.view!=='pos') loadView();
@@ -545,10 +546,12 @@ function renderShell(){
   if(S.me.role !== 'owner' && Array.isArray(acc)){ const keep = tabs.filter(([v]) => acc.includes(v)); tabs.splice(0, tabs.length, ...keep); }
   // остальные вкладки: владельцу все, остальным — по настройке «Какие вкладки видит каждая роль» (или по умолчанию)
   for(const [v,t] of EXTRA_TABS){ if(S.me.role==='owner' || v==='day' || (Array.isArray(acc) ? acc.includes(v) : (EXTRA_DEF[v]||[]).includes(S.me.role))) tabs.push([v, v==='pay' && !isBoss() ? 'Моя зарплата' : t]); }
-  if(S.me.role==='owner') tabs.push(['adm','Административный штат'], ['audit','Журнал']);
+  if(S.me.role==='owner') tabs.push(['adm','Административный штат'], ['audit','Журнал'], ['feat','Функции']);
   else if(['manager','purchaser'].includes(S.me.role) && Array.isArray(acc) && acc.includes('audit')) tabs.push(['audit','Журнал']);  // только просмотр, в пределах своего доступа
   // расчёт зарплаты в Silver пока выключен (зарплата считается в Google-таблицах); включается настройкой pay_enabled
   if(!S.payOn){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pay')); if(S.view==='pay') S.view = 'day'; }
+  // владелец включает и выключает разделы во вкладке «Функции» (bot_enabled, cons_enabled)
+  { const off = [...(S.botOn===false ? ['bot'] : []), ...(S.consOn ? [] : ['cons'])]; if(off.length){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => !off.includes(v))); if(off.includes(S.view)) S.view = 'day'; } }
   // касса Silver (продажа, смены, расходы) пока не используется — чеки пробиваются в Wipon; включается настройкой pos_enabled
   if(!S.posOn){ const off = ['pos','shifts', ...(isBoss() ? [] : ['cash'])]; tabs.splice(0, tabs.length, ...tabs.filter(([v]) => !off.includes(v)));
     // без кассы Silver «Расходы» — это журнал расходов магазинов (из тетрадей), он живёт в «Аналитике» рядом с «Рентабельностью»
@@ -570,7 +573,7 @@ function renderShell(){
 }
 // вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
 const GROUPS = [['home','✅','Мой день',['day']],['goods','📦','Товары',['flow','wh','po','nom','photo','site']],['analytics','📈','Аналитика',['analytics','profit']],
-  ['team','👥','Команда',['me','emps','cons','bot','pay','adm','audit']],['kassa','🧾','Чеки',['pos','shifts','cash','sales']],['clients','💳','Клиенты',['promo','content','bonus','certs']]];
+  ['team','👥','Команда',['me','emps','cons','bot','pay','adm','audit','feat']],['kassa','🧾','Чеки',['pos','shifts','cash','sales']],['clients','💳','Клиенты',['promo','content','bonus','certs']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 // старые адреса вкладок: #attn → «Мой день», #stock → «Склад» в режиме «Остатки»
 function viewAlias(){ if(S.view==='attn') S.view = 'day'; else if(S.view==='stock'){ S.view = 'wh'; S.wmode = 'stock'; } }
@@ -631,7 +634,7 @@ function render(){
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart, y0 = scrollY;
   if(lazyPending(S.view)){ $('#main').innerHTML = `<div class="card" style="text-align:center;padding:28px 16px"><div style="font-size:32px">📊</div><p style="margin:8px 0 14px">На телефоне аналитика загружается только по запросу — так приложение работает быстрее.</p><button class="btn primary" data-lazyload="${S.view}">Загрузить</button></div>`; return; }
-  ({ pos:renderPos, sales:renderSales, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, photo:renderPhoto, day:renderDay, audit:renderAudit, bot:renderBot })[S.view]();
+  ({ pos:renderPos, sales:renderSales, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, photo:renderPhoto, day:renderDay, audit:renderAudit, bot:renderBot, feat:renderFeat })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus({ preventScroll:true }); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
   if(y0 && Math.abs(scrollY - y0) > 2) scrollTo(0, y0);  // перерисовка не должна сбрасывать прокрутку
 }
@@ -3201,8 +3204,8 @@ function attnHtml(embed, role){
   if(A.noprice) add('bad', `Товары в наличии без розничной цены: ${A.noprice}`, 'Касса не продаст товар с ценой 0. Найдите их в «Номенклатуре» и поставьте цену: '+(A.noprice_names||[]).map(esc).join(', '), 'nom', 'Номенклатура', 'buy');
   const W = (A.wipon||[]).filter(w => dayOf(w.sales)!==today);
   if(W.length) add('warn', `Продажи из Wipon сегодня не загружены: ${W.length} маг.`, W.map(w=>esc(storeName(w.store_id))+' — '+ago(w.sales)).join(' · ')+'. Откройте кабинет Wipon и нажмите закладку «Silver ← Wipon».', 'day', 'Мой день');
-  if(A.cons_nophone) add('warn', `Консультанты без телефона: ${A.cons_nophone}`, 'Без телефона консультант не сможет пользоваться ботом смен и зарплаты.', 'cons', 'Вписать телефоны', 'mgr');
-  if(A.cons_notg) add('', `Телефон есть, но бот не подключён: ${A.cons_notg}`, 'Попросите открыть бота и нажать «Поделиться номером».', 'cons', 'Список', 'mgr');
+  if(S.consOn && A.cons_nophone) add('warn', `Консультанты без телефона: ${A.cons_nophone}`, 'Без телефона консультант не сможет пользоваться ботом смен и зарплаты.', 'cons', 'Вписать телефоны', 'mgr');
+  if(S.consOn && A.cons_notg) add('', `Телефон есть, но бот не подключён: ${A.cons_notg}`, 'Попросите открыть бота и нажать «Поделиться номером».', 'cons', 'Список', 'mgr');
   if(A.nophoto) add('', `Товары в наличии без фото: ${A.nophoto.toLocaleString('ru-RU')}`, 'Без фото товар не выложить на сайт и в Instagram. Начните с ходовых — «Путь товара» покажет их первыми.', 'flow', 'Путь товара', 'mgr');
   for(const x of (A.site||[])){ const nm = x.site==='moon'?'MOON':'Sunshine', days = x.loaded ? Math.floor((Date.now()-new Date(x.loaded))/864e5) : null;
     if(x.review) add('warn', `Сайт ${nm}: связи ждут проверки — ${x.review}`, 'Silver нашёл похожий товар в базе, но не уверен. Подтвердите или исправьте связь.', 'site', 'Проверить', 'buy');
@@ -4015,18 +4018,18 @@ function storesHtml(P, lite){
       const groups = g==='all' ? [['', St]] : [...St.reduce((m,x)=>{ const k = g==='city' ? city(x) : (BRAND[x.brand]||x.brand); (m.get(k) || m.set(k, []).get(k)).push(x); return m; }, new Map())];
       const seg = `<div class="seg" role="group" aria-label="Группировка" style="margin:0 0 8px">${[['all','Все магазины'],['city','По городам'],['brand','По брендам']].map(([k,t])=>`<button data-pgrp="${k}" aria-pressed="${g===k}">${t}</button>`).join('')}</div>`;
       const T0 = tot(St);
+      const cashFold = lite ? '' : (()=>{ const L = St.filter(x => cashStore(x.id)); if(!L.length) return '';
+        return `<details class="card" style="margin:8px 0 0;padding:10px 12px"><summary style="cursor:pointer"><b>Наличные в кассе</b> <span class="num" style="float:right">${T0[4]?fmt(T0[4]):'—'}</span></summary><div style="margin-top:8px">${L.map(x=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--line)"><span>${esc(x.address)}</span><b class="num">${cashN(x)}</b></div>`).join('')}</div><div class="meta" style="margin-top:6px">Остаток по тетради + наличные продажи после неё − расходы из Silver.</div></details>`; })();
       if(isPhone()){
-        const card = x => { const [v,w] = dv(x); return `<div class="pc"><div class="pc-h">${nm(x)}</div><div class="pc-g">
-          <div><span class="pc-l">${yd?'Вчера':'Сегодня'}</span><b class="num">${fmt(v)}</b> ${chip(pct(v,w))}</div>
-          <div><span class="pc-l">Месяц</span><b class="num">${mln(x.mtd)}</b> ${chip(pct(+x.mtd,+x.mtd_prev))}</div>
-          ${lite||!cashStore(x.id)?'':`<div><span class="pc-l">В кассе</span><b class="num">${cashN(x)}</b></div>`}</div></div>`; };
-        const sumLine = (t, d) => `<div class="pc st-tot"><div class="pc-h"><b>${esc(t)}</b></div><div class="pc-g"><div><span class="pc-l">${yd?'Вчера':'Сегодня'}</span><b class="num">${fmt(d[0])}</b> ${chip(pct(d[0],d[1]))}</div><div><span class="pc-l">Месяц</span><b class="num">${mln(d[2])}</b> ${chip(pct(d[2],d[3]))}</div>${lite?'':`<div><span class="pc-l">В кассе</span><b class="num">${fmt(d[4])}</b></div>`}</div></div>`;
-        return seg + `<div class="pc-list">${groups.map(([k,L]) => (k?sumLine(k, tot(L)):'') + L.map(card).join('')).join('')}${sumLine('Итого по сети', T0)}</div>`;
+        const G = 'display:grid;grid-template-columns:minmax(0,1fr) auto 84px;gap:10px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line)';
+        const pr = (name, v, m, bold) => `<div style="${G}"><span>${name}</span><b class="num">${fmt(v)}</b><span class="num" style="text-align:right;${bold?'font-weight:600':''}">${mln(m)}</span></div>`;
+        const head = `<div style="${G};border-top:0;padding:0 0 4px" class="meta"><span>Магазин</span><span>${yd?'Вчера':'Сегодня'}</span><span style="text-align:right">Месяц</span></div>`;
+        return seg + `<div>${head}${groups.map(([k,L]) => { const d = tot(L); return (k?pr('<b>'+esc(k)+'</b>', d[0], d[2], true):'') + L.map(x => pr(nm(x), dv(x)[0], x.mtd)).join(''); }).join('')}${pr('<b>Итого по сети</b>', T0[0], T0[2], true)}</div>` + cashFold;
       }
-      const row = x => { const [v,w] = dv(x); return `<tr><td>${nm(x)}</td><td class="num"><b style="font-size:16px">${fmt(v)}</b> ${chip(pct(v,w))}</td><td class="num">${mln(x.mtd)} ${chip(pct(+x.mtd,+x.mtd_prev))}</td>${lite?'':`<td class="num">${cashN(x)}</td>`}</tr>`; };
-      const trow = (t, d, cls) => `<tr class="${cls}"><td><b>${esc(t)}</b></td><td class="num"><b style="font-size:16px">${fmt(d[0])}</b> ${chip(pct(d[0],d[1]))}</td><td class="num"><b>${mln(d[2])}</b> ${chip(pct(d[2],d[3]))}</td>${lite?'':`<td class="num"><b>${d[4]?fmt(d[4]):''}</b></td>`}</tr>`;
-      return seg + `<div class="scroll"><table class="st-sum"><thead><tr><th>Магазин</th><th>${yd?'Вчера':'Сегодня'} <span class="meta">к прошл. неделе</span></th><th>Месяц <span class="meta">к прошл. месяцу</span></th>${lite?'':'<th title="Остаток по последней странице тетради + наличные продажи Wipon после неё − расходы, внесённые в Silver">В кассе</th>'}</tr></thead><tbody>
-        ${groups.map(([k,L]) => (k?trow(k, tot(L), 'st-grp'):'') + L.map(row).join('')).join('')}${trow('Итого по сети', T0, 'st-total')}</tbody></table></div>`; })()}`;
+      const row = x => { const [v,w] = dv(x); return `<tr><td>${nm(x)}</td><td class="num"><b style="font-size:16px">${fmt(v)}</b> ${chip(pct(v,w))}</td><td class="num">${mln(x.mtd)} ${chip(pct(+x.mtd,+x.mtd_prev))}</td></tr>`; };
+      const trow = (t, d, cls) => `<tr class="${cls}"><td><b>${esc(t)}</b></td><td class="num"><b style="font-size:16px">${fmt(d[0])}</b> ${chip(pct(d[0],d[1]))}</td><td class="num"><b>${mln(d[2])}</b> ${chip(pct(d[2],d[3]))}</td></tr>`;
+      return seg + `<div class="scroll"><table class="st-sum"><thead><tr><th>Магазин</th><th>${yd?'Вчера':'Сегодня'} <span class="meta">к прошл. неделе</span></th><th>С начала месяца <span class="meta">к прошл. месяцу</span></th></tr></thead><tbody>
+        ${groups.map(([k,L]) => (k?trow(k, tot(L), 'st-grp'):'') + L.map(row).join('')).join('')}${trow('Итого по сети', T0, 'st-total')}</tbody></table></div>` + cashFold; })()}`;
 }
 function pulseHtml(P){
   if(!P) return '<div class="empty">Собираем картину по сети…</div>';
@@ -4879,6 +4882,21 @@ document.addEventListener('change', e => { if(S.view!=='bot') return; const t = 
   else if(t.id==='bt-at'){ BT.at = t.value; } });
 document.addEventListener('input', e => { if(S.view==='bot' && e.target.id==='bt-text') BT.text = e.target.value; });
 
+/* ---------- функции: владелец включает и выключает разделы ---------- */
+const FEATS = [['pay_enabled','Расчёт зарплаты','Вкладка «Зарплата» с расчётом по дням.', () => !!S.payOn],
+  ['cons_enabled','Консультанты','Вкладка «Консультанты»: список и добавление новых.', () => !!S.consOn],
+  ['bot_enabled','Бот для консультантов','Вкладка «Бот»: сообщения и напоминания в Telegram.', () => S.botOn!==false]];
+function renderFeat(){
+  if(S.me.role!=='owner'){ $('#main').innerHTML = '<div class="empty">Нет доступа</div>'; return; }
+  $('#main').innerHTML = `<h2>Функции</h2><p class="meta" style="margin:4px 0 10px">Выключенный раздел пропадает из меню у всех сотрудников. Данные не удаляются — включите обратно, и всё вернётся.</p>
+    <div class="stack">${FEATS.map(([k,t,d,on])=>`<label class="card" style="display:flex;gap:12px;align-items:center;justify-content:space-between;cursor:pointer"><span><b>${t}</b><br><span class="meta">${d}</span></span><input type="checkbox" data-feat="${k}" ${on()?'checked':''} style="width:22px;height:22px" aria-label="${t}"></label>`).join('')}</div>`;
+}
+document.addEventListener('change', async e => { const t = e.target; if(S.view!=='feat' || !t.dataset || !t.dataset.feat) return;
+  if(S.me.role!=='owner') return; t.disabled = true;
+  const { error } = await sb.from('settings').upsert({ key:t.dataset.feat, value: t.checked ? 'true' : 'false' }, { onConflict:'key' });
+  if(error){ t.checked = !t.checked; t.disabled = false; return toast(errText(error)); }
+  toast(t.checked ? 'Включено' : 'Выключено'); setTimeout(() => location.reload(), 700); });
+
 function renderAdm(){
   if(S.me.role!=='owner'){ $('#main').innerHTML = '<div class="empty">Нет доступа</div>'; return; }
   const L = AD.list, C = (L||[]).map(adCalc), sum = k => C.reduce((t,c)=>t+c[k],0), ep = L&&L[0] ? +L[0].ep_rate : 24.8, taxes = (L||[]).reduce((t,a)=>t+(+a.tax||0),0);
@@ -4932,8 +4950,31 @@ document.addEventListener('change', async e => {
 
 
 /* ---------- путь товара: инфографика цепочки и что где застряло ---------- */
-const FL = { days:30, data:null };
-async function loadFlow(){ FL.data = null; const { data, error } = await sb.rpc('product_flow', { p_days:FL.days, p_stores:selStores() }); if(error) toast(errText(error)); FL.data = data || null; }
+const FL = { days:30, data:null, mc:null };
+async function loadFlow(){ FL.data = null; const [a, b] = await Promise.all([sb.rpc('product_flow', { p_days:FL.days, p_stores:selStores() }), sb.rpc('money_cycle', { p_stores:selStores() })]);
+  if(a.error) toast(errText(a.error)); FL.data = a.data || null; FL.mc = b.error ? null : (b.data || null); }
+function cycleHtml(M){
+  if(!M) return '';
+  const mm = v => (+v||0) >= 1e6 ? ((+v)/1e6).toLocaleString('ru-RU',{maximumFractionDigits:1})+' млн ₸' : fmt(v);
+  const O = M.order||{}, T = M.stock||{}, Sa = M.sales||{}, L = M.lost||{}, can = go => (S.tabs||[]).some(x=>x[0]===go);
+  const full = (+O.days||0) + (+T.days||0);
+  const box = (t, v, sub, hot) => `<div class="card" style="padding:12px;${hot?'border:2px solid var(--warn)':''}"><div class="label">${t}</div><div class="total num" style="font-size:20px">${v}</div><div class="meta">${sub}</div></div>`;
+  const act = (n, t, why, go, btn, an) => `<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line)"><div style="min-width:0;flex:1 1 240px"><b>${n}. ${t}</b><div class="meta">${why}</div></div>${can(go)?`<button class="btn small" data-flgo="${go}"${an?` data-flan="${an}"`:''}>${btn}</button>`:''}</div>`;
+  const A = []; let i = 1;
+  if(+T.excess > 0) A.push(act(i++, 'Не дозаказывать и распродать лишнее', `${mm(T.excess)} лежит сверх запаса на 3 месяца продаж — в ${nf(T.excess_n)} товарах. Самые дорогие идут первыми.`, 'nom', 'Открыть список'));
+  if(+M.move_n > 0) A.push(act(i++, 'Переместить между магазинами', `${nf(M.move_n)} товаров в одном магазине лежат без движения, а в другом закончились.`, 'wh', 'К перемещениям'));
+  if(+L.sum > 0) A.push(act(i++, 'Дозаказать ходовое', `За 30 дней упущено около ${mm(L.sum)}: ${nf(L.n)} товаров были в нуле, хотя продаются.`, 'analytics', 'Что дозаказать', 'inv'));
+  if(+O.old_n > 0) A.push(act(i++, 'Закрыть старые заказы', `${nf(O.old_n)} заказов на ${mm(O.old_c)} числятся «в пути» больше 30 дней. Принять, если уже пришли.`, 'po', 'К закупу'));
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:10px">
+    ${box('1. Заказ в пути', mm(O.cost), O.n ? `в среднем ${nf(O.days)} дн. · ${nf(O.n)} заказов` : 'заказов нет')}
+    ${box('2. В магазинах', mm(T.cost), T.days!=null ? `запас на ${nf(T.days)} дн. продаж` : 'по себестоимости', true)}
+    ${box('3. Продажа', mm(Sa.rev_m), `в месяц · маржа ${mm(Sa.margin_m)}`)}
+    ${box('4. Отдача', M.gmroi!=null ? String(M.gmroi).replace('.', ',')+' ₸' : '—', 'маржи в год на 1 ₸ в товаре')}
+  </div>
+  <div class="meta" style="margin:6px 0 0">Деньги идут по кругу: заказ → магазин → продажа → новый заказ.${full?` Сейчас полный круг занимает около ${nf(full)} дней.`:''} Суммы — по себестоимости, продажи — в среднем за 3 месяца.</div>
+  <div class="card" style="margin-top:12px;border-left:4px solid var(--warn);border-radius:0"><b>Где деньги стоят дольше всего: в магазинах</b>
+    <div class="meta" style="margin:2px 0 6px">Чем быстрее товар уходит с полки, тем чаще те же деньги приносят прибыль.</div>${A.join('') || '<div class="meta">Сейчас действий нет.</div>'}</div>`;
+}
 const nf = n => Math.round(+n||0).toLocaleString('ru-RU');
 function flowIdeas(D){
   const I = [], pct = (a,b) => b ? Math.round(a/b*100) : 0, inst = D.instock.pos || 0;
@@ -4967,6 +5008,8 @@ function renderFlow(){
   const list = (L, cols) => `<div class="list" style="margin-top:6px">${L.map(p=>`<div class="prod" style="grid-template-columns:44px minmax(0,1fr) auto">${thumb(p)}<span><b>${pcl(p.id||p.product_id, esc(p.name))}</b><br><span class="meta num">${esc(p.barcode||'')} · в наличии ${nf(p.qty)}${p.units?' · продано '+nf(p.units):''}</span><br>${p.no_photo?'<span class="chip zero">нет фото</span>':''}${p.no_card?'<span class="chip warn">карточка</span>':''}${p.no_site?'<span class="chip warn">нет на сайте</span>':''}</span><span class="price num">${cols==='retail'?fmt(p.retail):fmt(p.price)}</span></div>`).join('')}</div>`;
   $('#main').innerHTML = `<div class="row"><h2>Путь товара</h2><div class="seg">${[30,90].map(d=>`<button data-fldays="${d}" aria-pressed="${FL.days===d}">${d} дней</button>`).join('')}</div></div>
   ${!D?'<div class="empty">Считаем…</div>':`
+  ${cycleHtml(FL.mc)}
+  <details style="margin-top:16px"><summary class="label" style="cursor:pointer;padding:6px 0">Подробно: приёмки, фото, сайт и списки товаров</summary>
   <p class="meta" style="margin:6px 0 4px">Наведите на карточку (или нажмите на телефоне) — появится объяснение. Клик по карточке открывает нужную вкладку.</p>
   <div class="fl-map">
     ${stage(1,'Закупка','a', step('🧾','Заказано', nf(D.ordered.units)+' шт.', nf(D.ordered.pos)+' позиций у поставщиков', D.ordered.pos?'ok':'warn', false, TIP.ord, 'po') + step('🚚','В пути из Китая', nf(D.transit.units)+' шт.', nf(D.transit.pos)+' позиций', D.transit.pos?'ok':'warn', false, TIP.tr, 'po'))}
@@ -4983,14 +5026,14 @@ function renderFlow(){
     <div><h3>🔥 Продаются, но нет на сайте</h3>${(D.hot_no_site||[]).length?list(D.hot_no_site):'<div class="meta">Нет</div>'}</div>
     <div><h3>🕸 Самые дорогие залежи</h3>${(D.stale_top||[]).length?list(D.stale_top,'retail'):'<div class="meta">Нет</div>'}</div>
   </div>
-  ${(D.new_not_ready||[]).length?`<h3 style="margin-top:14px">📥 Новые поступления, которые ещё не готовы к продаже онлайн</h3>${list(D.new_not_ready)}`:''}`}`;
+  ${(D.new_not_ready||[]).length?`<h3 style="margin-top:14px">📥 Новые поступления, которые ещё не готовы к продаже онлайн</h3>${list(D.new_not_ready)}`:''}</details>`}`;
 }
 document.addEventListener('click', async e => {
   if(S.view!=='flow') return; const t = e.target.closest('button,.fl-step[data-flgo]'); if(!t) return;
   if(t.classList.contains('fl-step') && matchMedia('(hover: none)').matches && !t.dataset.tap){ document.querySelectorAll('.fl-step[data-tap]').forEach(x=>delete x.dataset.tap); t.dataset.tap = '1'; t.focus(); return; } // на телефоне: 1-е нажатие — подсказка, 2-е — переход
   if(t.dataset.fldays){ FL.days = +t.dataset.fldays; render(); await loadFlow(); render(); }
-  else if(t.dataset.flgo){ const b = document.querySelector(`nav button[data-view="${t.dataset.flgo}"]`); S.view = t.dataset.flgo; const g = groupOf(S.view); (S.lastView ||= {})[g[0]] = S.view; render(); scrollTo(0,0);
-    if(S.view==='po'){ await loadPo(); render(); } else if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); } else if(S.view==='site'){ await loadSite(); render(); } else if(S.view==='nom'){ await loadNom(); render(); } else if(S.view==='analytics'){ S.an=null; await loadAnalytics(); render(); } }
+  else if(t.dataset.flgo){ const b = document.querySelector(`nav button[data-view="${t.dataset.flgo}"]`); if(t.dataset.flan) S.anMode = t.dataset.flan; S.view = t.dataset.flgo; const g = groupOf(S.view); (S.lastView ||= {})[g[0]] = S.view; render(); scrollTo(0,0);
+    if(S.view==='po'){ await loadPo(); render(); } else if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); } else if(S.view==='site'){ await loadSite(); render(); } else if(S.view==='nom'){ await loadNom(); render(); } else if(S.view==='analytics'){ if(S.anMode==='inv'){ await loadInvAn(); } else { S.an=null; await loadAnalytics(); } render(); } }
 });
 
 
