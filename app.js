@@ -4885,7 +4885,8 @@ document.addEventListener('input', e => { if(S.view==='bot' && e.target.id==='bt
 /* ---------- функции: владелец включает и выключает разделы ---------- */
 const FEATS = [['pay_enabled','Расчёт зарплаты','Вкладка «Зарплата» с расчётом по дням.', () => !!S.payOn],
   ['cons_enabled','Консультанты','Вкладка «Консультанты»: список и добавление новых.', () => !!S.consOn],
-  ['bot_enabled','Бот для консультантов','Вкладка «Бот»: сообщения и напоминания в Telegram.', () => S.botOn!==false]];
+  ['bot_enabled','Бот для консультантов','Вкладка «Бот»: сообщения и напоминания в Telegram.', () => S.botOn!==false],
+  ['pos_enabled','Продажи (касса Silver)','Вкладки «Продажа» и «Смены»: пробивать чеки в Silver вместо Wipon.', () => !!S.posOn]];
 function renderFeat(){
   if(S.me.role!=='owner'){ $('#main').innerHTML = '<div class="empty">Нет доступа</div>'; return; }
   $('#main').innerHTML = `<h2>Функции</h2><p class="meta" style="margin:4px 0 10px">Выключенный раздел пропадает из меню у всех сотрудников. Данные не удаляются — включите обратно, и всё вернётся.</p>
