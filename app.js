@@ -529,7 +529,7 @@ async function boot(){
   }
   S.store = ls.get('kassa_store', null) || (me.store_ids||[])[0] || (S.stores[0]||{}).id;
   if(!S.stores.some(s=>s.id===S.store)) S.store = (S.stores[0]||{}).id;
-  { const [a, e, pe] = await Promise.all([sb.rpc('get_tab_access'), sb.rpc('get_tab_edit'), sb.from('settings').select('value').eq('key','pos_enabled').maybeSingle()]); S.tabAccess = a.data || {}; S.tabEdit = e.data || {}; S.posOn = !!(pe && pe.data && pe.data.value==='true'); }
+  { const [a, e, pe, py] = await Promise.all([sb.rpc('get_tab_access'), sb.rpc('get_tab_edit'), sb.from('settings').select('value').eq('key','pos_enabled').maybeSingle(), sb.from('settings').select('value').eq('key','pay_enabled').maybeSingle()]); S.tabAccess = a.data || {}; S.tabEdit = e.data || {}; S.posOn = !!(pe && pe.data && pe.data.value==='true'); S.payOn = !!(py && py.data && py.data.value==='true'); }
   const ph1688 = location.hash.startsWith('#ph=') ? location.hash.slice(4) : null; if(ph1688) try{ history.replaceState(null,'','#po'); }catch(_){}
   const sup1688 = location.hash.startsWith('#sup=') ? location.hash.slice(5) : null; if(sup1688) try{ history.replaceState(null,'','#po'); }catch(_){}
   renderShell(); await loadPosShift(); if(S.view!=='pos') render(); if(ph1688) importPhotos1688(ph1688); if(sup1688) importSuppliers(sup1688); await loadCatalog(); loadPromos().then(()=>{ if(S.view==='pos') render(); }); render(); flushQueue(); subscribeReqs(); if(S.view!=='pos') loadView();
@@ -547,6 +547,8 @@ function renderShell(){
   for(const [v,t] of EXTRA_TABS){ if(S.me.role==='owner' || v==='day' || (Array.isArray(acc) ? acc.includes(v) : (EXTRA_DEF[v]||[]).includes(S.me.role))) tabs.push([v, v==='pay' && !isBoss() ? 'Моя зарплата' : t]); }
   if(S.me.role==='owner') tabs.push(['adm','Административный штат'], ['audit','Журнал']);
   else if(['manager','purchaser'].includes(S.me.role) && Array.isArray(acc) && acc.includes('audit')) tabs.push(['audit','Журнал']);  // только просмотр, в пределах своего доступа
+  // расчёт зарплаты в Silver пока выключен (зарплата считается в Google-таблицах); включается настройкой pay_enabled
+  if(!S.payOn){ tabs.splice(0, tabs.length, ...tabs.filter(([v]) => v!=='pay')); if(S.view==='pay') S.view = 'day'; }
   // касса Silver (продажа, смены, расходы) пока не используется — чеки пробиваются в Wipon; включается настройкой pos_enabled
   if(!S.posOn){ const off = ['pos','shifts', ...(isBoss() ? [] : ['cash'])]; tabs.splice(0, tabs.length, ...tabs.filter(([v]) => !off.includes(v)));
     // без кассы Silver «Расходы» — это журнал расходов магазинов (из тетрадей), он живёт в «Аналитике» рядом с «Рентабельностью»
@@ -4699,7 +4701,7 @@ function renderMe(){
       ${P.A.map(a=>`<div class="row"><span>${PADJ[a.kind][0]}${a.note?' <span class="meta">— '+esc(a.note)+'</span>':''}</span><span class="num">${PADJ[a.kind][1]>0?'+':'−'}${fmt(a.amount)}</span></div>`).join('')}
       <div class="row" style="border-top:1px solid var(--line);padding-top:6px"><b>${P.rest<0?'Переплата':'Остаток к выплате'}</b><b class="num">${fmt(Math.abs(P.rest))}</b></div>
       ${P.card?`<div class="meta">из них на карту: ${fmt(P.card)}</div>`:''}
-      <button class="btn small" id="me-pay" style="align-self:flex-start">Подробный расчёт по дням →</button></div>`:''}
+      ${S.payOn?'<button class="btn small" id="me-pay" style="align-self:flex-start">Подробный расчёт по дням →</button>':''}</div>`:''}
     <div class="card stack" style="gap:6px"><b>🏆 Рекорды магазинов за месяц</b>
       ${(D.records||[]).filter(r=>r.best_check||r.best_day).map(r=>`<div><b>${esc(storeName(r.store_id))}</b><br><span class="meta">лучший чек ${fmt(r.best_check)} · лучший день ${fmt(r.best_day)}</span></div>`).join('') || '<span class="meta">Пока нет продаж</span>'}
       <span class="meta">Побейте рекорд — на кассе будет салют 🎉</span></div>
