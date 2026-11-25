@@ -3753,20 +3753,21 @@ function renderProfit(){
     return { ...r, tax, gross, cashT:cash, fixedT:fixed, net, margin: r.revenue ? net/r.revenue*100 : 0 }; });
   const T = rows.reduce((a,r)=>{ for(const k of ['revenue','cogs','gross','tax','wages','cashT','fixedT','net','purchases']) a[k]=(a[k]||0)+r[k]; return a; }, {});
   T.margin = T.revenue ? T.net/T.revenue*100 : 0;
-  const cell = (v, neg) => `<td class="num" ${neg&&v<0?'style="color:var(--bad)"':''}>${fmt(v)}</td>`;
-  const lines = [['Выручка','revenue'],['Себестоимость проданного','cogs',-1],['Валовая прибыль','gross'],[`Налог ${(D&&D[0]&&D[0].tax_rate)||3}% с выручки`,'tax',-1],['Зарплата (по табелю)','wages',-1],['Расходы из кассы','cashT',-1],['Аренда и постоянные расходы','fixedT',-1],['Чистая прибыль','net'],['Рентабельность','margin']];
+  const pfK = v => Math.round((+v||0)/1000).toLocaleString('ru-RU');  // суммы в таблице — в тысячах тенге
+  const cell = (v, neg) => `<td class="num" ${neg&&v<0?'style="color:var(--bad)"':''}>${pfK(v)}</td>`;
+  const lines = [['Выручка','revenue'],['Себестоимость проданного','cogs',-1],['Валовая прибыль','gross'],[`Налог ${(D&&D[0]&&D[0].tax_rate)||3}% с выручки`,'tax',-1],['Зарплата','wages',-1],['Расходы из кассы','cashT',-1],['Аренда и постоянные расходы','fixedT',-1],['Чистая прибыль','net'],['Рентабельность','margin']];
   const per = [['month','Этот месяц'],['prev','Прошлый месяц'],['q','3 месяца'],['year','С начала года'],['custom','Свой период']];
   $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap"><h2 style="margin:0">Рентабельность магазинов</h2>${(S.tabs||[]).some(x=>x[0]==='cash')?'<button class="btn small" data-gocash>Журнал расходов →</button>':''}</div>
   <div class="filters">${per.map(([k,v])=>`<button class="btn small ${PF.per===k?'primary':''}" data-pfper="${k}">${v}</button>`).join('')}
     ${PF.per==='custom'?`<input type="date" id="pf-from" value="${f}"><input type="date" id="pf-to" value="${t}">`:''}<span class="meta" style="align-self:center">${new Date(f).toLocaleDateString('ru-RU')} — ${new Date(t).toLocaleDateString('ru-RU')}</span></div>
-  ${!D?'<div class="empty">Считаем…</div>':`<div class="scroll"><table><thead><tr><th></th>${rows.map(r=>`<th>${esc(storeName(r.store))}</th>`).join('')}${rows.length>1?'<th>Итого</th>':''}</tr></thead><tbody>
+  ${!D?'<div class="empty">Считаем…</div>':`<p class="meta" style="margin:4px 0">Все суммы в таблице — в тысячах тенге.</p><div class="scroll"><table><thead><tr><th></th>${rows.map(r=>`<th>${esc(storeName(r.store))}</th>`).join('')}${rows.length>1?'<th>Итого</th>':''}</tr></thead><tbody>
     ${lines.map(([t,k,sign])=>`<tr ${['gross','net'].includes(k)?'style="font-weight:700"':''}><td>${t}</td>${rows.map(r=>k==='margin'?`<td class="num" style="font-weight:700;color:${r.margin<0?'var(--bad)':'var(--ok)'}">${r.margin.toFixed(1)}%</td>`:cell(sign?-r[k]:r[k], k==='net')).join('')}${rows.length>1?(k==='margin'?`<td class="num" style="font-weight:700">${T.margin.toFixed(1)}%</td>`:cell(sign?-T[k]:T[k], k==='net')):''}</tr>`).join('')}
-    <tr><td class="meta">Закуп по приёмке (справочно)</td>${rows.map(r=>`<td class="num meta">${fmt(r.purchases)}</td>`).join('')}${rows.length>1?`<td class="num meta">${fmt(T.purchases)}</td>`:''}</tr>
+    <tr><td class="meta">Закуп по приёмке (справочно)</td>${rows.map(r=>`<td class="num meta">${pfK(r.purchases)}</td>`).join('')}${rows.length>1?`<td class="num meta">${pfK(T.purchases)}</td>`:''}</tr>
   </tbody></table></div>
   ${pfBeHtml()}
   <details style="margin:8px 0"><summary class="meta">Расшифровка расходов по магазинам</summary>
     ${rows.map(r=>`<div class="meta" style="margin:6px 0"><b>${esc(storeName(r.store))}:</b> ${[...Object.entries(r.cash).map(([k,v])=>k+' (касса) '+fmt(v)), ...Object.entries(r.fixed).map(([k,v])=>k+' '+fmt(v))].join(' · ') || 'расходов нет'}</div>`).join('')}</details>
-  <p class="meta">Налог — ${(D&&D[0]&&D[0].tax_rate)||3}% с выручки (продажи минус возвраты). Себестоимость — по закупочной цене проданных товаров. Зарплата — начислено по табелю (без бонусов и штрафов). Из расходов кассы не учитываются инкассация, зарплата и закуп — они считаются отдельно. Постоянные расходы за неполный месяц берутся пропорционально дням.</p>`}
+  <p class="meta">Налог — ${(D&&D[0]&&D[0].tax_rate)||3}% с выручки (продажи минус возвраты). Себестоимость — по закупочной цене проданных товаров. Зарплата — из ваших зарплатных файлов Google (консультанты; по Астане ещё и менеджер). Из расходов кассы не учитываются инкассация, зарплата и закуп — они считаются отдельно. Постоянные расходы за неполный месяц берутся пропорционально дням.</p>`}
   <div class="grid2" style="margin-top:14px"><div class="card stack"><b>Добавить постоянный расход</b>
     <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">
       <select id="pf-store">${S.allStores.map(st=>`<option value="${st.id}" ${String(PF.add.store)===String(st.id)?'selected':''}>${esc(storeName(st.id))}</option>`).join('')}</select>
