@@ -44,7 +44,7 @@ function storeFilterHtml(){
   return `<div class="filters" style="align-items:center">
     ${groups.map(([k,t])=>`<button class="btn small" data-sgroup="${k}">${t}</button>`).join('')}
     ${S.stores.map(st=>`<label class="chip ${sel.includes(st.id)?'ok':''}" style="cursor:pointer;padding:4px 10px"><input type="checkbox" data-sone="${st.id}" ${sel.includes(st.id)?'checked':''} style="margin-right:4px">${esc(BRAND[st.brand]+' · '+st.address)}</label>`).join('')}
-    <span class="meta">${all?'выбраны все магазины — нажмите на магазин, чтобы смотреть только его':'выбрано: '+sel.length+' · нажатие добавляет или убирает магазин'}</span></div>`;
+</div>`;
 }
 async function onSelChange(){
   ls.set('kassa_sel', S.sel);
@@ -601,7 +601,7 @@ function renderStoreBar(kassa){
   const el = $('#storebar'); if(!el) return; let h = '';
   if(!kassa && S.stores && S.stores.length > 1){
     if(isBoss() && STORE_MULTI.includes(S.view)){ const sel = selStores(), all = sel.length===S.stores.length;
-      h = `<button class="btn small" id="sp-toggle" aria-expanded="${!!S.spOpen}">🏬 ${all?'Все магазины':sel.length===1?esc(storeName(sel[0])):'Магазинов: '+sel.length+' из '+S.stores.length} ▾</button>${S.spOpen?storeFilterHtml():''}`; }
+      h = storeFilterHtml(); }   // один выбор магазинов: сразу чипы, без отдельной кнопки-списка
     else if(!isBoss() && STORE_ONE.includes(S.view))
       h = `<label class="store-pick"><span class="meta">Магазин</span><select id="gstore-sel" aria-label="Магазин">${S.stores.map(s=>`<option value="${s.id}" ${s.id===S.store?'selected':''}>${esc(BRAND[s.brand]+' · '+s.address)}</option>`).join('')}</select></label>`;
   }
