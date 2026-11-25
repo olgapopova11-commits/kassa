@@ -2387,11 +2387,11 @@ function renderSite(){
         <div class="row" style="justify-content:flex-start;align-items:flex-start">${siteImg(r.photo)}<div><b>${esc(r.title)}</b><br><span class="meta">${esc(r.part||'')}</span><br><span class="num">${fmt(r.price)}</span>
           ${r.url?` · <a href="${esc(r.url)}" target="_blank" rel="noopener">на сайте</a>`:''}</div></div>
         <div class="row" style="justify-content:flex-start;align-items:flex-start">${r.product_id?`${siteImg(r.p_photo)}<div><b>${esc(r.p_name)}</b><br><span class="meta num">${esc(r.p_barcode)}</span><br>
-          <span class="num" style="${+r.p_price!==+r.price?'color:var(--bad)':''}">${fmt(r.p_price)}${+r.p_price!==+r.price?' — цена отличается':''}</span>${r.score!=null&&r.status!=='confirmed'?` <span class="chip">сходство ${Math.round(r.score*100)}%</span>`:''}<br><span class="meta">${r.p_cat?esc(r.p_cat)+' · ':''}остаток </span>${+r.stock>0?'<span class="chip ok">'+r.stock+'</span>':'<span class="meta">0</span>'}</div>`
+          <span class="num" style="${+r.p_price!==+r.price?'color:var(--bad)':''}">${fmt(r.p_price)}${+r.p_price!==+r.price?' — цена отличается':''}</span>${r.score!=null&&r.status!=='confirmed'&&r.status!=='group'?` <span class="chip">сходство ${Math.round(r.score*100)}%</span>`:''}<br><span class="meta">${r.p_cat?esc(r.p_cat)+' · ':''}остаток </span>${+r.stock>0?'<span class="chip ok">'+r.stock+'</span>':'<span class="meta">0</span>'}${r.status==='group'?'<br><span class="chip">общий товар · остаток общий на все виды</span>':''}</div>`
           :'<div class="meta">Не связан с базой</div>'}</div>
       </div>
       <div class="row" style="justify-content:flex-end;flex-wrap:wrap;margin-top:8px">
-        ${r.product_id&&r.status!=='confirmed'?`<button class="btn small primary" data-stok="${key}" data-pid="${r.product_id}">Верно</button>`:''}
+        ${r.product_id&&r.status!=='confirmed'&&r.status!=='group'?`<button class="btn small primary" data-stok="${key}" data-pid="${r.product_id}">Верно</button>`:''}
         <button class="btn small" data-stopen="${key}">${open?'Скрыть':'Выбрать другой товар'}</button>
         ${isBoss()&&!isViewer()&&!r.product_id?(r.status==='group'?`<button class="btn small" data-stgcard="${key}" data-on="0">Вернуть в «Только на сайте»</button>`:`<button class="btn small" data-stgcard="${key}" data-on="1" title="Изделие продаётся под общим штрихкодом — в базе отдельного товара нет. Карточка уйдёт из списка «Только на сайте»">Пометить как общий товар</button>`):''}
       </div>
