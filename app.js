@@ -1963,7 +1963,7 @@ function renderNom(){
   const place = el => { if(cur===el) return; hide(); const pop = el.querySelector('.nm-st-pop'); if(!pop) return; cur = el;
     fl = document.createElement('div'); fl.className = 'nm-st-pop'; fl.innerHTML = pop.innerHTML; fl.style.display = 'flex'; document.body.appendChild(fl);
     const r = el.getBoundingClientRect(), w = fl.offsetWidth, h = fl.offsetHeight;
-    fl.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + 'px'; fl.style.top = (r.bottom + h + 8 > innerHeight ? r.top - h - 4 : r.bottom + 4) + 'px'; };
+    fl.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + 'px'; fl.style.top = Math.max(8, r.bottom + h + 100 > innerHeight ? r.top - h - 4 : r.bottom + 4) + 'px'; fl.style.zIndex = 9999; };
   document.addEventListener('mouseover', e => { const el = e.target.closest && e.target.closest('.nm-st'); if(el) place(el); else if(cur) hide(); });
   document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest('.nm-st'); if(el) place(el); });
   document.addEventListener('click', e => { const el = e.target.closest && e.target.closest('.nm-st'); if(el){ if(cur===el) hide(); else place(el); } else if(cur) hide(); });
