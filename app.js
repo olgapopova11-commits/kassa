@@ -2424,7 +2424,8 @@ function chSync(){ if(chIsPo()){ PO.mode = 'match'; const want = CH_PO[CH.tab]; 
 const CHN2 = { need:'all', cat:'', mat:'', q:'', off:0, data:null, rows:null };
 const CH_NEED = [['all','Все'],['buy','Нет закупа'],['site','Нет на сайте'],['sug','💡 Есть подсказки'],['check','Сайт: подтвердить'],['warn','⚠️ Не совпадает цвет/категория'],['full','✅ Полная цепочка'],['charms','🧿 Общий товар и шармы: сайт ↔ закуп']];
 async function loadChain(more){
-  const F = CHN2; if(!F.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); F.cats = data || []; }
+  const F = CHN2; if(!F.locs){ const { data } = await sb.rpc('local_suppliers'); F.locs = data || []; }
+  if(!F.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); F.cats = data || []; }
   if(F.need==='charms'){ PO.mneed = 'charms'; const { data, error } = await sb.rpc('charm_buy_list', { p_limit: 80, p_q: F.q.trim()||null }); if(error) toast(errText(error)); PO.clist = (data&&data.rows)||[]; PO.cn = data&&data.n; return; }
   if(!more) F.off = 0;
   const { data, error } = await sb.rpc('chain_list', { p_need:F.need, p_cat:F.cat?+F.cat:null, p_mat:F.mat||null, p_q:F.q.trim()||null, p_offset:F.off, p_limit:50 });
@@ -2443,7 +2444,9 @@ function renderChain(){
     const B = (p.buys||[]).map(x => box(x.photo, `<div class="meta">✓ закуп</div><div style="max-height:2.6em;overflow:hidden">${esc(noZh(x.title)||'')}</div><div class="meta">заказ №${esc(String(x.order_no||''))}${x.url?` · <a href="${esc(x.url)}" target="_blank" rel="noopener">1688</a>`:''}</div><button class="btn small" style="margin-top:4px" data-pmun="c:${x.id}">🗑 Отвязать</button>`)).join('');
     const U = !B && p.purchase_url ? `<div class="meta">✓ <a href="${esc(p.purchase_url)}" target="_blank" rel="noopener">ссылка на закуп</a></div>` : '';
     const S2 = (p.cs||[]).map(x => sug('c', x, p.id)).join('');
-    return B + U + S2 || '<span class="chip warn">нет закупа</span>'; };
+    const SUP = p.sup ? `<div class="meta">✓ поставщик: ${esc(p.sup)}</div>` : '';
+    const LOC = !B && !U && !p.sup && (CHN2.locs||[]).length ? `<div class="row" style="gap:4px;justify-content:flex-start;margin-top:4px"><select data-chsup="${p.id}"><option value="">Местный поставщик…</option>${CHN2.locs.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select></div>` : '';
+    return (B + U + SUP + S2 || '<span class="chip warn">нет закупа</span>') + LOC; };
   const siteCol = p => {
     const A = (p.sites||[]).map(x => box(x.photo, `${x.warn?`<span class="chip" style="background:#c0392b;color:#fff">⚠️ ${esc(x.warn)}</span><br>`:''}<div class="meta">${['review','auto'].includes(x.st)?'<span class="chip warn">авто — проверь</span>':'✓ сайт'} · ${x.site==='moon'?'MOON':'Sunshine'}</div>
       ${x.url?`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title||'карточка')}</a>`:esc(x.title||'')}<br>
@@ -2471,6 +2474,7 @@ document.addEventListener('click', async e => { if(S.view!=='site') return; cons
   if(b.id==='ch-more'){ CHN2.off += 50; b.disabled = true; await loadChain(true); return render(); }
   CHN2.need = b.dataset.chneed; CHN2.rows = null; render(); await loadChain(); render(); });
 document.addEventListener('change', async e => { if(S.view!=='site') return; const t = e.target;
+  if(t.dataset && t.dataset.chsup){ if(!t.value) return; const { error } = await sb.rpc('product_set_supplier', { p_id:t.dataset.chsup, p_sup:+t.value }); if(error) return toast(errText(error)); toast('Поставщик сохранён'); const r = (CHN2.rows||[]).find(x=>x.id===t.dataset.chsup); if(r){ r.sup = t.options[t.selectedIndex].text; r.has_buy = true; } return render(); }
   if(t.id==='ch-cat'){ CHN2.cat = t.value; } else if(t.id==='ch-mat'){ CHN2.mat = t.value; } else return; CHN2.rows = null; render(); await loadChain(); render(); });
 document.addEventListener('input', e => { if(S.view!=='site' || e.target.id!=='ch-q') return; CHN2.q = e.target.value; clearTimeout(CHN2.qT); CHN2.qT = setTimeout(async()=>{ CHN2.rows = null; await loadChain(); render(); }, 400); });
 async function loadSite(){
