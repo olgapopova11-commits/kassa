@@ -3612,12 +3612,13 @@ async function loadPo(){
     if(k===[PO.sdays, PO.sbrand, PO.sper, PO.smode].join('|')) PO.sug = data||[]; }
   if(PO.mode==='all'){ const k = [PA.brand, PA.per].join('|'); PA.list = null; const { data, error } = await sb.rpc('po_stock_all', { p_brand:PA.brand||null, p_sales_days:PA.per||30 }); if(error) toast(errText(error)); if(k===[PA.brand, PA.per].join('|')) PA.list = data||[]; }
   if(PO.mode==='ideas') await piLoad();
+  if(PO.mode==='match'){ const { data, error } = await sb.rpc('po_match_list', { p_scope: PO.mscope||'transit', p_limit: 60 }); if(error) toast(errText(error)); PO.mlist = data||[]; }
   if(PO.mode==='sup'){ const { data, error } = await sb.rpc('suppliers_list'); if(error) toast(errText(error)); PO.sups = data||[]; }
   if(PO.mode==='an'){ const now = new Date(), iso = x => x.toLocaleDateString('sv-SE'); const from = PO.anPer==='month' ? new Date(now.getFullYear(), now.getMonth(), 1) : PO.anPer==='q' ? new Date(now.getFullYear(), now.getMonth()-2, 1) : new Date(now.getFullYear(), 0, 1);
     const { data, error } = await sb.rpc('po_analytics', { p_from: iso(from), p_to: iso(now) }); if(error) toast(errText(error)); PO.an = data||{}; }
 }
 function renderPo(){
-  const modes = [['orders','Заказы'],['new','Новый заказ'],['suggest','Что дозаказать'],['all','Все остатки'],['ideas','✨ Идеи и тренды'],['sup','Поставщики'],['an','Аналитика закупа']].filter(([k])=>poEdit() || k!=='new');
+  const modes = [['orders','Заказы'],['new','Новый заказ'],['suggest','Что дозаказать'],['all','Все остатки'],['ideas','✨ Идеи и тренды'],['sup','Поставщики'],['an','Аналитика закупа'],['match','🔗 Сопоставление']].filter(([k])=>poEdit() || k!=='new');
   const head = `<div class="row" style="flex-wrap:wrap"><h2>Закуп</h2><span class="row" style="gap:6px">${(PO.list||[]).some(o=>(o.supplier&&/[\u4e00-\u9fff]/.test(o.supplier)&&!o.supplier_ru)||(o.items||[]).some(i=>i.supplier_title&&!i.title_ru))?`<button class="btn small" id="po-tr">🌐 Перевести названия на русский</button>`:''}${poEdit()?`<label class="btn small" style="cursor:pointer">⬆ Загрузить заказы: 1688 или Alibaba (Excel)<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label>`:''}</span></div>
   ${PO.imp?`<div class="card meta" style="margin-bottom:8px">${esc(PO.imp)}</div>`:''}
   <div class="seg" style="display:inline-flex;margin-bottom:10px">${modes.map(([k,v])=>`<button data-pomode="${k}" aria-pressed="${PO.mode===k}">${v}</button>`).join('')}</div>`;
@@ -3672,6 +3673,18 @@ function renderPo(){
           <td class="num">${i.cost!==''&&i.cost!=null?fmt(poLanded(i.cost, rt, d.pct, d.cargo, un)):'—'}</td><td><button class="btn small" data-podel="${n}">✕</button></td></tr>`).join('')}</tbody></table></div>`; })():'<div class="empty">Добавьте товары поиском или из вкладки «Что дозаказать»</div>'}
       <div class="row"><span class="meta">Позиций ${d.items.length} · ${d.items.reduce((a,i)=>a+i.qty,0)} шт. · товар ${tot.toLocaleString('ru-RU')} ${CUR[d.cur]}${d.cur!=='KZT'?' ≈ '+fmt(tot*poRate(d)):''}${+d.cargo?' + доставка по Китаю '+d.cargo+' '+CUR[d.cur]:''} + ${d.pct||0}% до Казахстана</span>
         <button class="btn primary" id="po-save" ${d.items.length?'':'disabled'}>Оформить заказ</button></div></div>`;
+  }
+  if(PO.mode==='match'){ const L = PO.mlist;
+    body = `<div class="card meta" style="margin-bottom:8px">Silver сравнил фото из заказов Китая с фото наших товаров и подобрал похожие. Проверьте: если совпало — «✅ Это он», если подходит другой из списка — нажмите на него, если такого у нас нет — «➕ Новый товар».</div>
+    <div class="filters">${[['transit','В пути'],['received','Уже получены'],['all','Все']].map(([k,v])=>`<button class="btn small ${(PO.mscope||'transit')===k?'primary':''}" data-pomscope="${k}">${v}</button>`).join('')}</div>
+    ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Нет позиций на проверку — Silver ещё сравнивает фото или всё уже связано</div>':L.map(m=>{ const c = m.cands||[], pk = c.find(x=>x.id===m.pick);
+      return `<div class="card" style="margin-bottom:8px;padding:10px 12px"><div class="row" style="gap:12px;align-items:flex-start;justify-content:flex-start;flex-wrap:wrap">
+        <div style="width:130px;text-align:center"><img src="${esc(m.photo||'')}" loading="lazy" style="width:130px;height:130px;object-fit:cover;border-radius:10px"><div class="meta">Китай · заказ №${m.order_no} · ${m.qty} шт.</div></div>
+        <div style="flex:1;min-width:220px"><div class="meta" style="margin-bottom:6px">${esc(noZh(m.title)||'')}</div>
+          ${pk?`<div class="row" style="justify-content:flex-start;gap:10px"><img src="${esc(pk.photo||'')}" loading="lazy" style="width:110px;height:110px;object-fit:cover;border-radius:10px;outline:3px solid var(--ok,#3a9)"><div><b>${esc(pk.name)}</b><div class="meta">${esc(pk.barcode||'')} · ${fmt(+pk.price||0)}</div><div class="meta">совпадение ${Math.round((+m.conf||0)*100)}% · ${esc(m.reason||'')}</div>
+            <button class="btn small primary" data-pomatch="${m.poi_id}:link:${pk.id}" style="margin-top:6px">✅ Это он</button></div></div>`:`<div class="meta">${esc(m.reason||'Точного совпадения нет')}</div>`}
+          ${c.filter(x=>x.id!==m.pick).length?`<div class="meta" style="margin-top:8px">Другие похожие — нажмите, если это он:</div><div class="row" style="justify-content:flex-start;gap:6px;flex-wrap:wrap">${c.filter(x=>x.id!==m.pick).map(x=>`<button class="btn small" data-pomatch="${m.poi_id}:other:${x.id}" title="${esc(x.name)}" style="padding:2px;display:flex;flex-direction:column;align-items:center;width:84px"><img src="${esc(x.photo||'')}" loading="lazy" style="width:76px;height:76px;object-fit:cover;border-radius:8px"><span style="font-size:11px;line-height:1.2;max-height:2.4em;overflow:hidden">${esc(x.name)}</span></button>`).join('')}</div>`:''}
+          <div class="row" style="justify-content:flex-start;gap:6px;margin-top:8px"><button class="btn small" data-pomatch="${m.poi_id}:new:">➕ Новый товар</button><button class="btn small" data-pomatch="${m.poi_id}:skip:">Пропустить</button></div></div></div></div>`; }).join('')}`;
   }
   if(PO.mode==='all') body = paHtml();
   if(PO.mode==='ideas') body = piHtml();
@@ -4290,6 +4303,11 @@ document.addEventListener('click', async e => {
     if(error) toast(errText(error)); else { toast(d.nmlink?'Связано с сайтом':'Отвязано'); S.nm.sq=''; S.nm.sfound=[]; await loadNom(); const fr=S.nm.data.rows.find(r=>r.id===S.nm.ed.id); if(fr) nmOpen(fr); else render(); } }
   else if(d.wook||d.wono){ t.disabled=true; const { data, error } = await sb.rpc('decide_writeoff', { p_id:d.wook||d.wono, p_approve:!!d.wook, p_note:null }); if(error){ toast(errText(error)); t.disabled=false; return; } toast(data); await loadWhSide(); render(); }
   else if(d.pomode){ PO.mode=d.pomode; render(); await loadPo(); render(); }
+  else if(d.pomscope){ PO.mscope=d.pomscope; PO.mlist=null; render(); await loadPo(); render(); }
+  else if(d.pomatch){ const [poi, act, pid] = d.pomatch.split(':'); t.disabled = true;
+    const { data, error } = await sb.rpc('po_match_decide', { p_poi:poi, p_action:act, p_product:pid||null }); if(error){ t.disabled=false; return toast(errText(error)); }
+    toast(act==='new'?'Отмечено как новый товар — создадите карточку при приёмке':String(data||'Готово')); PO.mlist = (PO.mlist||[]).filter(x=>x.poi_id!==poi); render(); }
+
   else if(d.pofilter){ PO.filter=d.pofilter; PO.list=null; render(); await loadPo(); render(); }
   else if(d.poper){ PO.anPer=d.poper; PO.an=null; render(); await loadPo(); render(); }
   else if(d.poadd){ const p = PO.found.find(x=>x.id===d.poadd); const dd = PO.d || (PO.d=poNew()); if(p){ const ex = dd.items.find(i=>i.pid===p.id); if(ex) ex.qty++; else dd.items.push({ pid:p.id, name:p.name, barcode:p.barcode, qty:1, cost:'' }); } PO.q=''; PO.found=[]; render(); }
