@@ -11,7 +11,7 @@ const ROLE = { owner:'Владелец', manager:'Менеджер', consultant:
 const BRAND = { moon:'MOON', sunshine:'Sunshine' };
 
 const S = {
-  me:null, stores:[], store:null, view:(location.hash.startsWith('#ph=')?'po':(location.hash.slice(1).replace(/[^a-z]/g,'')||'pos')), catalog:[], catalogAt:null,
+  me:null, stores:[], store:null, view:(location.hash.startsWith('#ph=')?'po':(location.hash.slice(1).split('/')[0].replace(/[^a-z]/g,'')||'pos')), catalog:[], catalogAt:null,
   q:'', found:[], stock:{},
   cf:{ st:'active', q:'', store:'' }, cart:[], discType:'pct', disc:0, pays:{}, certCode:'', cert:null, certQ:'', certList:null,
   phone:'', cust:null, custMsg:'', bonusSpend:0,
@@ -629,7 +629,8 @@ function renderHeader(){
 function render(){
   viewAlias();
   if(S.view!=='nom' && document.getElementById('nm-modal')){ $('#modal').innerHTML = ''; if(S.nm) S.nm.ed = null; }
-  if(location.hash.slice(1)!==S.view) try{ history.replaceState(null,'','#'+S.view); }catch(_){}
+  { let hv = S.view; try{ if(S.view==='po' && PO.mode && PO.mode!=='orders') hv = 'po/'+PO.mode+(PO.mode==='match'&&PO.mscope&&PO.mscope!=='transit'?'/'+PO.mscope:''); }catch(_){}
+    if(location.hash.slice(1)!==hv) try{ history.replaceState(null,'','#'+hv); }catch(_){} }
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart, y0 = scrollY;
@@ -3608,7 +3609,8 @@ document.addEventListener('toggle', e => { const el = e.target; if(el && el.data
 /* что дозаказать: при наведении — остаток и продажи по каждому магазину */
 function poByStore(p, k, total){ const B = p.by_store || {}, ids = Object.keys(B); if(!ids.length) return `${total}`;
   return `<span class="nm-st" tabindex="0">${total}<span class="nm-st-pop">${S.allStores.filter(st=>B[st.id]).map(st=>{ const b = B[st.id]; return `<span class="row" style="gap:12px"><span>${esc(BRAND[st.brand]+' · '+st.address)}</span><span class="num">остаток <b>${+b.stock||0}</b> · продано <b>${+b.sold||0}</b></span></span>`; }).join('')}</span></span>`; }
-const PO = { mode:'orders', filter:'open', list:null, sug:null, an:null, anPer:'month', q:'', found:[], d:null, sbrand:'', sper:30, sdays:30, smode:'recent' };
+const PO_H = (location.hash.match(/^#po\/([a-z]+)(?:\/([a-z]+))?/)||[]);
+const PO = { mode:(['new','suggest','all','ideas','sup','an','match'].includes(PO_H[1])?PO_H[1]:'orders'), mscope:(PO_H[2]||'transit'), filter:'open', list:null, sug:null, an:null, anPer:'month', q:'', found:[], d:null, sbrand:'', sper:30, sdays:30, smode:'recent' };
 const PO_ST = { ordered:['warn','заказано'], transit:['warn','в пути'], received:['ok','получено'], cancelled:['zero','отменён'] };
 const poNew = () => ({ supplier:'', store:S.store, eta:'', cargo:'', note:'', items:[], cur:'CNY', rate:'', pct:10 });
 const CUR = { KZT:'₸', CNY:'¥', USD:'$', RUB:'₽' };
