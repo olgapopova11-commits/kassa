@@ -3698,7 +3698,7 @@ function renderPo(){
   if(PO.mode==='match' && (PO.mscope||'prod')==='prod'){ const L = PO.plist;
     const pic = (u, w=96) => u?`<img referrerpolicy="no-referrer" src="${esc(/alicdn/.test(u)?u.replace(/(_\d+x\d+.*)?$/,'_400x400.jpg'):u)}" loading="lazy" style="width:${w}px;height:${w}px;object-fit:cover;border-radius:10px;background:#eee">`:`<span style="width:${w}px;height:${w}px;border-radius:10px;background:#eee;display:inline-block"></span>`;
     const sug = (kind, x, pid) => `<div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start;margin-bottom:6px">${pic(x.photo,72)}<div style="min-width:0"><div class="meta" style="max-height:3.6em;overflow:hidden">${esc(noZh(x.title)||'')}</div>
-      <div class="meta">${kind==='s'?(x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'):'заказ №'+x.order_no+' · '+x.qty+' шт.'}${x.url?` · <a href="${esc(x.url)}" target="_blank" rel="noopener">открыть</a>`:''}</div>
+      <div class="meta">${kind==='s'?(x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'):(x.refs>1?x.refs+' позиции · заказы №':'заказ №')+x.order_no+' · '+x.qty+' шт.'}${x.url?` · <a href="${esc(x.url)}" target="_blank" rel="noopener">открыть</a>`:''}</div>
       <span class="row" style="gap:4px;justify-content:flex-start;margin-top:4px"><button class="btn small primary" data-pmok="${kind}:${x.ref}:${pid}">✅ Связать</button><button class="btn small" data-pmno="${kind}:${x.ref}">✖ Не он</button></span></div></div>`;
     body = `<div class="card meta" style="margin-bottom:8px">Одна строка — один товар базы. Справа подсказки: какая карточка сайта и какая позиция заказа Китая, похоже, этот же товар. «✅ Связать» — связь сохранится, «✖ Не он» — подсказка уберётся.</div>
     <div class="filters">${[['prod','📦 По товарам'],['transit','Китай: в пути'],['received','Китай: получены'],['all','Китай: все'],['site','🌐 Сайт без товара']].map(([k,v])=>`<button class="btn small ${(PO.mscope||'prod')===k?'primary':''}" data-pomscope="${k}">${v}</button>`).join('')}</div>
@@ -4347,8 +4347,9 @@ document.addEventListener('click', async e => {
     const { error } = a[0]==='s' ? await sb.rpc('site_link_set', { p_site:a[1], p_uid:+a[2], p_product:null, p_status:'rejected' }) : await sb.rpc('po_unlink_item', { p_item:a[1] });
     if(error){ t.disabled=false; return toast(errText(error)); } toast('Отвязано'); await loadPo(); render(); }
   else if(d.pmok||d.pmno){ const [k, ref, pid] = (d.pmok||d.pmno).split(':'); t.disabled = true;
-    const { data, error } = k==='s' ? await sb.rpc('site_match_decide', { p_ref:ref, p_action:d.pmok?'link':'skip', p_product:pid||null }) : await sb.rpc('po_match_decide', { p_poi:ref, p_action:d.pmok?'link':'skip', p_product:pid||null });
-    if(error){ t.disabled=false; return toast(errText(error)); } toast(d.pmok?String(data||'Связано'):'Подсказка убрана'); await loadPo(); render(); }
+    let data, error;
+    for(const r1 of ref.split(',')){ ({ data, error } = k==='s' ? await sb.rpc('site_match_decide', { p_ref:r1, p_action:d.pmok?'link':'skip', p_product:pid||null }) : await sb.rpc('po_match_decide', { p_poi:r1, p_action:d.pmok?'link':'skip', p_product:pid||null })); if(error) break; }
+    if(error){ t.disabled=false; return toast(errText(error)); } toast(d.pmok?'Связано':'Подсказка убрана'); await loadPo(); render(); }
   else if(d.pomscope){ PO.mscope=d.pomscope; PO.mlist=null; render(); await loadPo(); render(); }
   else if(d.pomatch){ const [poi, act, pid] = d.pomatch.split(':'); t.disabled = true;
     const { data, error } = PO.mscope==='site' ? await sb.rpc('site_match_decide', { p_ref:poi, p_action:act, p_product:pid||null }) : await sb.rpc('po_match_decide', { p_poi:poi, p_action:act, p_product:pid||null }); if(error){ t.disabled=false; return toast(errText(error)); }
