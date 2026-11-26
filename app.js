@@ -2420,12 +2420,59 @@ function charmTable(pic){ const L = PO.clist;
 function poScopeRow(){ if(S.view!=='site') return `<div class="filters">${[['prod','📦 По товарам'],['transit','Китай: в пути'],['received','Китай: получены'],['all','Китай: все'],['site','🌐 Сайт без товара']].map(([k,v])=>`<button class="btn small ${(PO.mscope||'prod')===k?'primary':''}" data-pomscope="${k}">${v}</button>`).join('')}</div>`;
   if(CH.tab!=='china') return ''; return `<div class="filters">${[['transit','в пути'],['received','получены'],['all','все заказы']].map(([k,v])=>`<button class="btn small ${PO.mscope===k?'primary':''}" data-pomscope="${k}">${v}</button>`).join('')}</div>`; }
 function chSync(){ if(chIsPo()){ PO.mode = 'match'; const want = CH_PO[CH.tab]; if(CH.tab==='china'){ if(!['transit','received','all'].includes(PO.mscope)) PO.mscope = 'transit'; } else PO.mscope = want; } else if(S.st) S.st.status = CH.tab; }
-function renderChain(){ chSync();
-  if(!chIsPo()){ renderSite(); const m = $('#main'); if(m) m.insertAdjacentHTML('afterbegin', chainHead()); return; }
-  renderPo(); }
-async function loadChain(){ chSync(); if(chIsPo()){ const p = loadPo(); if(S.st && !S.st.data) loadSite().then(()=>{ if(S.view==='site') render(); }); return p; } S.st.off = 0; return loadSite(); }
-document.addEventListener('click', async e => { const b = e.target.closest && e.target.closest('[data-chtab]'); if(!b || S.view!=='site') return;
-  CH.tab = b.dataset.chtab; PO.mlist = null; PO.plist = null; render(); await loadChain(); render(); });
+/* «Цепочка товара» — одна страница: слева закуп 1688, в центре товар базы, справа сайт. Где звена нет — там и дописываем связь. */
+const CHN2 = { need:'all', cat:'', mat:'', q:'', off:0, data:null, rows:null };
+const CH_NEED = [['all','Все'],['buy','Нет закупа'],['site','Нет на сайте'],['sug','💡 Есть подсказки'],['check','Сайт: подтвердить'],['warn','⚠️ Не совпадает цвет/категория'],['full','✅ Полная цепочка'],['charms','🧿 Шармы']];
+async function loadChain(more){
+  const F = CHN2; if(!F.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); F.cats = data || []; }
+  if(F.need==='charms'){ PO.mneed = 'charms'; const { data, error } = await sb.rpc('charm_buy_list', { p_limit: 80, p_q: F.q.trim()||null }); if(error) toast(errText(error)); PO.clist = (data&&data.rows)||[]; PO.cn = data&&data.n; return; }
+  if(!more) F.off = 0;
+  const { data, error } = await sb.rpc('chain_list', { p_need:F.need, p_cat:F.cat?+F.cat:null, p_mat:F.mat||null, p_q:F.q.trim()||null, p_offset:F.off, p_limit:50 });
+  if(error){ toast(errText(error)); return; }
+  F.data = data; F.rows = more ? [...(F.rows||[]), ...(data.rows||[])] : (data.rows||[]);
+  if(PO.cn==null) sb.rpc('charm_buy_list', { p_limit: 0 }).then(({data}) => { if(data){ PO.cn = data.n; if(S.view==='site') render(); } });
+}
+function renderChain(){
+  const F = CHN2, D = F.data, N = (D&&D.n)||{}, L = F.rows;
+  const pic = (u, w=80) => u?`<img referrerpolicy="no-referrer" src="${esc(/cbu\d*\.alicdn\.com\/img\/ibank/.test(u)&&!/_\d+x\d+/.test(u)?u+'_400x400.jpg':u)}" data-full="${esc(u)}" onerror="if(this.src!==this.dataset.full)this.src=this.dataset.full" loading="lazy" style="width:${w}px;height:${w}px;object-fit:cover;border-radius:10px;background:#eee;flex:none">`:`<span style="width:${w}px;height:${w}px;border-radius:10px;background:#eee;display:inline-block;flex:none"></span>`;
+  const box = (ph, html) => `<div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start;margin-bottom:8px">${pic(ph)}<div style="min-width:0;font-size:13px">${html}</div></div>`;
+  const sug = (kind, x, pid) => box(x.photo, `<div class="meta">💡 похоже</div><div style="max-height:2.6em;overflow:hidden">${esc(noZh(x.title)||'')}</div>
+      <div class="meta">${kind==='s'?(x.site==='moon'?'MOON':'Sunshine'):(x.refs>1?x.refs+' позиции · заказы №':'заказ №')+x.order_no}${x.url?` · <a href="${esc(x.url)}" target="_blank" rel="noopener">открыть</a>`:''}</div>
+      <span class="row" style="gap:4px;justify-content:flex-start;margin-top:4px"><button class="btn small primary" data-pmok="${kind}:${x.ref}:${pid}">✅ Связать</button><button class="btn small" data-pmno="${kind}:${x.ref}">✖ Не он</button></span>`);
+  const buyCol = p => {
+    const B = (p.buys||[]).map(x => box(x.photo, `<div class="meta">✓ закуп</div><div style="max-height:2.6em;overflow:hidden">${esc(noZh(x.title)||'')}</div><div class="meta">заказ №${esc(String(x.order_no||''))}${x.url?` · <a href="${esc(x.url)}" target="_blank" rel="noopener">1688</a>`:''}</div><button class="btn small" style="margin-top:4px" data-pmun="c:${x.id}">🗑 Отвязать</button>`)).join('');
+    const U = !B && p.purchase_url ? `<div class="meta">✓ <a href="${esc(p.purchase_url)}" target="_blank" rel="noopener">ссылка на закуп</a></div>` : '';
+    const S2 = (p.cs||[]).map(x => sug('c', x, p.id)).join('');
+    return B + U + S2 || '<span class="chip warn">нет закупа</span>'; };
+  const siteCol = p => {
+    const A = (p.sites||[]).map(x => box(x.photo, `${x.warn?`<span class="chip" style="background:#c0392b;color:#fff">⚠️ ${esc(x.warn)}</span><br>`:''}<div class="meta">${['review','auto'].includes(x.st)?'<span class="chip warn">авто — проверь</span>':'✓ сайт'} · ${x.site==='moon'?'MOON':'Sunshine'}</div>
+      ${x.url?`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title||'карточка')}</a>`:esc(x.title||'')}<br>
+      ${['review','auto'].includes(x.st)?`<button class="btn small primary" style="margin-top:4px" data-pmsok="${x.site}:${x.uid}:${p.id}">✅ Верно</button> `:''}<button class="btn small" style="margin-top:4px" data-pmun="s:${x.site}:${x.uid}">🗑 Отвязать</button>`)).join('');
+    const S2 = (p.ss||[]).map(x => sug('s', x, p.id)).join('');
+    const find = PO.sfind===p.id ? `<div style="margin-top:6px"><input id="pm-sq" data-pid="${p.id}" placeholder="Название на сайте" value="${esc(PO.sq||'')}" style="width:100%">
+        ${(PO.sfound||[]).map(x=>`<button class="prod" style="width:100%;margin-top:4px" data-pmslink="${x.site}:${x.uid}:${p.id}">${pic(x.photo,48)}<span style="text-align:left"><b>${esc(x.title)}</b><br><span class="meta">${x.site==='moon'?'MOON':'Sunshine'}${x.linked_to?' · сейчас связан с: '+esc(x.linked_to):''}</span></span></button>`).join('')||'<div class="meta">Начните вводить название</div>'}
+        <button class="btn small" style="margin-top:4px" data-pmsfind="${p.id}">Закрыть</button></div>`
+      : `<button class="btn small" style="margin-top:2px" data-pmsfind="${p.id}" data-name="${esc(p.name)}">🔍 Найти на сайте</button>`;
+    return (A + S2 || '<span class="chip warn">нет на сайте</span><br>') + find; };
+  const mats = ['Нержавейка','Мед сплав','Серебро 925','Пластик','мельхиор','Жемчуг','Кожа','другой'];
+  $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap"><h2>Цепочка товара</h2><span class="meta" style="flex:1">слева закуп 1688 → в центре товар → справа сайт. Где звена нет — его и добавляем.</span></div>
+  <div class="filters"><select id="ch-cat"><option value="">Все категории</option>${(F.cats||[]).map(c=>`<option value="${c.id}" ${String(F.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+    <select id="ch-mat"><option value="">Все материалы</option>${mats.map(m=>`<option ${F.mat===m?'selected':''}>${esc(m)}</option>`).join('')}</select>
+    <input id="ch-q" placeholder="Поиск: название или штрихкод" value="${esc(F.q)}" style="flex:1;min-width:180px"></div>
+  <div class="filters">${CH_NEED.map(([k,v])=>{ const n = k==='charms' ? PO.cn : N[k]; return `<button class="btn small ${F.need===k?'primary':''}" data-chneed="${k}">${v}${n!=null?` (${n})`:''}</button>`; }).join('')}</div>
+  ${F.need==='charms' ? charmTable((u,w)=>pic(u,w||80)) : !L ? '<div class="empty">Загружаем…</div>' : !L.length ? '<div class="empty">Ничего не нашлось</div>' :
+  `<div class="scroll"><table class="mc" style="width:100%;table-layout:fixed"><thead><tr><th style="text-align:left;width:34%">🇨🇳 Закуп</th><th style="text-align:left;width:28%">📦 Товар в базе</th><th style="text-align:left;width:38%">🌐 Сайт</th></tr></thead><tbody>
+  ${L.map(p=>`<tr style="vertical-align:top"><td>${buyCol(p)}</td>
+    <td style="background:var(--soft,rgba(127,127,127,.06))">${box(p.photo, `<b>${pcl(p.id, esc(p.name))}</b><div class="meta">${esc(p.barcode||'')} · ${fmt(+p.price||0)}${p.material?' · '+esc(p.material):''}</div>${+p.sold60>0?`<div class="meta">продано за 60 дн: <b>${p.sold60}</b></div>`:''}`)}</td>
+    <td>${siteCol(p)}</td></tr>`).join('')}</tbody></table></div>
+  ${D && L.length < D.total ? `<div class="row" style="justify-content:center;margin:10px 0"><button class="btn" id="ch-more">Показать ещё (${D.total - L.length})</button></div>` : ''}`}`;
+}
+document.addEventListener('click', async e => { if(S.view!=='site') return; const b = e.target.closest && e.target.closest('[data-chneed],#ch-more'); if(!b) return;
+  if(b.id==='ch-more'){ CHN2.off += 50; b.disabled = true; await loadChain(true); return render(); }
+  CHN2.need = b.dataset.chneed; CHN2.rows = null; render(); await loadChain(); render(); });
+document.addEventListener('change', async e => { if(S.view!=='site') return; const t = e.target;
+  if(t.id==='ch-cat'){ CHN2.cat = t.value; } else if(t.id==='ch-mat'){ CHN2.mat = t.value; } else return; CHN2.rows = null; render(); await loadChain(); render(); });
+document.addEventListener('input', e => { if(S.view!=='site' || e.target.id!=='ch-q') return; CHN2.q = e.target.value; clearTimeout(CHN2.qT); CHN2.qT = setTimeout(async()=>{ CHN2.rows = null; await loadChain(); render(); }, 400); });
 async function loadSite(){
   const f = S.st; f.data = null;
   const pk = f.site+':'+f.status;
@@ -3671,6 +3718,7 @@ const poRate = d => +d.rate || fxNow(d.cur) || 1;
 const poLanded = (price, rate, pct, cargo, units) => (+price||0)*rate*(1+(+pct||0)/100) + (units ? (+cargo||0)*rate/units : 0);
 const poEdit = () => S.me && ['owner','manager','purchaser'].includes(S.me.role);
 async function loadPo(){
+  if(S.view==='site') return loadChain();
   if(!PO.fx){ const r = await sb.rpc('fx_current'); PO.fx = r.data || {}; }
   if(PO.mode==='orders'){ const { data, error } = await sb.rpc('po_list', { p_status: PO.filter==='all'?null:PO.filter }); if(error) toast(errText(error)); PO.list = data||[]; }
   if(PO.mode==='suggest'){ if(!WU.srv) wuLoadSrv(); const k = [PO.sdays, PO.sbrand, PO.sper, PO.smode].join('|');
