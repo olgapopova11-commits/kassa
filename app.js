@@ -3484,7 +3484,7 @@ function renderPhoto(){
   ${!D?'<div class="empty">Загружаем…</div>':!p?`<div class="card" style="text-align:center;padding:24px">${PH.q?'Такого товара без фото нет — возможно, фото уже есть':'✅ Здесь все товары с фото'}</div>`:`
   <div class="card stack" style="gap:10px;max-width:560px">
     <div class="meta">${PH.i+1} из ${R.length}${D.total>R.length?' (показаны первые '+R.length+')':''}</div>
-    <div style="font-size:20px;font-weight:600;line-height:1.25">${esc(p.name)}</div>
+    <div style="font-size:20px;font-weight:600;line-height:1.25">${esc(p.name)}</div>${p.for_site?'<div><span class="chip warn">📷 для сайта MOON — есть только фото поставщика, нужно своё</span></div>':''}
     <div class="row" style="justify-content:flex-start;gap:14px;flex-wrap:wrap"><span class="num" style="font-size:18px">${esc(p.barcode||'')}</span><span><b>${+p.price>0?fmt(p.price):'нет цены'}</b></span><span class="meta">в наличии ${p.stock} · продано за 30 дн. ${p.sold30}</span></div>
     <label class="btn primary" style="cursor:pointer;text-align:center;padding:16px;font-size:17px">${PH.busy?'Загружаем…':'📷 Снять фото'}<input type="file" id="ph-file" accept="image/*" capture="environment" hidden ${PH.busy?'disabled':''}></label>
     <div class="row" style="gap:8px"><button class="btn" id="ph-prev" ${PH.i?'':'disabled'}>← Назад</button><button class="btn" id="ph-skip">Пропустить →</button></div>
