@@ -2398,9 +2398,9 @@ const SITE_NAME = { moon:'mooncollection.kz', sunshine:'sunshinejewelry.kz' };
 /* «Цепочка товаров»: закуп (1688) → база → сайт в одном месте.
    «Связывание» — подсказки по фото (по товарам, Китай без товара, сайт без товара); «Проверка сайта» — прежняя вкладка «Сайт». */
 const CH = { tab:'prod' };
-{ const m = INIT_HASH.match(/^#site\/([a-z]+)/); if(m) CH.tab = m[1]; }
+{ const m = INIT_HASH.match(/^#site\/([a-z]+)/); if(m && ['prod','review','baseonly'].includes(m[1])) CH.tab = m[1]; }
 const CH_PO = { prod:'prod', china:'transit', sitefree:'site' };
-const CH_TABS = [['prod','📦 По товарам'],['china','🇨🇳 Китай без товара'],['sitefree','🌐 Сайт без товара'],['review','✔️ Проверить связи сайта'],['auto','🤖 Связано автоматически'],['confirmed','✅ Подтверждено'],['baseonly','📭 Нет на сайте'],['group','Общий товар (скрыто)']];
+const CH_TABS = [['prod','🔗 Связать'],['review','✔️ Проверить сайт'],['baseonly','📭 Нет на сайте']];
 const chIsPo = () => !!CH_PO[CH.tab];
 function chCnt(k){ if(k==='prod') return PO.pn && PO.pn.all; const f = S.st, D = f && f.data; if(!D || !D.counts) return null; const c0 = x => D.counts[f.site+':'+x] || 0;
   return k==='baseonly' ? (f.baseTotal||null) : ['review','auto','confirmed','group'].includes(k) ? c0(k) : null; }
@@ -2410,7 +2410,7 @@ function chainHead(){
 // внутри «Цепочки» строка разделов уже сверху — у Китая оставляем только «в пути / получены / все»
 function poScopeRow(){ if(S.view!=='site') return `<div class="filters">${[['prod','📦 По товарам'],['transit','Китай: в пути'],['received','Китай: получены'],['all','Китай: все'],['site','🌐 Сайт без товара']].map(([k,v])=>`<button class="btn small ${(PO.mscope||'prod')===k?'primary':''}" data-pomscope="${k}">${v}</button>`).join('')}</div>`;
   if(CH.tab!=='china') return ''; return `<div class="filters">${[['transit','в пути'],['received','получены'],['all','все заказы']].map(([k,v])=>`<button class="btn small ${PO.mscope===k?'primary':''}" data-pomscope="${k}">${v}</button>`).join('')}</div>`; }
-function chSync(){ if(chIsPo()){ PO.mode = 'match'; const want = CH_PO[CH.tab]; if(CH.tab==='china'){ if(!['transit','received','all'].includes(PO.mscope)) PO.mscope = 'transit'; } else PO.mscope = want; } else if(S.st) S.st.status = CH.tab; }
+function chSync(){ if(chIsPo()){ PO.mode = 'match'; PO.mneed = 'all'; const want = CH_PO[CH.tab]; if(CH.tab==='china'){ if(!['transit','received','all'].includes(PO.mscope)) PO.mscope = 'transit'; } else PO.mscope = want; } else if(S.st) S.st.status = CH.tab; }
 function renderChain(){ chSync();
   if(!chIsPo()){ renderSite(); const m = $('#main'); if(m) m.insertAdjacentHTML('afterbegin', chainHead()); return; }
   renderPo(); }
@@ -3744,7 +3744,7 @@ function renderPo(){
       <span class="row" style="gap:4px;justify-content:flex-start;margin-top:4px"><button class="btn small primary" data-pmok="${kind}:${x.ref}:${pid}">✅ Связать</button><button class="btn small" data-pmno="${kind}:${x.ref}">✖ Не он</button></span></div></div>`;
     body = `<div class="card meta" style="margin-bottom:8px">Одна строка — один товар базы. Справа подсказки: какая карточка сайта и какая позиция заказа Китая, похоже, этот же товар. «✅ Связать» — связь сохранится, «✖ Не он» — подсказка уберётся.</div>
     ${poScopeRow()}
-    <div class="filters" style="margin-top:4px">${[['all','Все'],['site','Нет на сайте'],['buy','Нет закупа'],['both','Нет ни сайта, ни закупа']].map(([k,v])=>`<button class="btn small ${(PO.mneed||'all')===k?'primary':''}" data-pomneed="${k}">${v}${PO.pn&&PO.pn[k]!=null?` (${PO.pn[k]})`:''}</button>`).join('')}</div>
+    ${S.view==='site'?'':`<div class="filters" style="margin-top:4px">${[['all','Все'],['site','Нет на сайте'],['buy','Нет закупа'],['both','Нет ни сайта, ни закупа']].map(([k,v])=>`<button class="btn small ${(PO.mneed||'all')===k?'primary':''}" data-pomneed="${k}">${v}${PO.pn&&PO.pn[k]!=null?` (${PO.pn[k]})`:''}</button>`).join('')}</div>`}
     ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Подсказок нет</div>':`<div class="scroll"><table class="mc" style="width:100%"><thead><tr><th style="text-align:left">Товар в базе</th><th style="text-align:left">🌐 Сайт</th><th style="text-align:left">🇨🇳 Закуп (Китай)</th></tr></thead><tbody>${L.map(p=>`<tr style="vertical-align:top">
       <td style="min-width:200px"><div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start">${pic(p.photo)}<div><b>${esc(p.name)}</b><div class="meta">${esc(p.barcode||'')} · ${fmt(+p.price||0)}</div></div></div></td>
       <td style="min-width:240px">${(p.sites||[]).map(x=>`<div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start;margin-bottom:6px">${pic(x.photo,72)}<div class="meta">✓ уже связано · ${x.site==='moon'?'MOON':'Sunshine'}<br>${x.url?`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title||'карточка')}</a>`:esc(x.title||'')}<br><button class="btn small" style="margin-top:4px" data-pmun="s:${x.site}:${x.uid}">🗑 Отвязать</button></div></div>`).join('')}${(p.ss||[]).map(x=>sug('s',x,p.id)).join('')}${!(p.sites||[]).length&&!(p.ss||[]).length?'<span class="meta">—</span>':''}</td>
