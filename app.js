@@ -2422,7 +2422,7 @@ function poScopeRow(){ if(S.view!=='site') return `<div class="filters">${[['pro
 function chSync(){ if(chIsPo()){ PO.mode = 'match'; const want = CH_PO[CH.tab]; if(CH.tab==='china'){ if(!['transit','received','all'].includes(PO.mscope)) PO.mscope = 'transit'; } else PO.mscope = want; } else if(S.st) S.st.status = CH.tab; }
 /* «Цепочка товара» — одна страница: слева закуп 1688, в центре товар базы, справа сайт. Где звена нет — там и дописываем связь. */
 const CHN2 = { need:'all', cat:'', mat:'', q:'', off:0, data:null, rows:null };
-const CH_NEED = [['all','Все'],['buy','Нет закупа'],['site','Нет на сайте'],['sug','💡 Есть подсказки'],['check','Сайт: подтвердить'],['warn','⚠️ Не совпадает цвет/категория'],['full','✅ Полная цепочка'],['charms','🧿 Общий товар и шармы: сайт ↔ закуп']];
+const CH_NEED = [['all','Все'],['buy','Нет закупа'],['site','Нет на сайте'],['sug','💡 Есть подсказки'],['check','Сайт: подтвердить'],['warn','⚠️ Не совпадает цвет/категория'],['full','✅ Полная цепочка'],['moonsite','🌙 Предложение на сайт MOON'],['charms','🧿 Общий товар и шармы: сайт ↔ закуп']];
 async function loadChain(more){
   const F = CHN2; if(!F.locs){ const { data } = await sb.rpc('local_suppliers'); F.locs = data || []; }
   if(!F.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); F.cats = data || []; }
@@ -2463,6 +2463,7 @@ function renderChain(){
     <select id="ch-mat"><option value="">Все материалы</option>${mats.map(m=>`<option ${F.mat===m?'selected':''}>${esc(m)}</option>`).join('')}</select>
     <input id="ch-q" placeholder="Поиск: название или штрихкод" value="${esc(F.q)}" style="flex:1;min-width:180px"></div>
   <div class="filters">${CH_NEED.map(([k,v])=>{ const n = k==='charms' ? PO.cn : N[k]; return `<button class="btn small ${F.need===k?'primary':''}" data-chneed="${k}">${v}${n!=null?` (${n})`:''}</button>`; }).join('')}</div>
+  ${F.need==='moonsite'&&D?`<div class="card meta" style="margin:6px 0">Кандидаты на сайт MOON: в магазинах MOON от 3 шт., за 60 дней продано от 3, есть фото, карточки на сайте нет (и нет второго цвета или похожего названия). Всего: <b>${D.total}</b>. Сверху самые продаваемые. Ничего не загружено — сначала посмотри список.</div>`:''}
   ${F.need==='charms' ? charmTable((u,w)=>pic(u,w||80)) : !L ? '<div class="empty">Загружаем…</div>' : !L.length ? '<div class="empty">Ничего не нашлось</div>' :
   `${(()=>{ const ids = Object.keys(CHN2.sel||{}).filter(k=>CHN2.sel[k]); const noBuy = L.filter(p=>!p.has_buy); return noBuy.length ? `<div class="card row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;margin:8px 0;padding:8px 12px">
       <label class="meta" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="ch-selall" ${noBuy.every(p=>(CHN2.sel||{})[p.id])?'checked':''}> выбрать все без закупа на странице</label>
