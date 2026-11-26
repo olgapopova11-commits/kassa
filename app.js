@@ -629,7 +629,7 @@ function renderHeader(){
 function render(){
   viewAlias();
   if(S.view!=='nom' && document.getElementById('nm-modal')){ $('#modal').innerHTML = ''; if(S.nm) S.nm.ed = null; }
-  { let hv = S.view; try{ if(S.view==='po' && PO.mode && PO.mode!=='orders') hv = 'po/'+PO.mode+(PO.mode==='match'&&PO.mscope&&PO.mscope!=='transit'?'/'+PO.mscope:''); }catch(_){}
+  { let hv = S.view; try{ if(S.view==='po' && PO.mode && PO.mode!=='orders') hv = 'po/'+PO.mode+(PO.mode==='match'&&PO.mscope&&PO.mscope!=='prod'?'/'+PO.mscope:''); }catch(_){}
     if(location.hash.slice(1)!==hv) try{ history.replaceState(null,'','#'+hv); }catch(_){} }
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
@@ -3610,7 +3610,7 @@ document.addEventListener('toggle', e => { const el = e.target; if(el && el.data
 function poByStore(p, k, total){ const B = p.by_store || {}, ids = Object.keys(B); if(!ids.length) return `${total}`;
   return `<span class="nm-st" tabindex="0">${total}<span class="nm-st-pop">${S.allStores.filter(st=>B[st.id]).map(st=>{ const b = B[st.id]; return `<span class="row" style="gap:12px"><span>${esc(BRAND[st.brand]+' · '+st.address)}</span><span class="num">остаток <b>${+b.stock||0}</b> · продано <b>${+b.sold||0}</b></span></span>`; }).join('')}</span></span>`; }
 const PO_H = (location.hash.match(/^#po\/([a-z]+)(?:\/([a-z]+))?/)||[]);
-const PO = { mode:(['new','suggest','all','ideas','sup','an','match'].includes(PO_H[1])?PO_H[1]:'orders'), mscope:(PO_H[2]||'transit'), filter:'open', list:null, sug:null, an:null, anPer:'month', q:'', found:[], d:null, sbrand:'', sper:30, sdays:30, smode:'recent' };
+const PO = { mode:(['new','suggest','all','ideas','sup','an','match'].includes(PO_H[1])?PO_H[1]:'orders'), mscope:(PO_H[2]||'prod'), filter:'open', list:null, sug:null, an:null, anPer:'month', q:'', found:[], d:null, sbrand:'', sper:30, sdays:30, smode:'recent' };
 const PO_ST = { ordered:['warn','заказано'], transit:['warn','в пути'], received:['ok','получено'], cancelled:['zero','отменён'] };
 const poNew = () => ({ supplier:'', store:S.store, eta:'', cargo:'', note:'', items:[], cur:'CNY', rate:'', pct:10 });
 const CUR = { KZT:'₸', CNY:'¥', USD:'$', RUB:'₽' };
@@ -3627,7 +3627,8 @@ async function loadPo(){
     if(k===[PO.sdays, PO.sbrand, PO.sper, PO.smode].join('|')) PO.sug = data||[]; }
   if(PO.mode==='all'){ const k = [PA.brand, PA.per].join('|'); PA.list = null; const { data, error } = await sb.rpc('po_stock_all', { p_brand:PA.brand||null, p_sales_days:PA.per||30 }); if(error) toast(errText(error)); if(k===[PA.brand, PA.per].join('|')) PA.list = data||[]; }
   if(PO.mode==='ideas') await piLoad();
-  if(PO.mode==='match'){ const site = PO.mscope==='site'; const { data, error } = site ? await sb.rpc('site_match_list', { p_limit: 60 }) : await sb.rpc('po_match_list', { p_scope: PO.mscope||'transit', p_limit: 60 }); if(error) toast(errText(error));
+  if(PO.mode==='match' && (PO.mscope||'prod')==='prod'){ const { data, error } = await sb.rpc('match_by_product', { p_need: PO.mneed||'all', p_limit: 60 }); if(error) toast(errText(error)); PO.plist = data||[]; }
+  else if(PO.mode==='match'){ const site = PO.mscope==='site'; const { data, error } = site ? await sb.rpc('site_match_list', { p_limit: 60 }) : await sb.rpc('po_match_list', { p_scope: PO.mscope||'transit', p_limit: 60 }); if(error) toast(errText(error));
     PO.mlist = (data||[]).map(m => site ? { ...m, poi_id:m.ref, site_card:true } : m); }
   if(PO.mode==='sup'){ const { data, error } = await sb.rpc('suppliers_list'); if(error) toast(errText(error)); PO.sups = data||[]; }
   if(PO.mode==='an'){ const now = new Date(), iso = x => x.toLocaleDateString('sv-SE'); const from = PO.anPer==='month' ? new Date(now.getFullYear(), now.getMonth(), 1) : PO.anPer==='q' ? new Date(now.getFullYear(), now.getMonth()-2, 1) : new Date(now.getFullYear(), 0, 1);
@@ -3694,9 +3695,22 @@ function renderPo(){
       <div class="row"><span class="meta">Позиций ${d.items.length} · ${d.items.reduce((a,i)=>a+i.qty,0)} шт. · товар ${tot.toLocaleString('ru-RU')} ${CUR[d.cur]}${d.cur!=='KZT'?' ≈ '+fmt(tot*poRate(d)):''}${+d.cargo?' + доставка по Китаю '+d.cargo+' '+CUR[d.cur]:''} + ${d.pct||0}% до Казахстана</span>
         <button class="btn primary" id="po-save" ${d.items.length?'':'disabled'}>Оформить заказ</button></div></div>`;
   }
-  if(PO.mode==='match'){ const L = PO.mlist;
+  if(PO.mode==='match' && (PO.mscope||'prod')==='prod'){ const L = PO.plist;
+    const pic = (u, w=96) => u?`<img referrerpolicy="no-referrer" src="${esc(/alicdn/.test(u)?u.replace(/(_\d+x\d+.*)?$/,'_400x400.jpg'):u)}" loading="lazy" style="width:${w}px;height:${w}px;object-fit:cover;border-radius:10px;background:#eee">`:`<span style="width:${w}px;height:${w}px;border-radius:10px;background:#eee;display:inline-block"></span>`;
+    const sug = (kind, x, pid) => `<div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start;margin-bottom:6px">${pic(x.photo,72)}<div style="min-width:0"><div class="meta" style="max-height:3.6em;overflow:hidden">${esc(noZh(x.title)||'')}</div>
+      <div class="meta">${kind==='s'?(x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'):'заказ №'+x.order_no+' · '+x.qty+' шт.'}${x.url?` · <a href="${esc(x.url)}" target="_blank" rel="noopener">открыть</a>`:''}</div>
+      <span class="row" style="gap:4px;justify-content:flex-start;margin-top:4px"><button class="btn small primary" data-pmok="${kind}:${x.ref}:${pid}">✅ Связать</button><button class="btn small" data-pmno="${kind}:${x.ref}">✖ Не он</button></span></div></div>`;
+    body = `<div class="card meta" style="margin-bottom:8px">Одна строка — один товар базы. Справа подсказки: какая карточка сайта и какая позиция заказа Китая, похоже, этот же товар. «✅ Связать» — связь сохранится, «✖ Не он» — подсказка уберётся.</div>
+    <div class="filters">${[['prod','📦 По товарам'],['transit','Китай: в пути'],['received','Китай: получены'],['all','Китай: все'],['site','🌐 Сайт без товара']].map(([k,v])=>`<button class="btn small ${(PO.mscope||'prod')===k?'primary':''}" data-pomscope="${k}">${v}</button>`).join('')}</div>
+    <div class="filters" style="margin-top:4px">${[['all','Все'],['site','Нет сайта'],['buy','Нет закупа'],['both','Нет ни того, ни другого']].map(([k,v])=>`<button class="btn small ${(PO.mneed||'all')===k?'primary':''}" data-pomneed="${k}">${v}</button>`).join('')}</div>
+    ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Подсказок нет</div>':`<div class="scroll"><table class="mc" style="width:100%"><thead><tr><th style="text-align:left">Товар в базе</th><th style="text-align:left">🌐 Сайт</th><th style="text-align:left">🇨🇳 Закуп (Китай)</th></tr></thead><tbody>${L.map(p=>`<tr style="vertical-align:top">
+      <td style="min-width:200px"><div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start">${pic(p.photo)}<div><b>${esc(p.name)}</b><div class="meta">${esc(p.barcode||'')} · ${fmt(+p.price||0)}</div></div></div></td>
+      <td style="min-width:240px">${(p.sites||[]).map(x=>`<div class="meta">✓ ${x.site==='moon'?'MOON':'Sunshine'}: ${x.url?`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title||'карточка')}</a>`:esc(x.title||'')}</div>`).join('')}${(p.ss||[]).map(x=>sug('s',x,p.id)).join('')}${!(p.sites||[]).length&&!(p.ss||[]).length?'<span class="meta">—</span>':''}</td>
+      <td style="min-width:240px">${p.has_buy?`<div class="meta">✓ ${p.purchase_url?`<a href="${esc(p.purchase_url)}" target="_blank" rel="noopener">ссылка на закуп</a>`:'есть в заказах'}</div>`:''}${(p.cs||[]).map(x=>sug('c',x,p.id)).join('')}${!p.has_buy&&!(p.cs||[]).length?'<span class="meta">—</span>':''}</td></tr>`).join('')}</tbody></table></div>`}`;
+  }
+  else if(PO.mode==='match'){ const L = PO.mlist;
     body = `<div class="card meta" style="margin-bottom:8px">Silver сравнил фото из заказов Китая с фото наших товаров и подобрал похожие. Проверьте: если совпало — «✅ Это он», если подходит другой из списка — нажмите на него, если такого у нас нет — «➕ Новый товар».</div>
-    <div class="filters">${[['transit','Китай: в пути'],['received','Китай: получены'],['all','Китай: все'],['site','🌐 Сайт ↔ база']].map(([k,v])=>`<button class="btn small ${(PO.mscope||'transit')===k?'primary':''}" data-pomscope="${k}">${v}</button>`).join('')}</div>
+    <div class="filters">${[['prod','📦 По товарам'],['transit','Китай: в пути'],['received','Китай: получены'],['all','Китай: все'],['site','🌐 Сайт без товара']].map(([k,v])=>`<button class="btn small ${(PO.mscope||'prod')===k?'primary':''}" data-pomscope="${k}">${v}</button>`).join('')}</div>
     ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Нет позиций на проверку — Silver ещё сравнивает фото или всё уже связано</div>':L.map(m=>{ const c = m.cands||[], pk = c.find(x=>x.id===m.pick);
       return `<div class="card" style="margin-bottom:8px;padding:10px 12px"><div class="row" style="gap:12px;align-items:flex-start;justify-content:flex-start;flex-wrap:wrap">
         <div style="width:130px;text-align:center"><img referrerpolicy="no-referrer" src="${esc(/alicdn/.test(m.photo||'')?(m.photo||'').replace(/(_\d+x\d+.*)?$/,'_400x400.jpg'):(m.photo||''))}" onerror="this.onerror=null;this.src='${esc(m.photo||'')}'" loading="lazy" style="width:130px;height:130px;object-fit:cover;border-radius:10px"><div class="meta">${m.site_card?`${m.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'}${m.url?` · <a href="${esc(m.url)}" target="_blank" rel="noopener">открыть</a>`:''}`:`Китай · заказ №${m.order_no} · ${m.qty} шт.`}</div></div>
@@ -4328,6 +4342,10 @@ document.addEventListener('click', async e => {
     t.disabled = true; const { data, error } = await sb.rpc('product_attrs_ok', { p_id:d.nattrok, p_attrs:p }); if(error){ t.disabled=false; return toast(errText(error)); }
     toast(String(data||'Сохранено')); (S.nm.attrs||{})[d.nattrok] = undefined; render(); }
   else if(d.pomfind){ PO.mfind = PO.mfind===d.pomfind ? null : d.pomfind; PO.mq=''; if(!S.catalog) loadCatalog().then(()=>{ const r=document.getElementById('po-mq-res'); if(r) r.innerHTML=poMqRes(PO.mfind); }); render(); const el=document.getElementById('po-mq'); if(el) el.focus(); }
+  else if(d.pomneed){ PO.mneed=d.pomneed; PO.plist=null; render(); await loadPo(); render(); }
+  else if(d.pmok||d.pmno){ const [k, ref, pid] = (d.pmok||d.pmno).split(':'); t.disabled = true;
+    const { data, error } = k==='s' ? await sb.rpc('site_match_decide', { p_ref:ref, p_action:d.pmok?'link':'skip', p_product:pid||null }) : await sb.rpc('po_match_decide', { p_poi:ref, p_action:d.pmok?'link':'skip', p_product:pid||null });
+    if(error){ t.disabled=false; return toast(errText(error)); } toast(d.pmok?String(data||'Связано'):'Подсказка убрана'); await loadPo(); render(); }
   else if(d.pomscope){ PO.mscope=d.pomscope; PO.mlist=null; render(); await loadPo(); render(); }
   else if(d.pomatch){ const [poi, act, pid] = d.pomatch.split(':'); t.disabled = true;
     const { data, error } = PO.mscope==='site' ? await sb.rpc('site_match_decide', { p_ref:poi, p_action:act, p_product:pid||null }) : await sb.rpc('po_match_decide', { p_poi:poi, p_action:act, p_product:pid||null }); if(error){ t.disabled=false; return toast(errText(error)); }
