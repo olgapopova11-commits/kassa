@@ -2264,6 +2264,7 @@ function nmEditorHtml(e, f, cats, inp){
          <button class="btn primary" id="nm-save">${e.id?'Сохранить':'Создать товар'}</button></span></div>
      ${invProdHtml(e, f)}
      ${e.id?nmCardHtml(e, f, op):''}
+     ${e.id?nmAttrsHtml(e, f):''}
      ${e.id?nmHistHtml((f.hist||{})[e.id], op.hist):''}
      ${e.id&&ed?aiPhotoHtml(e):''}
      <details class="cust" data-nmdet="site" ${op.site||f.sq?'open':''}><summary style="cursor:pointer"><b>🔗 Связь с сайтом</b> <span class="meta">${!e.id?'— сначала сохраните товар':(e.sites||[]).length?'— связан: '+(e.sites||[]).map(x=>x.site==='moon'?'MOON':'Sunshine').join(', '):'— не связан'}</span></summary>
@@ -2329,6 +2330,18 @@ document.addEventListener('click', async e => {
 });
 function nmInfo(p){ return [p.category, p.color, p.material, p.stone, {moon:'MOON',sunshine:'Sunshine',both:'MOON и Sunshine'}[p.brand]||p.brand, +p.price===0?'⚠ нет розничной цены':'', p.supplier?'поставщик '+p.supplier:''].filter(Boolean).join(' · '); }
 function nmSiteLinks(p){ const L=(p.sites||[]).filter(x=>x.url); return L.length?`<div class="meta" style="padding:0 10px 8px">${L.map(x=>`🔗 <a href="${esc(x.url)}" target="_blank" rel="noopener">${x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'}${x.status==='review'?' (связь не проверена)':''}</a>`).join(' &nbsp; ')}</div>`:''; }
+const ATTR_F = [['metal','Металл'],['plating','Покрытие'],['probe','Проба'],['stones','Вставки'],['size','Размер / длина'],['clasp','Застёжка'],['color','Цвет металла']];
+function nmAttrsHtml(e, f){
+  const A = (f.attrs ||= {})[e.id];
+  if(A===undefined){ f.attrs[e.id] = null; sb.rpc('product_attrs_get', { p_id:e.id }).then(({ data }) => { f.attrs[e.id] = data || { a:null }; if(S.view==='nom' && S.nm.ed && S.nm.ed.id===e.id) render(); }); }
+  const a = (A && A.a) || null;
+  return `<details class="cust" ${a?'open':''}><summary style="cursor:pointer"><b>💎 Характеристики</b> <span class="meta">${!A?'загружаем…':!a?'ещё не заполнены':a.error?'не удалось распознать':A.ok?'✓ проверено':'заполнено ИИ — проверьте'}</span></summary>
+    ${a&&!a.error?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px 10px;margin-top:8px">
+      ${ATTR_F.map(([k,l])=>`<label class="stack" style="gap:2px"><span class="label">${l}</span><input data-nattr="${k}" value="${esc(a[k]==null?'':String(a[k]))}" ${nmCanEdit()?'':'disabled'}></label>`).join('')}
+      <label class="stack" style="gap:2px"><span class="label">Гипоаллергенно</span><select data-nattr="hypo" ${nmCanEdit()?'':'disabled'}>${[['','не понятно'],['true','да'],['false','нет']].map(([v,t])=>`<option value="${v}" ${String(a.hypo??'')===v?'selected':''}>${t}</option>`).join('')}</select></label></div>
+      ${nmCanEdit()?`<button class="btn small primary" data-nattrok="${e.id}" style="margin-top:8px">${A.ok?'Сохранить':'✓ Верно, сохранить'}</button>`:''}`:''}
+  </details>`;
+}
 function nmOpen(p, keep){ if(p && p.id && !keep && S.nm.card) delete S.nm.card[p.id]; S.nm.ed = { ...NM_EMPTY(), ...p, category_id: p.category_id??'', cost: p.cost??'', supplier: p.supplier||'', sites: p.sites||[] }; S.nm.sq=''; S.nm.sfound=[]; render(); }
 async function nmSave(){
   const e = S.nm.ed; if(!e) return;
@@ -3612,7 +3625,8 @@ async function loadPo(){
     if(k===[PO.sdays, PO.sbrand, PO.sper, PO.smode].join('|')) PO.sug = data||[]; }
   if(PO.mode==='all'){ const k = [PA.brand, PA.per].join('|'); PA.list = null; const { data, error } = await sb.rpc('po_stock_all', { p_brand:PA.brand||null, p_sales_days:PA.per||30 }); if(error) toast(errText(error)); if(k===[PA.brand, PA.per].join('|')) PA.list = data||[]; }
   if(PO.mode==='ideas') await piLoad();
-  if(PO.mode==='match'){ const { data, error } = await sb.rpc('po_match_list', { p_scope: PO.mscope||'transit', p_limit: 60 }); if(error) toast(errText(error)); PO.mlist = data||[]; }
+  if(PO.mode==='match'){ const site = PO.mscope==='site'; const { data, error } = site ? await sb.rpc('site_match_list', { p_limit: 60 }) : await sb.rpc('po_match_list', { p_scope: PO.mscope||'transit', p_limit: 60 }); if(error) toast(errText(error));
+    PO.mlist = (data||[]).map(m => site ? { ...m, poi_id:m.ref, site_card:true } : m); }
   if(PO.mode==='sup'){ const { data, error } = await sb.rpc('suppliers_list'); if(error) toast(errText(error)); PO.sups = data||[]; }
   if(PO.mode==='an'){ const now = new Date(), iso = x => x.toLocaleDateString('sv-SE'); const from = PO.anPer==='month' ? new Date(now.getFullYear(), now.getMonth(), 1) : PO.anPer==='q' ? new Date(now.getFullYear(), now.getMonth()-2, 1) : new Date(now.getFullYear(), 0, 1);
     const { data, error } = await sb.rpc('po_analytics', { p_from: iso(from), p_to: iso(now) }); if(error) toast(errText(error)); PO.an = data||{}; }
@@ -3676,10 +3690,10 @@ function renderPo(){
   }
   if(PO.mode==='match'){ const L = PO.mlist;
     body = `<div class="card meta" style="margin-bottom:8px">Silver сравнил фото из заказов Китая с фото наших товаров и подобрал похожие. Проверьте: если совпало — «✅ Это он», если подходит другой из списка — нажмите на него, если такого у нас нет — «➕ Новый товар».</div>
-    <div class="filters">${[['transit','В пути'],['received','Уже получены'],['all','Все']].map(([k,v])=>`<button class="btn small ${(PO.mscope||'transit')===k?'primary':''}" data-pomscope="${k}">${v}</button>`).join('')}</div>
+    <div class="filters">${[['transit','Китай: в пути'],['received','Китай: получены'],['all','Китай: все'],['site','🌐 Сайт ↔ база']].map(([k,v])=>`<button class="btn small ${(PO.mscope||'transit')===k?'primary':''}" data-pomscope="${k}">${v}</button>`).join('')}</div>
     ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Нет позиций на проверку — Silver ещё сравнивает фото или всё уже связано</div>':L.map(m=>{ const c = m.cands||[], pk = c.find(x=>x.id===m.pick);
       return `<div class="card" style="margin-bottom:8px;padding:10px 12px"><div class="row" style="gap:12px;align-items:flex-start;justify-content:flex-start;flex-wrap:wrap">
-        <div style="width:130px;text-align:center"><img src="${esc(m.photo||'')}" loading="lazy" style="width:130px;height:130px;object-fit:cover;border-radius:10px"><div class="meta">Китай · заказ №${m.order_no} · ${m.qty} шт.</div></div>
+        <div style="width:130px;text-align:center"><img src="${esc(m.photo||'')}" loading="lazy" style="width:130px;height:130px;object-fit:cover;border-radius:10px"><div class="meta">${m.site_card?`${m.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'}${m.url?` · <a href="${esc(m.url)}" target="_blank" rel="noopener">открыть</a>`:''}`:`Китай · заказ №${m.order_no} · ${m.qty} шт.`}</div></div>
         <div style="flex:1;min-width:220px"><div class="meta" style="margin-bottom:6px">${esc(noZh(m.title)||'')}</div>
           ${pk?`<div class="row" style="justify-content:flex-start;gap:10px"><img src="${esc(pk.photo||'')}" loading="lazy" style="width:110px;height:110px;object-fit:cover;border-radius:10px;outline:3px solid var(--ok,#3a9)"><div><b>${esc(pk.name)}</b><div class="meta">${esc(pk.barcode||'')} · ${fmt(+pk.price||0)}</div><div class="meta">совпадение ${Math.round((+m.conf||0)*100)}% · ${esc(m.reason||'')}</div>
             <button class="btn small primary" data-pomatch="${m.poi_id}:link:${pk.id}" style="margin-top:6px">✅ Это он</button></div></div>`:`<div class="meta">${esc(m.reason||'Точного совпадения нет')}</div>`}
@@ -4303,9 +4317,12 @@ document.addEventListener('click', async e => {
     if(error) toast(errText(error)); else { toast(d.nmlink?'Связано с сайтом':'Отвязано'); S.nm.sq=''; S.nm.sfound=[]; await loadNom(); const fr=S.nm.data.rows.find(r=>r.id===S.nm.ed.id); if(fr) nmOpen(fr); else render(); } }
   else if(d.wook||d.wono){ t.disabled=true; const { data, error } = await sb.rpc('decide_writeoff', { p_id:d.wook||d.wono, p_approve:!!d.wook, p_note:null }); if(error){ toast(errText(error)); t.disabled=false; return; } toast(data); await loadWhSide(); render(); }
   else if(d.pomode){ PO.mode=d.pomode; render(); await loadPo(); render(); }
+  else if(d.nattrok){ const p = {}; document.querySelectorAll('[data-nattr]').forEach(x => { const k = x.dataset.nattr; p[k] = k==='hypo' ? (x.value===''?null:x.value==='true') : x.value.trim(); });
+    t.disabled = true; const { data, error } = await sb.rpc('product_attrs_ok', { p_id:d.nattrok, p_attrs:p }); if(error){ t.disabled=false; return toast(errText(error)); }
+    toast(String(data||'Сохранено')); (S.nm.attrs||{})[d.nattrok] = undefined; render(); }
   else if(d.pomscope){ PO.mscope=d.pomscope; PO.mlist=null; render(); await loadPo(); render(); }
   else if(d.pomatch){ const [poi, act, pid] = d.pomatch.split(':'); t.disabled = true;
-    const { data, error } = await sb.rpc('po_match_decide', { p_poi:poi, p_action:act, p_product:pid||null }); if(error){ t.disabled=false; return toast(errText(error)); }
+    const { data, error } = PO.mscope==='site' ? await sb.rpc('site_match_decide', { p_ref:poi, p_action:act, p_product:pid||null }) : await sb.rpc('po_match_decide', { p_poi:poi, p_action:act, p_product:pid||null }); if(error){ t.disabled=false; return toast(errText(error)); }
     toast(act==='new'?'Отмечено как новый товар — создадите карточку при приёмке':String(data||'Готово')); PO.mlist = (PO.mlist||[]).filter(x=>x.poi_id!==poi); render(); }
 
   else if(d.pofilter){ PO.filter=d.pofilter; PO.list=null; render(); await loadPo(); render(); }
