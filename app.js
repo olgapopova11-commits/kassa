@@ -1,5 +1,7 @@
 /* Silver — касса и учёт MOON и Sunshine. Данные: Supabase. */
 'use strict';
+// старая ссылка «Закуп → Сопоставление» теперь ведёт в «Цепочку товаров»
+if(/^#po\/match/.test(location.hash)) try{ history.replaceState(null,'',location.hash.replace(/^#po\/match\/?/,'#site')); }catch(_){}
 const INIT_HASH = location.hash;
 const SB_URL = 'https://ottuadjdksxipfjytlyv.supabase.co';
 const SB_KEY = 'sb_publishable_OyN1810CuHrR9Ys0VTSExA_XY-nO7zo';
@@ -539,8 +541,8 @@ async function boot(){
 /* ---------- каркас ---------- */
 function renderShell(){
   const tabs = [['pos','Продажа'],['shifts','Смены'],['cash','Расходы'],['sales','Чеки и возвраты'],['stock','Остатки'],['wh','Склад'],['certs','Сертификаты']];
-  if(isBoss()) { tabs.splice(1,0,['analytics','Аналитика']); tabs.push(['bonus','Бонусные карты']); tabs.push(['nom','Номенклатура']); tabs.push(['site','Сайт']); tabs.push(['emps','Сотрудники']); }
-  if(S.me.role==='purchaser') tabs.push(['site','Сайт']);  // сайт ведёт закуп
+  if(isBoss()) { tabs.splice(1,0,['analytics','Аналитика']); tabs.push(['bonus','Бонусные карты']); tabs.push(['nom','Номенклатура']); tabs.push(['site','Цепочка товаров']); tabs.push(['emps','Сотрудники']); }
+  if(S.me.role==='purchaser') tabs.push(['site','Цепочка товаров']);  // сайт ведёт закуп
   // настройка владельца: какие вкладки видит каждая роль
   const acc = (S.tabAccess||{})[S.me.role];
   if(S.me.role !== 'owner' && Array.isArray(acc)){ const keep = tabs.filter(([v]) => acc.includes(v)); tabs.splice(0, tabs.length, ...keep); }
@@ -572,11 +574,11 @@ function renderShell(){
   renderHeader();
 }
 // вкладки сгруппированы в разделы: внизу — разделы, сверху — вкладки выбранного раздела
-const GROUPS = [['home','✅','Мой день',['day']],['goods','📦','Товары',['flow','wh','po','nom','photo','site']],['analytics','📈','Аналитика',['analytics','profit']],
+const GROUPS = [['home','✅','Мой день',['day']],['goods','📦','Товары',['flow','wh','po','nom','site','photo']],['analytics','📈','Аналитика',['analytics','profit']],
   ['team','👥','Команда',['me','emps','cons','bot','pay','adm','audit','feat']],['kassa','🧾','Чеки',['pos','shifts','cash','sales']],['clients','💳','Клиенты',['promo','content','bonus','certs']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
 // старые адреса вкладок: #attn → «Мой день», #stock → «Склад» в режиме «Остатки»
-function viewAlias(){ if(S.view==='attn') S.view = 'day'; else if(S.view==='stock'){ S.view = 'wh'; S.wmode = 'stock'; } }
+function viewAlias(){ try{ if(S.view==='po' && PO.mode==='match') PO.mode = 'orders'; }catch(_){} if(S.view==='attn') S.view = 'day'; else if(S.view==='stock'){ S.view = 'wh'; S.wmode = 'stock'; } }
 /* меняем DOM, только если разметка изменилась — меньше перерисовок и не сбивается фокус */
 function setHtml(el, h){ if(el._h !== h){ el.innerHTML = h; el._h = h; } }
 function renderNav(){
@@ -629,13 +631,13 @@ function renderHeader(){
 function render(){
   viewAlias();
   if(S.view!=='nom' && document.getElementById('nm-modal')){ $('#modal').innerHTML = ''; if(S.nm) S.nm.ed = null; }
-  { let hv = S.view; try{ if(S.view==='po' && PO.mode && PO.mode!=='orders') hv = 'po/'+PO.mode+(PO.mode==='match'&&PO.mscope&&PO.mscope!=='prod'?'/'+PO.mscope:''); }catch(_){}
+  { let hv = S.view; try{ if(S.view==='site') hv = CH.check ? 'site/check' : 'site'+(PO.mscope&&PO.mscope!=='prod'?'/'+PO.mscope:''); else if(S.view==='po' && PO.mode && PO.mode!=='orders') hv = 'po/'+PO.mode+(PO.mode==='match'&&PO.mscope&&PO.mscope!=='prod'?'/'+PO.mscope:''); }catch(_){}
     if(location.hash.slice(1)!==hv) try{ history.replaceState(null,'','#'+hv); }catch(_){} }
   document.body.classList.toggle('readonly', !canEdit(S.store) || !canEditTab(S.view));
   renderNav();
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart, y0 = scrollY;
   if(lazyPending(S.view)){ $('#main').innerHTML = `<div class="card" style="text-align:center;padding:28px 16px"><div style="font-size:32px">📊</div><p style="margin:8px 0 14px">На телефоне аналитика загружается только по запросу — так приложение работает быстрее.</p><button class="btn primary" data-lazyload="${S.view}">Загрузить</button></div>`; return; }
-  ({ pos:renderPos, sales:renderSales, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderSite, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, photo:renderPhoto, day:renderDay, audit:renderAudit, bot:renderBot, feat:renderFeat })[S.view]();
+  ({ pos:renderPos, sales:renderSales, certs:renderCerts, emps:renderEmps, shifts:renderShifts, analytics:renderAnalytics, wh:renderWh, site:renderChain, nom:renderNom, bonus:renderBonus, cash:renderCash, pay:renderPay, profit:renderProfit, po:renderPo, promo:renderPromo, me:renderMe, adm:renderAdm, flow:renderFlow, content:renderContent, cons:renderCons, photo:renderPhoto, day:renderDay, audit:renderAudit, bot:renderBot, feat:renderFeat })[S.view]();
   if(id){ const el = document.getElementById(id); if(el){ el.focus({ preventScroll:true }); try{ if(pos!=null) el.setSelectionRange(pos,pos) }catch(e){} } }
   if(y0 && Math.abs(scrollY - y0) > 2) scrollTo(0, y0);  // перерисовка не должна сбрасывать прокрутку
 }
@@ -1916,7 +1918,7 @@ function nmFxHtml(f){ const x = f.fx || {}, on = Object.keys(x).filter(k => x[k]
 document.addEventListener('change', async e => { const t = e.target; if(S.view!=='nom' || !t.dataset || !t.dataset.nmfx) return; const f = S.nm; (f.fx ||= {})[t.dataset.nmfx] = t.value;
   if(t.dataset.nmfx==='arch') f.arch = !!t.value; f.off = 0; f.data = null; render(); await loadNom(); render(); });
 document.addEventListener('click', async e => { if(S.view!=='nom') return; const pb = e.target.closest('[data-nmpath]'), mb = e.target.closest('[data-nmmatch]');
-  if(mb){ e.preventDefault(); S.view = 'po'; PO.mode = 'match'; PO.mscope = 'prod'; PO.plist = null; render(); loadView(); return; }
+  if(mb){ e.preventDefault(); S.view = 'site'; CH.check = false; PO.mscope = 'prod'; PO.plist = null; (S.lastView ||= {})[groupOf('site')[0]] = 'site'; render(); loadView(); return; }
   if(!pb) return; const f = S.nm; (f.fx ||= {}).path = pb.dataset.nmpath; if(f.fx.path){ f.sort = 'sold'; f.desc = true; } f.off = 0; f.data = null; render(); await loadNom(); render(); });
 document.addEventListener('click', async e => { if(S.view!=='nom' || !e.target.closest('#nm-fx-x')) return; const f = S.nm; f.fx = {}; f.arch = false; f.off = 0; f.data = null; render(); await loadNom(); render(); });
 async function loadNom(){
@@ -2393,6 +2395,20 @@ async function nmPhoto(file){
 /* ---------- сайт ↔ база ---------- */
 const SITE_ST = [['review','Проверить'],['auto','Связано автоматически'],['confirmed','Подтверждено'],['siteonly','Только на сайте — нет в базе'],['group','Общий товар (скрыто)'],['baseonly','Только в базе — нет на сайте']];
 const SITE_NAME = { moon:'mooncollection.kz', sunshine:'sunshinejewelry.kz' };
+/* «Цепочка товаров»: закуп (1688) → база → сайт в одном месте.
+   «Связывание» — подсказки по фото (по товарам, Китай без товара, сайт без товара); «Проверка сайта» — прежняя вкладка «Сайт». */
+const CH = { check: /^#site\/check/.test(INIT_HASH) };
+{ const m = INIT_HASH.match(/^#site\/([a-z]+)/); if(m && m[1]!=='check') try{ PO.mscope = m[1]; }catch(_){ CH.ms = m[1]; } }
+function chainHead(){
+  return `<div class="row" style="flex-wrap:wrap"><h2>Цепочка товаров</h2><span class="meta" style="flex:1">закуп 1688 → база → сайт</span></div>
+  <div class="seg" style="display:inline-flex;margin-bottom:10px"><button data-chmode="link" aria-pressed="${!CH.check}">🔗 Связывание</button><button data-chmode="check" aria-pressed="${!!CH.check}">🌐 Сайт: проверка и «нет на сайте»</button></div>`; }
+function renderChain(){
+  if(CH.check){ renderSite(); const m = $('#main'); if(m) m.insertAdjacentHTML('afterbegin', chainHead()); return; }
+  if(CH.ms){ PO.mscope = CH.ms; CH.ms = null; }
+  PO.mode = 'match'; renderPo(); }
+async function loadChain(){ if(CH.check) return loadSite(); PO.mode = 'match'; return loadPo(); }
+document.addEventListener('click', async e => { const b = e.target.closest && e.target.closest('[data-chmode]'); if(!b || S.view!=='site') return;
+  CH.check = b.dataset.chmode==='check'; render(); await loadChain(); render(); });
 async function loadSite(){
   const f = S.st; f.data = null;
   const pk = f.site+':'+f.status;
@@ -3657,7 +3673,7 @@ function poMqRes(poi){ const q = (PO.mq||'').trim(); if(q.length<2 || !S.catalog
   return L.map(p=>`<button class="btn small" data-pomatch="${poi}:other:${p.id}" title="${esc(p.name)}" style="padding:2px;display:flex;flex-direction:column;align-items:center;width:96px">${p.photo_url?`<img referrerpolicy="no-referrer" src="${esc(p.photo_url?(/supabase\.co\/storage/.test(p.photo_url)?p.photo_url:thumbUrl(p.photo_url)):'')}" data-full="${esc(p.photo_url||'')}" onerror="if(this.dataset.full&&this.src!==this.dataset.full)this.src=this.dataset.full" loading="lazy" style="width:88px;height:88px;object-fit:cover;border-radius:8px;background:#eee">`:`<span style="width:88px;height:88px;border-radius:8px;background:#eee;display:flex;align-items:center;justify-content:center;font-size:11px;color:#999">нет фото</span>`}<span style="font-size:11px;line-height:1.2;max-height:3.6em;overflow:hidden">${esc(p.name)}</span><span class="meta" style="font-size:10px">${esc(p.barcode||'')}</span></button>`).join(''); }
 document.addEventListener('input', e => { if(e.target.id!=='po-mq') return; PO.mq = e.target.value; const r = document.getElementById('po-mq-res'); if(r) r.innerHTML = poMqRes(PO.mfind); });
 function renderPo(){
-  const modes = [['orders','Заказы'],['new','Новый заказ'],['suggest','Что дозаказать'],['all','Все остатки'],['ideas','✨ Идеи и тренды'],['sup','Поставщики'],['an','Аналитика закупа'],['match','🔗 Сопоставление']].filter(([k])=>poEdit() || k!=='new');
+  const modes = [['orders','Заказы'],['new','Новый заказ'],['suggest','Что дозаказать'],['all','Все остатки'],['ideas','✨ Идеи и тренды'],['sup','Поставщики'],['an','Аналитика закупа']].filter(([k])=>poEdit() || k!=='new');
   const head = `<div class="row" style="flex-wrap:wrap"><h2>Закуп</h2><span class="row" style="gap:6px">${(PO.list||[]).some(o=>(o.supplier&&/[\u4e00-\u9fff]/.test(o.supplier)&&!o.supplier_ru)||(o.items||[]).some(i=>i.supplier_title&&!i.title_ru))?`<button class="btn small" id="po-tr">🌐 Перевести названия на русский</button>`:''}${poEdit()?`<label class="btn small" style="cursor:pointer">⬆ Загрузить заказы: 1688 или Alibaba (Excel)<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label>`:''}</span></div>
   ${PO.imp?`<div class="card meta" style="margin-bottom:8px">${esc(PO.imp)}</div>`:''}
   <div class="seg" style="display:inline-flex;margin-bottom:10px">${modes.map(([k,v])=>`<button data-pomode="${k}" aria-pressed="${PO.mode===k}">${v}</button>`).join('')}</div>`;
@@ -3787,7 +3803,7 @@ function renderPo(){
       <h2 style="margin-top:14px">По поставщикам</h2>${(A.by_supplier||[]).length?`<div class="scroll"><table><thead><tr><th>Поставщик</th><th>Заказов</th><th>Товар</th><th>Карго</th></tr></thead><tbody>${A.by_supplier.map(r=>`<tr><td>${esc(r.supplier)}</td><td class="num">${r.orders}</td><td class="num">${fmt(r.goods)}</td><td class="num">${fmt(r.cargo)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">За период заказов нет</div>'}`}
     <p class="meta">Закуп в рентабельности считается по фактической приёмке на склад; здесь — по оформленным заказам.</p>`;
   }
-  $('#main').innerHTML = head + body;
+  $('#main').innerHTML = (S.view==='site' ? chainHead() : head) + body;
 }
 
 /* ---------- рентабельность ---------- */
@@ -4651,7 +4667,7 @@ async function loadView0(){
   if(S.view==='bot'){ render(); await loadBot(); render(); }
   if(S.view==='flow'){ render(); await loadFlow(); render(); }
   if(S.view==='wh'){ if(!S.wmode) S.wmode=whModes()[0][0]; await loadWhSide(); render(); }
-  if(S.view==='site'){ render(); await loadSite(); render(); }
+  if(S.view==='site'){ render(); await loadChain(); render(); }
   if(S.view==='nom'){ render(); await loadNom(); render(); }
   if(S.view==='bonus'){ render(); await loadBonus(); render(); }
   if(S.view==='cash'){ render(); await loadCash(); render(); }
