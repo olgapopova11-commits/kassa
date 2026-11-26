@@ -4973,7 +4973,7 @@ function applyTheme(){
     const m = document.querySelector('meta[name="theme-color"]'); if(m) m.content = dark ? '#0b0b0f' : '#F2F2F7';
   }catch(_){}
 }
-applyTheme(); setInterval(applyTheme, 60000);
+applyTheme(); setInterval(applyTheme, 600000);
 document.addEventListener('visibilitychange', () => { if(!document.hidden) applyTheme(); });
 
 const FL = { days:30, data:null, mc:null };
