@@ -2411,8 +2411,8 @@ function chainHead(){
 // шармы: в базе это общий товар, поэтому карточку сайта связываем прямо с позицией закупа 1688
 function charmTable(pic){ const L = PO.clist;
   if(!L) return '<div class="empty">Загружаем…</div>'; if(!L.length) return '<div class="empty">Подсказок нет</div>';
-  return `<div class="meta" style="margin:6px 0">Шарм на сайте → такой же шарм в заказах 1688 (сравниваем только шармы, цвет тоже). В базе шармы — общий товар, поэтому связь идёт сайт ↔ закуп.</div>
-  <div class="scroll"><table class="mc" style="width:100%"><thead><tr><th style="text-align:left">🌐 Шарм на сайте</th><th style="text-align:left">🇨🇳 Похожие в закупе</th></tr></thead><tbody>${L.map(r=>`<tr style="vertical-align:top">
+  return `<div class="meta" style="margin:6px 0">Карточки сайта, у которых в базе нет своего товара (общий товар «в асс», шармы и т.п.), связываем прямо с позицией закупа 1688 по фото. Сравниваем только ту же категорию и цвет, шармы — только с шармами. Когда такие товары заведёте в базе отдельно, связь перейдёт на них.</div>
+  <div class="scroll"><table class="mc" style="width:100%"><thead><tr><th style="text-align:left">🌐 На сайте</th><th style="text-align:left">🇨🇳 Похожие в закупе</th></tr></thead><tbody>${L.map(r=>`<tr style="vertical-align:top">
     <td style="min-width:220px"><div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start">${pic(r.photo)}<div><b>${esc(r.title||'')}</b><div class="meta">${r.site==='moon'?'MOON':'Sunshine'}${r.url?` · <a href="${esc(r.url)}" target="_blank" rel="noopener">на сайте</a>`:''}${r.pname?`<br>в базе: ${esc(r.pname)}`:''}</div>
       <button class="btn small" style="margin-top:4px" data-chbno="${r.ref}">✖ Здесь нет</button></div></div></td>
     <td><div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">${(r.cands||[]).map(c=>`<div style="width:150px">${pic(c.photo,130)}<div class="meta" style="max-height:2.4em;overflow:hidden">${esc(noZh(c.title)||'')}</div><div class="meta">заказ №${esc(String(c.order_no||''))}${c.url?` · <a href="${esc(c.url)}" target="_blank" rel="noopener">открыть</a>`:''}</div>
@@ -2422,7 +2422,7 @@ function poScopeRow(){ if(S.view!=='site') return `<div class="filters">${[['pro
 function chSync(){ if(chIsPo()){ PO.mode = 'match'; const want = CH_PO[CH.tab]; if(CH.tab==='china'){ if(!['transit','received','all'].includes(PO.mscope)) PO.mscope = 'transit'; } else PO.mscope = want; } else if(S.st) S.st.status = CH.tab; }
 /* «Цепочка товара» — одна страница: слева закуп 1688, в центре товар базы, справа сайт. Где звена нет — там и дописываем связь. */
 const CHN2 = { need:'all', cat:'', mat:'', q:'', off:0, data:null, rows:null };
-const CH_NEED = [['all','Все'],['buy','Нет закупа'],['site','Нет на сайте'],['sug','💡 Есть подсказки'],['check','Сайт: подтвердить'],['warn','⚠️ Не совпадает цвет/категория'],['full','✅ Полная цепочка'],['charms','🧿 Шармы']];
+const CH_NEED = [['all','Все'],['buy','Нет закупа'],['site','Нет на сайте'],['sug','💡 Есть подсказки'],['check','Сайт: подтвердить'],['warn','⚠️ Не совпадает цвет/категория'],['full','✅ Полная цепочка'],['charms','🧿 Общий товар и шармы: сайт ↔ закуп']];
 async function loadChain(more){
   const F = CHN2; if(!F.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); F.cats = data || []; }
   if(F.need==='charms'){ PO.mneed = 'charms'; const { data, error } = await sb.rpc('charm_buy_list', { p_limit: 80, p_q: F.q.trim()||null }); if(error) toast(errText(error)); PO.clist = (data&&data.rows)||[]; PO.cn = data&&data.n; return; }
