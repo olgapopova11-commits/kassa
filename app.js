@@ -1957,11 +1957,17 @@ function renderNom(){
     ${nmPagerHtml(f, D)}`}`;
   nmModalSync(e, f, cats, inp);
 }
-(()=>{ const st = document.createElement('style'); st.textContent = `.nm-st{position:relative;display:inline-block;cursor:default}.nm-st-pop{display:none;position:fixed;z-index:20;min-width:240px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 10px;box-shadow:0 6px 24px rgba(0,0,0,.15);text-align:left;font-size:13px;flex-direction:column;gap:4px;white-space:nowrap}.nm-st:hover .nm-st-pop,.nm-st:focus .nm-st-pop{display:flex}`; document.head.appendChild(st);
-  const place = el => { const pop = el.querySelector('.nm-st-pop'); if(!pop) return; const r = el.getBoundingClientRect(); pop.style.display = 'flex';
-    const w = pop.offsetWidth, h = pop.offsetHeight; pop.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + 'px'; pop.style.top = (r.bottom + h + 8 > innerHeight ? r.top - h - 4 : r.bottom + 4) + 'px'; pop.style.display = ''; };
-  document.addEventListener('mouseover', e => { const el = e.target.closest && e.target.closest('.nm-st'); if(el) place(el); });
-  document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest('.nm-st'); if(el) place(el); }); })();
+(()=>{ const st = document.createElement('style'); st.textContent = `.nm-st{position:relative;display:inline-block;cursor:default}.nm-st-pop{display:none;position:fixed;z-index:20;min-width:240px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 10px;box-shadow:0 6px 24px rgba(0,0,0,.15);text-align:left;font-size:13px;flex-direction:column;gap:4px;white-space:nowrap}.nm-st .nm-st-pop{display:none!important}`; document.head.appendChild(st);
+  // окно рисуем прямо в <body>: внутри «стеклянной» таблицы position:fixed обрезается
+  let fl = null, cur = null; const hide = () => { if(fl){ fl.remove(); fl = null; } cur = null; };
+  const place = el => { if(cur===el) return; hide(); const pop = el.querySelector('.nm-st-pop'); if(!pop) return; cur = el;
+    fl = document.createElement('div'); fl.className = 'nm-st-pop'; fl.innerHTML = pop.innerHTML; fl.style.display = 'flex'; document.body.appendChild(fl);
+    const r = el.getBoundingClientRect(), w = fl.offsetWidth, h = fl.offsetHeight;
+    fl.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + 'px'; fl.style.top = (r.bottom + h + 8 > innerHeight ? r.top - h - 4 : r.bottom + 4) + 'px'; };
+  document.addEventListener('mouseover', e => { const el = e.target.closest && e.target.closest('.nm-st'); if(el) place(el); else if(cur) hide(); });
+  document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest('.nm-st'); if(el) place(el); });
+  document.addEventListener('click', e => { const el = e.target.closest && e.target.closest('.nm-st'); if(el){ if(cur===el) hide(); else place(el); } else if(cur) hide(); });
+  addEventListener('scroll', hide, true); })();
 document.addEventListener('mousedown', e => { if(e.target && e.target.id==='nm-modal' && S.nm) nmClose(); });
 /* закрыть карточку: если её открыли из другого раздела (data-pcard) — вернуться туда */
 function nmClose(){ S.nm.ed = null; const b = S.nm.back; S.nm.back = null;
