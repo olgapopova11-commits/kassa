@@ -2398,15 +2398,15 @@ const SITE_NAME = { moon:'mooncollection.kz', sunshine:'sunshinejewelry.kz' };
 /* «Цепочка товаров»: закуп (1688) → база → сайт в одном месте.
    «Связывание» — подсказки по фото (по товарам, Китай без товара, сайт без товара); «Проверка сайта» — прежняя вкладка «Сайт». */
 const CH = { tab:'prod' };
-{ const m = INIT_HASH.match(/^#site\/([a-z]+)/); if(m && ['prod','review','baseonly'].includes(m[1])) CH.tab = m[1]; }
+{ const m = INIT_HASH.match(/^#site\/([a-z]+)/); if(m && m[1]==='prod') CH.tab = m[1]; }
 const CH_PO = { prod:'prod', china:'transit', sitefree:'site' };
-const CH_TABS = [['prod','🔗 Связать'],['review','✔️ Проверить сайт'],['baseonly','📭 Нет на сайте']];
+const CH_TABS = [['prod','🔗 Связать']];
 const chIsPo = () => !!CH_PO[CH.tab];
 function chCnt(k){ if(k==='prod') return PO.pn && PO.pn.all; const f = S.st, D = f && f.data; if(!D || !D.counts) return null; const c0 = x => D.counts[f.site+':'+x] || 0;
   return k==='baseonly' ? (f.baseTotal||null) : ['review','auto','confirmed','group'].includes(k) ? c0(k) : null; }
 function chainHead(){
   return `<div class="row" style="flex-wrap:wrap"><h2>Цепочка товаров</h2><span class="meta" style="flex:1">закуп 1688 → база → сайт</span></div>
-  <div class="filters">${CH_TABS.map(([k,v])=>{ const n = chCnt(k); return `<button class="btn small ${CH.tab===k?'primary':''}" data-chtab="${k}">${v}${n!=null?` (${n})`:''}</button>`; }).join('')}</div>`; }
+  <div class="filters" ${CH_TABS.length<2?'hidden':''}>${CH_TABS.map(([k,v])=>{ const n = chCnt(k); return `<button class="btn small ${CH.tab===k?'primary':''}" data-chtab="${k}">${v}${n!=null?` (${n})`:''}</button>`; }).join('')}</div>`; }
 // внутри «Цепочки» строка разделов уже сверху — у Китая оставляем только «в пути / получены / все»
 function poScopeRow(){ if(S.view!=='site') return `<div class="filters">${[['prod','📦 По товарам'],['transit','Китай: в пути'],['received','Китай: получены'],['all','Китай: все'],['site','🌐 Сайт без товара']].map(([k,v])=>`<button class="btn small ${(PO.mscope||'prod')===k?'primary':''}" data-pomscope="${k}">${v}</button>`).join('')}</div>`;
   if(CH.tab!=='china') return ''; return `<div class="filters">${[['transit','в пути'],['received','получены'],['all','все заказы']].map(([k,v])=>`<button class="btn small ${PO.mscope===k?'primary':''}" data-pomscope="${k}">${v}</button>`).join('')}</div>`; }
@@ -3742,12 +3742,12 @@ function renderPo(){
     const sug = (kind, x, pid) => `<div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start;margin-bottom:6px">${pic(x.photo,72)}<div style="min-width:0"><div class="meta" style="max-height:3.6em;overflow:hidden">${esc(noZh(x.title)||'')}</div>
       <div class="meta">${kind==='s'?(x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'):(x.refs>1?x.refs+' позиции · заказы №':'заказ №')+x.order_no+' · '+x.qty+' шт.'}${x.url?` · <a href="${esc(x.url)}" target="_blank" rel="noopener">открыть</a>`:''}</div>
       <span class="row" style="gap:4px;justify-content:flex-start;margin-top:4px"><button class="btn small primary" data-pmok="${kind}:${x.ref}:${pid}">✅ Связать</button><button class="btn small" data-pmno="${kind}:${x.ref}">✖ Не он</button></span></div></div>`;
-    body = `<div class="card meta" style="margin-bottom:8px">Одна строка — один товар базы. Справа подсказки: какая карточка сайта и какая позиция заказа Китая, похоже, этот же товар. «✅ Связать» — связь сохранится, «✖ Не он» — подсказка уберётся.</div>
+    body = `<div class="card meta" style="margin-bottom:8px">Одна строка — один товар базы. Справа сайт и закуп из Китая. «✅ Связать» — сохранить подсказку, «✖ Не он» — убрать, «✅ Верно» — подтвердить автоматическую связь с сайтом, «🗑 Отвязать» — убрать неправильную.${PO.pn&&PO.pn.check?` Автосвязей с сайтом на проверку: <b>${PO.pn.check}</b>.`:''}</div>
     ${poScopeRow()}
     ${S.view==='site'?'':`<div class="filters" style="margin-top:4px">${[['all','Все'],['site','Нет на сайте'],['buy','Нет закупа'],['both','Нет ни сайта, ни закупа']].map(([k,v])=>`<button class="btn small ${(PO.mneed||'all')===k?'primary':''}" data-pomneed="${k}">${v}${PO.pn&&PO.pn[k]!=null?` (${PO.pn[k]})`:''}</button>`).join('')}</div>`}
     ${!L?'<div class="empty">Загружаем…</div>':!L.length?'<div class="empty">Подсказок нет</div>':`<div class="scroll"><table class="mc" style="width:100%"><thead><tr><th style="text-align:left">Товар в базе</th><th style="text-align:left">🌐 Сайт</th><th style="text-align:left">🇨🇳 Закуп (Китай)</th></tr></thead><tbody>${L.map(p=>`<tr style="vertical-align:top">
       <td style="min-width:200px"><div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start">${pic(p.photo)}<div><b>${esc(p.name)}</b><div class="meta">${esc(p.barcode||'')} · ${fmt(+p.price||0)}</div></div></div></td>
-      <td style="min-width:240px">${(p.sites||[]).map(x=>`<div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start;margin-bottom:6px">${pic(x.photo,72)}<div class="meta">✓ уже связано · ${x.site==='moon'?'MOON':'Sunshine'}<br>${x.url?`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title||'карточка')}</a>`:esc(x.title||'')}<br><button class="btn small" style="margin-top:4px" data-pmun="s:${x.site}:${x.uid}">🗑 Отвязать</button></div></div>`).join('')}${(p.ss||[]).map(x=>sug('s',x,p.id)).join('')}${!(p.sites||[]).length&&!(p.ss||[]).length?'<span class="meta">—</span>':''}</td>
+      <td style="min-width:240px">${(p.sites||[]).map(x=>`<div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start;margin-bottom:6px">${pic(x.photo,72)}<div class="meta">${['review','auto'].includes(x.st)?'<span class="chip warn">связано автоматически — проверь</span>':'✓ уже связано'} · ${x.site==='moon'?'MOON':'Sunshine'}<br>${x.url?`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title||'карточка')}</a>`:esc(x.title||'')}<br>${['review','auto'].includes(x.st)?`<button class="btn small primary" style="margin-top:4px" data-pmsok="${x.site}:${x.uid}:${p.id}">✅ Верно</button> `:''}<button class="btn small" style="margin-top:4px" data-pmun="s:${x.site}:${x.uid}">🗑 Отвязать</button></div></div>`).join('')}${(p.ss||[]).map(x=>sug('s',x,p.id)).join('')}${!(p.sites||[]).length&&!(p.ss||[]).length?'<span class="meta">—</span>':''}</td>
       <td style="min-width:240px">${(p.buys||[]).map(x=>`<div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start;margin-bottom:6px">${pic(x.photo,72)}<div class="meta">✓ уже связано · заказ №${esc(String(x.order_no||''))}<br><span style="display:block;max-height:2.4em;overflow:hidden">${esc(noZh(x.title)||'')}</span><button class="btn small" style="margin-top:4px" data-pmun="c:${x.id}">🗑 Отвязать</button></div></div>`).join('')}${p.has_buy&&!(p.buys||[]).length?`<div class="meta">✓ ${p.purchase_url?`<a href="${esc(p.purchase_url)}" target="_blank" rel="noopener">ссылка на закуп</a>`:'есть в заказах'}</div>`:''}${(p.cs||[]).map(x=>sug('c',x,p.id)).join('')}${!p.has_buy&&!(p.cs||[]).length?'<span class="meta">—</span>':''}</td></tr>`).join('')}</tbody></table></div>`}`;
   }
   else if(PO.mode==='match'){ const L = PO.mlist;
@@ -4385,6 +4385,8 @@ document.addEventListener('click', async e => {
     toast(String(data||'Сохранено')); (S.nm.attrs||{})[d.nattrok] = undefined; render(); }
   else if(d.pomfind){ PO.mfind = PO.mfind===d.pomfind ? null : d.pomfind; PO.mq=''; if(!S.catalog) loadCatalog().then(()=>{ const r=document.getElementById('po-mq-res'); if(r) r.innerHTML=poMqRes(PO.mfind); }); render(); const el=document.getElementById('po-mq'); if(el) el.focus(); }
   else if(d.pomneed){ PO.mneed=d.pomneed; PO.plist=null; render(); await loadPo(); render(); }
+  else if(d.pmsok){ const [st, uid, pid] = d.pmsok.split(':'); t.disabled = true; const { error } = await sb.rpc('site_link_set', { p_site:st, p_uid:+uid, p_product:pid, p_status:'confirmed' });
+    if(error){ t.disabled=false; return toast(errText(error)); } toast('Подтверждено'); await loadPo(); render(); }
   else if(d.pmun){ const a = d.pmun.split(':'); t.disabled = true;
     const { error } = a[0]==='s' ? await sb.rpc('site_link_set', { p_site:a[1], p_uid:+a[2], p_product:null, p_status:'rejected' }) : await sb.rpc('po_unlink_item', { p_item:a[1] });
     if(error){ t.disabled=false; return toast(errText(error)); } toast('Отвязано'); await loadPo(); render(); }
