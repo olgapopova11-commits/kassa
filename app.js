@@ -2428,6 +2428,7 @@ async function loadChain(more){
   if(!F.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); F.cats = data || []; }
   if(F.need==='charms'){ PO.mneed = 'charms'; const { data, error } = await sb.rpc('charm_buy_list', { p_limit: 80, p_q: F.q.trim()||null }); if(error) toast(errText(error)); PO.clist = (data&&data.rows)||[]; PO.cn = data&&data.n; return; }
   if(!more) F.off = 0;
+  if(F.need==='moonsite' && !more) await sb.rpc('refresh_moon_site_cand');
   const { data, error } = await sb.rpc('chain_list', { p_need:F.need, p_cat:F.cat?+F.cat:null, p_mat:F.mat||null, p_q:F.q.trim()||null, p_offset:F.off, p_limit:50 });
   if(error){ toast(errText(error)); return; }
   F.data = data; F.rows = more ? [...(F.rows||[]), ...(data.rows||[])] : (data.rows||[]);
