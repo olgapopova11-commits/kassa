@@ -2464,16 +2464,25 @@ function renderChain(){
     <input id="ch-q" placeholder="Поиск: название или штрихкод" value="${esc(F.q)}" style="flex:1;min-width:180px"></div>
   <div class="filters">${CH_NEED.map(([k,v])=>{ const n = k==='charms' ? PO.cn : N[k]; return `<button class="btn small ${F.need===k?'primary':''}" data-chneed="${k}">${v}${n!=null?` (${n})`:''}</button>`; }).join('')}</div>
   ${F.need==='charms' ? charmTable((u,w)=>pic(u,w||80)) : !L ? '<div class="empty">Загружаем…</div>' : !L.length ? '<div class="empty">Ничего не нашлось</div>' :
-  `<div class="scroll"><table class="mc" style="width:100%;table-layout:fixed"><thead><tr><th style="text-align:left;width:34%">🇨🇳 Закуп</th><th style="text-align:left;width:28%">📦 Товар в базе</th><th style="text-align:left;width:38%">🌐 Сайт</th></tr></thead><tbody>
+  `${(()=>{ const ids = Object.keys(CHN2.sel||{}).filter(k=>CHN2.sel[k]); const noBuy = L.filter(p=>!p.has_buy); return noBuy.length ? `<div class="card row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;margin:8px 0;padding:8px 12px">
+      <label class="meta" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="ch-selall" ${noBuy.every(p=>(CHN2.sel||{})[p.id])?'checked':''}> выбрать все без закупа на странице</label>
+      <b>Выбрано: ${ids.length}</b><select id="ch-bulk-sup"><option value="">Местный поставщик…</option>${(CHN2.locs||[]).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select>
+      <button class="btn small primary" id="ch-bulk-go" ${ids.length?'':'disabled'}>Назначить</button></div>` : ''; })()}
+  <div class="scroll"><table class="mc" style="width:100%;table-layout:fixed"><thead><tr><th style="text-align:left;width:34%">🇨🇳 Закуп</th><th style="text-align:left;width:28%">📦 Товар в базе</th><th style="text-align:left;width:38%">🌐 Сайт</th></tr></thead><tbody>
   ${L.map(p=>`<tr style="vertical-align:top"><td>${buyCol(p)}</td>
-    <td style="background:var(--soft,rgba(127,127,127,.06))">${box(p.photo, `<b>${pcl(p.id, esc(p.name))}</b><div class="meta">${esc(p.barcode||'')} · ${fmt(+p.price||0)}${p.material?' · '+esc(p.material):''}</div>${+p.sold60>0?`<div class="meta">продано за 60 дн: <b>${p.sold60}</b></div>`:''}`)}</td>
+    <td style="background:var(--soft,rgba(127,127,127,.06))">${!p.has_buy?`<label class="meta" style="display:flex;gap:6px;align-items:center;margin-bottom:4px;cursor:pointer"><input type="checkbox" data-chsel="${p.id}" ${(CHN2.sel||{})[p.id]?'checked':''}> выбрать</label>`:''}${box(p.photo, `<b>${pcl(p.id, esc(p.name))}</b><div class="meta">${esc(p.barcode||'')} · ${fmt(+p.price||0)}${p.material?' · '+esc(p.material):''}</div>${+p.sold60>0?`<div class="meta">продано за 60 дн: <b>${p.sold60}</b></div>`:''}`)}</td>
     <td>${siteCol(p)}</td></tr>`).join('')}</tbody></table></div>
   ${D && L.length < D.total ? `<div class="row" style="justify-content:center;margin:10px 0"><button class="btn" id="ch-more">Показать ещё (${D.total - L.length})</button></div>` : ''}`}`;
 }
-document.addEventListener('click', async e => { if(S.view!=='site') return; const b = e.target.closest && e.target.closest('[data-chneed],#ch-more'); if(!b) return;
+document.addEventListener('click', async e => { if(S.view!=='site') return; const b = e.target.closest && e.target.closest('[data-chneed],#ch-more,#ch-bulk-go'); if(!b) return;
+  if(b.id==='ch-bulk-go'){ const sup = +($('#ch-bulk-sup')||{}).value; if(!sup) return toast('Выберите поставщика'); const ids = Object.keys(CHN2.sel||{}).filter(k=>CHN2.sel[k]); b.disabled = true;
+    let n = 0; for(const id of ids){ const { error } = await sb.rpc('product_set_supplier', { p_id:id, p_sup:sup }); if(error){ toast(errText(error)); break; } n++; }
+    toast(`Поставщик назначен: ${n}`); CHN2.sel = {}; CHN2.rows = null; render(); await loadChain(); return render(); }
   if(b.id==='ch-more'){ CHN2.off += 50; b.disabled = true; await loadChain(true); return render(); }
   CHN2.need = b.dataset.chneed; CHN2.rows = null; render(); await loadChain(); render(); });
 document.addEventListener('change', async e => { if(S.view!=='site') return; const t = e.target;
+  if(t.dataset && t.dataset.chsel){ (CHN2.sel ||= {})[t.dataset.chsel] = t.checked; return render(); }
+  if(t.id==='ch-selall'){ CHN2.sel ||= {}; (CHN2.rows||[]).filter(p=>!p.has_buy).forEach(p=>{ CHN2.sel[p.id] = t.checked; }); return render(); }
   if(t.dataset && t.dataset.chsup){ if(!t.value) return; const { error } = await sb.rpc('product_set_supplier', { p_id:t.dataset.chsup, p_sup:+t.value }); if(error) return toast(errText(error)); toast('Поставщик сохранён'); const r = (CHN2.rows||[]).find(x=>x.id===t.dataset.chsup); if(r){ r.sup = t.options[t.selectedIndex].text; r.has_buy = true; } return render(); }
   if(t.id==='ch-cat'){ CHN2.cat = t.value; } else if(t.id==='ch-mat'){ CHN2.mat = t.value; } else return; CHN2.rows = null; render(); await loadChain(); render(); });
 document.addEventListener('input', e => { if(S.view!=='site' || e.target.id!=='ch-q') return; CHN2.q = e.target.value; clearTimeout(CHN2.qT); CHN2.qT = setTimeout(async()=>{ CHN2.rows = null; await loadChain(); render(); }, 400); });
