@@ -2735,7 +2735,14 @@ document.addEventListener('click', async e => { const t = e.target.closest && e.
 /* один блок «Данные» на главной: Wipon + Китай + Alibaba, одна кнопка, короткие статусы; с расширением — автообновление раз в час */
 const SYNC = { busy:false, res:(() => { try{ return JSON.parse(localStorage.getItem('silver_sync_res')) || {}; }catch(_){ return {}; } })() };
 const syncSave = (k, ok, text) => { SYNC.res[k] = { ok, at:Date.now(), text:String(text||'').replace(/^Silver:?\s*/,'').slice(0,140) }; try{ localStorage.setItem('silver_sync_res', JSON.stringify(SYNC.res)); }catch(_){ } };
-const syncKinds = () => ['owner','purchaser'].includes(S.me && S.me.role) ? ['wipon','china','alibaba'] : ['wipon'];
+const syncKinds = () => ['owner','purchaser'].includes(S.me && S.me.role) ? ['wipon','china','alibaba','sheet','site'] : ['wipon'];
+/* рабочая база Google и сайты Tilda — обновляет сервер (catalog_sync), потом сам ищет совпадения по фото */
+const CSY = { last:null };
+async function csyLoad(){ const { data } = await sb.rpc('catalog_sync_last'); CSY.last = data || {}; for(const k of ['sheet','site']){ const L = CSY.last[k]; if(L) SYNC.res[k] = { ok:L.ok, at:new Date(L.at).getTime(), text:csyText(k, L.res) }; } if(S.view==='day') render(); }
+function csyText(k, r){ r = r || {}; if(r.error) return r.error;
+  if(k==='sheet') return 'Рабочая база: новых товаров ' + (r.new||0) + (r.names && r.names.length ? ' (' + r.names.slice(0,3).join(', ') + (r.new>3?'…':'') + ')' : '');
+  const f = (n, x) => x ? n + ': новых ' + (x.new||0) + (x.gone ? ', скрыто с сайта ' + x.gone : '') : '';
+  return 'Сайты — ' + [f('MOON', r.moon), f('Sunshine', r.sunshine)].filter(Boolean).join('; ') + '. Совпадения по фото подберутся за 2–3 минуты.'; }
 async function syncAll(auto, only){
   if(SYNC.busy) return; SYNC.busy = true; if(!auto) render();
   try{
@@ -2746,6 +2753,10 @@ async function syncAll(auto, only){
         if(extOn()){ const key = await sb.rpc('wipon_sync_key'); const r = key.data ? await extRun('wipon', key.data) : { ok:false, text:errText(key.error||'нет доступа') }; syncSave('wipon', !!r.ok, r.text); }
         else { const { data, error } = await sb.functions.invoke('wipon_srv', { body:{ action:'pull_now' } }).catch(err => ({ error:err })); syncSave('wipon', !!data && !error && !(data.error && !data.sales), error ? errText(error) : data && data.error || ''); }
         await wuLoadSrv();
+      } else if(k==='sheet' || k==='site'){
+        const { data, error } = await sb.functions.invoke('catalog_sync', { body:{ action:k } }).catch(err => ({ error:err }));
+        let r = data; if(error){ try{ r = await error.context.json(); }catch(_){ r = { error:errText(error) }; } }
+        syncSave(k, !error && r && !r.error, csyText(k, r)); if(!auto) toast(csyText(k, r));
       } else if(extOn()){
         const key = await sb.rpc('po_sync_key'); const r = key.data ? await extRun(k, key.data) : { ok:false, text:errText(key.error||'нет доступа') };
         syncSave(k, !!r.ok, !r.ok && /не дождалась/.test(r.text||'') ? (k==='china'?'1688':'Alibaba') + ' просит проверку «сдвиньте ползунок»: откройте сайт, пройдите её и нажмите 🔄 ещё раз' : r.text); CHN.last = null;
@@ -2764,7 +2775,8 @@ function dataHtml(){
   if(!S.me || !['owner','manager','purchaser'].includes(S.me.role)) return '';
   syncAuto();
   const hm = t => { const d = new Date(t), tm = d.toLocaleTimeString('ru-RU',{ hour:'2-digit', minute:'2-digit' }); return d.toDateString()===new Date().toDateString() ? tm : d.toLocaleDateString('ru-RU',{ day:'2-digit', month:'2-digit' }) + ' ' + tm; };
-  const st = wuState(), N = { wipon:'Wipon', china:'Китай', alibaba:'Alibaba' };
+  const st = wuState(), N = { wipon:'Wipon', china:'Китай', alibaba:'Alibaba', sheet:'Рабочая база', site:'Сайты' };
+  if(CSY.last===null && syncKinds().includes('site')){ CSY.last = {}; csyLoad(); }
   const chip = k => {
     if(SYNC.busy && SYNC.step===k) return `<span class="chip">⏳ ${N[k]}</span>`;
     if(k==='wipon'){ if(!st) return `<span class="chip">${N[k]} …</span>`; return st.ok ? `<span class="chip ok">✓ ${N[k]} ${esc(String(st.at||'').split(', ').pop())}</span>` : `<span class="chip warn" title="${esc(st.why.join('; '))}">⚠ ${N[k]}: ${esc(st.why.map(w => w.split(' — ')[0].replace(/\s*\(\d+ чек\.\)/,'')).join('; '))}</span>`; }
@@ -2772,9 +2784,11 @@ function dataHtml(){
     return !r ? `<span class="chip zero">${N[k]} —</span>` : r.ok ? `<span class="chip ok">✓ ${N[k]} ${hm(r.at)}</span>` : `<span class="chip warn" title="${esc(r.text)}">⚠ ${N[k]}</span>`;
   };
   const bad = syncKinds().map(k => k!=='wipon' && SYNC.res[k] && !SYNC.res[k].ok ? SYNC.res[k].text : '').filter(Boolean);
+  const csOk = ['sheet','site'].filter(k => syncKinds().includes(k) && SYNC.res[k] && SYNC.res[k].ok && Date.now() - SYNC.res[k].at < 6*36e5).map(k => SYNC.res[k].text);
   return `<div class="card" style="margin:12px 0;padding:10px 14px"><div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap">
-    <b>Данные</b><span class="row" style="gap:10px;flex-wrap:wrap;justify-content:flex-end">${syncKinds().map(k => `<span class="row" style="gap:4px">${chip(k)}<button class="btn small" data-sync="${k}" ${SYNC.busy || (k!=='wipon' && !extOn())?'disabled':''} title="Обновить ${N[k]} сейчас">🔄</button></span>`).join('')}</span></div>
-    <div class="meta" style="margin-top:6px">Wipon обновляется сам каждый час. ${syncKinds().length>1?'Китай и Alibaba — сами по понедельникам утром, в другие дни — кнопкой 🔄.':''}</div>
+    <b>Данные</b><span class="row" style="gap:10px;flex-wrap:wrap;justify-content:flex-end">${syncKinds().map(k => `<span class="row" style="gap:4px">${chip(k)}<button class="btn small" data-sync="${k}" ${SYNC.busy || (['china','alibaba'].includes(k) && !extOn())?'disabled':''} title="Обновить ${N[k]} сейчас">🔄</button></span>`).join('')}</span></div>
+    <div class="meta" style="margin-top:6px">Wipon обновляется сам каждый час. ${syncKinds().length>1?'Китай, Alibaba, рабочая база и сайты — сами по понедельникам утром, в другие дни — кнопкой 🔄.':''}</div>
+    ${csOk.map(t => `<div class="meta" style="margin-top:4px">${esc(t)}</div>`).join('')}
     ${bad.length?`<div class="meta" style="margin-top:6px">${esc(bad[0])}</div>`:''}
     ${extOn()?'':`<div class="meta" style="margin-top:6px"><a href="silver-ext.zip" download onclick="toast(EXT_HINT)">Установить расширение Silver</a> — один раз, чтобы всё обновлялось само.</div>`}</div>`;
 }
