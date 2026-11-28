@@ -2462,7 +2462,8 @@ function renderChain(){
   const siteCol = p => {
     const A = (p.sites||[]).map(x => box(x.photo, `${x.warn?`<span class="chip" style="background:#c0392b;color:#fff">⚠️ ${esc(x.warn)}</span><br>`:''}<div class="meta">${['review','auto'].includes(x.st)?'<span class="chip warn">авто — проверь</span>':'✓ сайт'} · ${x.site==='moon'?'MOON':'Sunshine'}</div>
       ${x.url?`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title||'карточка')}</a>`:esc(x.title||'')}<br>
-      ${['review','auto'].includes(x.st)?`<button class="btn small primary" style="margin-top:4px" data-pmsok="${x.site}:${x.uid}:${p.id}">✅ Верно</button> `:''}<button class="btn small" style="margin-top:4px" data-pmun="s:${x.site}:${x.uid}">🗑 Отвязать</button>`)).join('');
+      ${x.var?`<span class="meta">цвет в карточке: <b>${esc(x.var)}</b></span><br>`:x.colors?`<span class="meta">на сайте цвет: ${esc(x.colors)}</span><br>`:''}
+      ${x.main===false?'<span class="meta">одна карточка на несколько цветов</span>':`${['review','auto'].includes(x.st)?`<button class="btn small primary" style="margin-top:4px" data-pmsok="${x.site}:${x.uid}:${p.id}">✅ Верно</button> `:''}<button class="btn small" style="margin-top:4px" data-pmun="s:${x.site}:${x.uid}">🗑 Отвязать</button>`}`)).join('');
     const S2 = (p.ss||[]).map(x => sug('s', x, p.id)).join('');
     const find = PO.sfind===p.id ? `<div style="margin-top:6px"><input id="pm-sq" data-pid="${p.id}" placeholder="Название на сайте" value="${esc(PO.sq||'')}" style="width:100%">
         ${(PO.sfound||[]).map(x=>`<button class="prod" style="width:100%;margin-top:4px" data-pmslink="${x.site}:${x.uid}:${p.id}">${pic(x.photo,48)}<span style="text-align:left"><b>${esc(x.title)}</b><br><span class="meta">${x.site==='moon'?'MOON':'Sunshine'}${x.linked_to?' · сейчас связан с: '+esc(x.linked_to):''}</span></span></button>`).join('')||'<div class="meta">Начните вводить название</div>'}
