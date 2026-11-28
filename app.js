@@ -2738,6 +2738,8 @@ const syncSave = (k, ok, text) => { SYNC.res[k] = { ok, at:Date.now(), text:Stri
 const syncKinds = () => ['owner','purchaser'].includes(S.me && S.me.role) ? ['wipon','china','alibaba','sheet','site'] : ['wipon'];
 /* рабочая база Google и сайты Tilda — обновляет сервер (catalog_sync), потом сам ищет совпадения по фото */
 const CSY = { last:null };
+const WORK_SHEET = { id:'1vX72QJqy8k6PltM6hC5bH_qkZN0gwIbU9KcM0sco-yg', gid:'890474029' };   // «Рабочая База данных товаров», лист «база» — только чтение
+const extSheet = () => extOn() && (document.documentElement.dataset.silverExtV || '') >= '1.2';
 async function csyLoad(){ const { data } = await sb.rpc('catalog_sync_last'); CSY.last = data || {}; for(const k of ['sheet','site']){ const L = CSY.last[k]; if(L) SYNC.res[k] = { ok:L.ok, at:new Date(L.at).getTime(), text:csyText(k, L.res) }; } if(S.view==='day') render(); }
 function csyText(k, r){ r = r || {}; if(r.error) return r.error;
   if(k==='sheet') return 'Рабочая база: новых товаров ' + (r.new||0) + (r.names && r.names.length ? ' (' + r.names.slice(0,3).join(', ') + (r.new>3?'…':'') + ')' : '');
@@ -2754,7 +2756,10 @@ async function syncAll(auto, only){
         else { const { data, error } = await sb.functions.invoke('wipon_srv', { body:{ action:'pull_now' } }).catch(err => ({ error:err })); syncSave('wipon', !!data && !error && !(data.error && !data.sales), error ? errText(error) : data && data.error || ''); }
         await wuLoadSrv();
       } else if(k==='sheet' || k==='site'){
-        const { data, error } = await sb.functions.invoke('catalog_sync', { body:{ action:k } }).catch(err => ({ error:err }));
+        const body = { action:k };
+        if(k==='sheet'){ if(!extSheet()){ syncSave(k, false, 'Для рабочей базы обновите расширение Silver до 1.2: скачайте silver-ext.zip, распакуйте поверх старой папки и нажмите ⟳ у расширения в chrome://extensions'); continue; }
+          SYNC.step = k; const r = await extRun('sheet', { id:WORK_SHEET.id, gid:WORK_SHEET.gid, range:'C1:L' }); if(!r.ok || !r.csv){ syncSave(k, false, r.text); continue; } body.csv = r.csv; }
+        const { data, error } = await sb.functions.invoke('catalog_sync', { body }).catch(err => ({ error:err }));
         let r = data; if(error){ try{ r = await error.context.json(); }catch(_){ r = { error:errText(error) }; } }
         syncSave(k, !error && r && !r.error, csyText(k, r)); if(!auto) toast(csyText(k, r));
       } else if(extOn()){
@@ -2768,7 +2773,7 @@ async function syncAll(auto, only){
 function syncAuto(){ if(!extOn() || SYNC.busy || SYNC.autoT) return; const g = k => { try{ return +localStorage.getItem(k) || 0; }catch(_){ return 0; } };
   // Wipon — раз в час (расширение по очереди открывает каждое ИП); Китай и Alibaba — сами только по понедельникам утром (раз в неделю), в остальное время — по кнопке
   const al = new Date(Date.now() + 5*36e5), mon = al.getUTCDay()===1 && al.getUTCHours() < 14, wk = Date.now() - g('silver_auto_at') > 20*36e5;
-  const only = [...(Date.now() - g('silver_auto_wu') > 36e5 ? ['wipon'] : []), ...(mon && wk ? ['china','alibaba'] : [])];
+  const only = [...(Date.now() - g('silver_auto_wu') > 36e5 ? ['wipon'] : []), ...(mon && wk ? ['china','alibaba','site', ...(extSheet() ? ['sheet'] : [])] : [])];
   if(only.length) SYNC.autoT = setTimeout(() => { SYNC.autoT = null; syncAll(true, only); }, 3000); }   // авто раз в 6 часов: чаще 1688 начинает просить проверку
 document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-sync]'); if(b && !SYNC.busy) syncAll(false, [b.dataset.sync]); });
 function dataHtml(){
@@ -2786,7 +2791,7 @@ function dataHtml(){
   const bad = syncKinds().map(k => k!=='wipon' && SYNC.res[k] && !SYNC.res[k].ok ? SYNC.res[k].text : '').filter(Boolean);
   const csOk = ['sheet','site'].filter(k => syncKinds().includes(k) && SYNC.res[k] && SYNC.res[k].ok && Date.now() - SYNC.res[k].at < 6*36e5).map(k => SYNC.res[k].text);
   return `<div class="card" style="margin:12px 0;padding:10px 14px"><div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap">
-    <b>Данные</b><span class="row" style="gap:10px;flex-wrap:wrap;justify-content:flex-end">${syncKinds().map(k => `<span class="row" style="gap:4px">${chip(k)}<button class="btn small" data-sync="${k}" ${SYNC.busy || (['china','alibaba'].includes(k) && !extOn())?'disabled':''} title="Обновить ${N[k]} сейчас">🔄</button></span>`).join('')}</span></div>
+    <b>Данные</b><span class="row" style="gap:10px;flex-wrap:wrap;justify-content:flex-end">${syncKinds().map(k => `<span class="row" style="gap:4px">${chip(k)}<button class="btn small" data-sync="${k}" ${SYNC.busy || (['china','alibaba','sheet'].includes(k) && !extOn())?'disabled':''} title="Обновить ${N[k]} сейчас">🔄</button></span>`).join('')}</span></div>
     <div class="meta" style="margin-top:6px">Wipon обновляется сам каждый час. ${syncKinds().length>1?'Китай, Alibaba, рабочая база и сайты — сами по понедельникам утром, в другие дни — кнопкой 🔄.':''}</div>
     ${csOk.map(t => `<div class="meta" style="margin-top:4px">${esc(t)}</div>`).join('')}
     ${bad.length?`<div class="meta" style="margin-top:6px">${esc(bad[0])}</div>`:''}
