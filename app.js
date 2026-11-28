@@ -2422,7 +2422,17 @@ function poScopeRow(){ if(S.view!=='site') return `<div class="filters">${[['pro
 function chSync(){ if(chIsPo()){ PO.mode = 'match'; const want = CH_PO[CH.tab]; if(CH.tab==='china'){ if(!['transit','received','all'].includes(PO.mscope)) PO.mscope = 'transit'; } else PO.mscope = want; } else if(S.st) S.st.status = CH.tab; }
 /* «Цепочка товара» — одна страница: слева закуп 1688, в центре товар базы, справа сайт. Где звена нет — там и дописываем связь. */
 const CHN2 = { need:'all', cat:'', mat:'', q:'', off:0, data:null, rows:null };
-const CH_NEED = [['all','Все'],['buy','Нет закупа'],['site','Нет на сайте'],['sug','💡 Есть подсказки'],['check','Сайт: подтвердить'],['warn','⚠️ Не совпадает цвет/категория'],['full','✅ Полная цепочка'],['moonsite','🌙 Предложение на сайт MOON'],['charms','🧿 Общий товар и шармы: сайт ↔ закуп']];
+const CH_NEED = [['all','Все'],['buy','Нет закупа'],['site','Нет на сайте'],['sug','💡 Есть подсказки'],['check','Сайт: подтвердить'],['warn','⚠️ Не совпадает цвет/категория'],['full','✅ Полная цепочка'],['grp','📦 Общие товары (в асс)'],['moonsite','🌙 Предложение на сайт MOON'],['charms','🌐 На сайте есть, в базе нет: сайт ↔ закуп']];
+/* общий товар: один штрихкод на много моделей. Раскрываем — каждая модель (карточка сайта) со своим закупом */
+async function loadGroup(id){ const { data, error } = await sb.rpc('chain_group', { p_id:id }); if(error){ toast(errText(error)); return; } (CHN2.grp ||= {})[id] = data || []; }
+function groupRows(p, pic){ const M = (CHN2.grp||{})[p.id]; if(!M) return '<div class="empty">Загружаем модели…</div>'; if(!M.length) return '<div class="empty">Моделей на сайте нет</div>';
+  const nb = M.filter(m=>m.buy).length;
+  return `<div class="meta" style="margin:2px 0 8px">Моделей на сайте: <b>${M.length}</b>, с закупом: <b>${nb}</b>. Остаток и продажи считаются по общему штрихкоду, закуп — по каждой модели.</div>
+  <table class="mc" style="width:100%"><thead><tr><th style="text-align:left;width:60%">🇨🇳 Закуп этой модели</th><th style="text-align:left">🌐 Модель на сайте</th></tr></thead><tbody>${M.map(m=>`<tr style="vertical-align:top">
+    <td>${m.buy ? `<div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start">${pic(m.buy.photo)}<div style="font-size:13px"><div class="meta">✓ закуп</div><div style="max-height:2.6em;overflow:hidden">${esc(noZh(m.buy.title)||'')}</div><div class="meta">заказ №${esc(String(m.buy.order_no||''))}${m.buy.url?` · <a href="${esc(m.buy.url)}" target="_blank" rel="noopener">1688</a>`:''}</div><button class="btn small" style="margin-top:4px" data-grun="${p.id}:${m.site}:${m.uid}">🗑 Отвязать</button></div></div>`
+      : (m.cands||[]).length ? `<div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">${m.cands.map(c=>`<div style="width:130px">${pic(c.photo,120)}<div class="meta" style="max-height:2.4em;overflow:hidden">${esc(noZh(c.title)||'')}</div><div class="meta">заказ №${esc(String(c.order_no||''))}${c.url?` · <a href="${esc(c.url)}" target="_blank" rel="noopener">открыть</a>`:''}</div><button class="btn small ${c.poi===m.pick?'primary':''}" data-chbok="${m.ref}:${c.poi}">✅ Это он</button></div>`).join('')}<div><button class="btn small" data-chbno="${m.ref}">✖ Здесь нет</button></div></div>`
+      : `<span class="chip warn">${m.skip?'в закупе не нашли':'нет закупа'}</span>`}</td>
+    <td><div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start">${pic(m.photo)}<div style="font-size:13px">${m.url?`<a href="${esc(m.url)}" target="_blank" rel="noopener"><b>${esc(m.title||'карточка')}</b></a>`:`<b>${esc(m.title||'')}</b>`}<div class="meta">${m.site==='moon'?'MOON':'Sunshine'}${m.price?' · '+fmt(+m.price):''}</div><button class="btn small" style="margin-top:4px" data-pmun="s:${m.site}:${m.uid}" title="Убрать модель из этого общего товара">🗑 Не этот товар</button></div></div></td></tr>`).join('')}</tbody></table>`; }
 async function loadChain(more){
   const F = CHN2; if(!F.locs){ const { data } = await sb.rpc('local_suppliers'); F.locs = data || []; }
   if(!F.cats){ const { data } = await sb.from('categories').select('id,name').eq('hidden',false).order('name'); F.cats = data || []; }
@@ -2471,12 +2481,18 @@ function renderChain(){
       <b>Выбрано: ${ids.length}</b><select id="ch-bulk-sup"><option value="">Местный поставщик…</option>${(CHN2.locs||[]).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select>
       <button class="btn small primary" id="ch-bulk-go" ${ids.length?'':'disabled'}>Назначить</button></div>` : ''; })()}
   <div class="scroll"><table class="mc" style="width:100%;table-layout:fixed"><thead><tr><th style="text-align:left;width:34%">🇨🇳 Закуп</th><th style="text-align:left;width:28%">📦 Товар в базе</th><th style="text-align:left;width:38%">🌐 Сайт</th></tr></thead><tbody>
-  ${L.map(p=>`<tr style="vertical-align:top"><td>${buyCol(p)}</td>
+  ${L.map(p=>p.grp ? `<tr style="vertical-align:top"><td>${(p.buys||[]).length||p.purchase_url||p.sup||(p.cs||[]).length?buyCol(p):''}<div class="meta">закуп по моделям: <b>${p.models_buy||0}</b> из ${p.models||0}</div></td>
+    <td style="background:var(--soft,rgba(127,127,127,.06))">${box(p.photo, `<span class="chip">📦 общий товар</span><br><b>${pcl(p.id, esc(p.name))}</b><div class="meta">${esc(p.barcode||'')} · ${fmt(+p.price||0)}${p.material?' · '+esc(p.material):''}</div>${+p.sold60>0?`<div class="meta">продано за 60 дн: <b>${p.sold60}</b></div>`:''}`)}</td>
+    <td><div><b>${p.models||0}</b> ${(n=>n%10===1&&n%100!==11?'модель':[2,3,4].includes(n%10)&&![12,13,14].includes(n%100)?'модели':'моделей')(p.models||0)} на сайте</div><button class="btn small ${CHN2.open===p.id?'':'primary'}" style="margin:4px 0" data-gropen="${p.id}">${CHN2.open===p.id?'▲ Свернуть':'▼ Раскрыть модели'}</button><br>${siteCol(p)}</td></tr>
+    ${CHN2.open===p.id?`<tr><td colspan="3" style="padding:10px 14px;border-left:4px solid var(--accent,#888)">${groupRows(p, pic)}</td></tr>`:''}` : `<tr style="vertical-align:top"><td>${buyCol(p)}</td>
     <td style="background:var(--soft,rgba(127,127,127,.06))">${!p.has_buy?`<label class="meta" style="display:flex;gap:6px;align-items:center;margin-bottom:4px;cursor:pointer"><input type="checkbox" data-chsel="${p.id}" ${(CHN2.sel||{})[p.id]?'checked':''}> выбрать</label>`:''}${box(p.photo, `<b>${pcl(p.id, esc(p.name))}</b><div class="meta">${esc(p.barcode||'')} · ${fmt(+p.price||0)}${p.material?' · '+esc(p.material):''}</div>${+p.sold60>0?`<div class="meta">продано за 60 дн: <b>${p.sold60}</b></div>`:''}`)}</td>
     <td>${siteCol(p)}</td></tr>`).join('')}</tbody></table></div>
   ${D && L.length < D.total ? `<div class="row" style="justify-content:center;margin:10px 0"><button class="btn" id="ch-more">Показать ещё (${D.total - L.length})</button></div>` : ''}`}`;
 }
-document.addEventListener('click', async e => { if(S.view!=='site') return; const b = e.target.closest && e.target.closest('[data-chneed],#ch-more,#ch-bulk-go'); if(!b) return;
+document.addEventListener('click', async e => { if(S.view!=='site') return; const b = e.target.closest && e.target.closest('[data-chneed],#ch-more,#ch-bulk-go,[data-gropen],[data-grun]'); if(!b) return;
+  if(b.dataset.gropen){ const id = b.dataset.gropen; CHN2.open = CHN2.open===id ? null : id; render(); if(CHN2.open){ await loadGroup(id); render(); } return; }
+  if(b.dataset.grun){ const [pid, site, uid] = b.dataset.grun.split(':'); b.disabled = true; const { error } = await sb.rpc('site_buy_unlink', { p_site:site, p_uid:uid }); if(error){ b.disabled = false; return toast(errText(error)); }
+    toast('Закуп отвязан'); const r = (CHN2.rows||[]).find(x=>x.id===pid); if(r) r.models_buy = Math.max(0, (r.models_buy||0) - 1); await loadGroup(pid); return render(); }
   if(b.id==='ch-bulk-go'){ const sup = +($('#ch-bulk-sup')||{}).value; if(!sup) return toast('Выберите поставщика'); const ids = Object.keys(CHN2.sel||{}).filter(k=>CHN2.sel[k]); b.disabled = true;
     let n = 0; for(const id of ids){ const { error } = await sb.rpc('product_set_supplier', { p_id:id, p_sup:sup }); if(error){ toast(errText(error)); break; } n++; }
     toast(`Поставщик назначен: ${n}`); CHN2.sel = {}; CHN2.rows = null; render(); await loadChain(); return render(); }
@@ -4482,7 +4498,9 @@ document.addEventListener('click', async e => {
   else if(d.pomfind){ PO.mfind = PO.mfind===d.pomfind ? null : d.pomfind; PO.mq=''; if(!S.catalog) loadCatalog().then(()=>{ const r=document.getElementById('po-mq-res'); if(r) r.innerHTML=poMqRes(PO.mfind); }); render(); const el=document.getElementById('po-mq'); if(el) el.focus(); }
   else if(d.pomneed){ PO.mneed=d.pomneed; PO.plist=null; PO.clist=null; render(); await loadPo(); render(); }
   else if(d.chbok||d.chbno){ const [ref, poi] = (d.chbok||d.chbno).split(':'); t.disabled = true; const { error } = await sb.rpc('charm_buy_decide', { p_ref:ref, p_poi: d.chbok ? poi : null });
-    if(error){ t.disabled=false; return toast(errText(error)); } toast(d.chbok?'Связано с закупом':'Убрано'); await loadPo(); render(); }
+    if(error){ t.disabled=false; return toast(errText(error)); } toast(d.chbok?'Связано с закупом':'Убрано');
+    if(S.view==='site' && CHN2.open && CHN2.need!=='charms'){ const r = (CHN2.rows||[]).find(x=>x.id===CHN2.open); if(r && d.chbok) r.models_buy = (r.models_buy||0) + 1; await loadGroup(CHN2.open); return render(); }
+    await loadPo(); render(); }
   else if(d.pmsfind){ if(PO.sfind===d.pmsfind){ PO.sfind = null; return render(); } PO.sfind = d.pmsfind; PO.sq = (d.name||'').split(' ').slice(0,2).join(' '); PO.sfound = []; render();
     const { data } = await sb.rpc('site_search', { p_q: PO.sq }); PO.sfound = data || []; render(); const el = $('#pm-sq'); if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
   else if(d.pmslink){ const [st, uid, pid] = d.pmslink.split(':'); t.disabled = true; const { error } = await sb.rpc('site_link_set', { p_site:st, p_uid:+uid, p_product:pid, p_status:'confirmed' });
