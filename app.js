@@ -577,6 +577,11 @@ function renderShell(){
 const GROUPS = [['home','✅','Мой день',['day']],['goods','📦','Товары',['flow','wh','po','nom','site','photo']],['analytics','📈','Аналитика',['analytics','profit']],
   ['team','👥','Команда',['me','emps','cons','bot','pay','adm','audit','feat']],['kassa','🧾','Чеки',['pos','shifts','cash','sales']],['clients','💳','Клиенты',['promo','content','bonus','certs']]];
 const groupOf = v => GROUPS.find(g => g[3].includes(v)) || GROUPS[0];
+const TAB_PARENT = { site:'po', photo:'nom' };
+const tabHas = v => (S.tabs||[]).some(t => t[0]===v);
+const tabChild = v => !!(TAB_PARENT[v] && tabHas(TAB_PARENT[v]));   // вкладка спрятана внутрь родительской
+document.addEventListener('click', async e => { const b = e.target.closest && e.target.closest('[data-goview]'); if(!b) return; e.preventDefault();
+  if(!tabHas(b.dataset.goview)) return; if(b.dataset.an) S.anMode = b.dataset.an; S.view = b.dataset.goview; render(); scrollTo(0,0); await loadView(); });
 // старые адреса вкладок: #attn → «Мой день», #stock → «Склад» в режиме «Остатки»
 function viewAlias(){ try{ if(S.view==='po' && PO.mode==='match') PO.mode = 'orders'; }catch(_){} if(S.view==='attn') S.view = 'day'; else if(S.view==='stock'){ S.view = 'wh'; S.wmode = 'stock'; } }
 /* меняем DOM, только если разметка изменилась — меньше перерисовок и не сбивается фокус */
@@ -591,10 +596,10 @@ function renderNav(){
   const mn = $('#mainnav'); if(mn) setHtml(mn, main.map(gbtn).join('')
     + (more.length ? `<button role="tab" data-more="1" aria-selected="${more.includes(cur)}"><span class="ico">☰</span>${more.includes(cur)?esc(cur[2]):'Ещё'}</button>` : '')
     + (more.length && S.moreOpen ? `<div class="more-bg" data-moreclose="1"></div><div class="more-sheet" id="more-sheet">${more.map(gbtn).join('')}</div>` : ''));
-  const av = cur[3].filter(has), sn = $('#subnav');
+  const av = cur[3].filter(has).filter(v => !tabChild(v)), sn = $('#subnav');
   // магазин выбирают только в разделе «Касса»: чек, смена и расходы относятся к конкретной кассе
   const kassa = cur[0]==='kassa' && ['pos','shifts','cash'].includes(S.view) && (S.view==='pos' || S.posOn);
-  if(sn){ sn.hidden = av.length < 2 && !kassa; setHtml(sn, av.map(v => `<button role="tab" data-view="${v}" aria-selected="${v===S.view}">${title(v)}${v==='wh'?rq:''}</button>`).join('')
+  if(sn){ sn.hidden = av.length < 2 && !kassa; setHtml(sn, av.map(v => `<button role="tab" data-view="${v}" aria-selected="${v===S.view || (tabChild(S.view) && TAB_PARENT[S.view]===v)}">${title(v)}${v==='wh'?rq:''}</button>`).join('')
     + (kassa && S.stores && S.stores.length ? `<label class="store-pick"><span class="meta">Магазин</span><select id="store-sel" aria-label="Магазин">${S.stores.map(s=>`<option value="${s.id}" ${s.id===S.store?'selected':''}>${esc(BRAND[s.brand]+' · '+s.city+', '+s.address)}</option>`).join('')}</select></label>` : ''));
     const ss = $('#store-sel'); if(ss) ss.onchange = e => { S.store = +e.target.value; ls.set('kassa_store', S.store); S.cust = null; S.bonusSpend = 0; if(S.phone) lookupCustomer(); renderHeader(); render(); loadPosShift().then(render); if(S.view==='shifts') loadShifts().then(render); if(S.view==='cash') loadCash().then(render); };
   }
@@ -1448,7 +1453,7 @@ function deltaHtml(cur, prev, dir, prevText){
   return `<span title="Предыдущий период: ${esc(prevText)}" style="font-size:13px;font-weight:600;color:${col};white-space:nowrap">${r>0?'▲ +':r<0?'▼ ':''}${r}%</span>`;
 }
 function renderAnalytics(){ return S.anMode==='stock' ? renderStockAn() : S.anMode==='inv' ? renderInvAn() : renderSalesAn(); }
-const anModeHtml = () => `<div class="seg" style="display:inline-flex;margin-bottom:10px"><button data-anmode="sales" aria-pressed="${S.anMode==='sales'}">Продажи</button><button data-anmode="stock" aria-pressed="${S.anMode==='stock'}">Остатки</button><button data-anmode="inv" aria-pressed="${S.anMode==='inv'}">Управление</button></div>`;
+const anModeHtml = () => `<div class="seg" style="display:inline-flex;margin-bottom:10px"><button data-anmode="sales" aria-pressed="${S.anMode==='sales'}">Продажи</button><button data-anmode="stock" aria-pressed="${S.anMode==='stock'}">Остатки</button>${tabHas('flow')?'':`<button data-anmode="inv" aria-pressed="${S.anMode==='inv'}">Управление</button>`}</div>${S.anMode==='inv'&&tabHas('flow')?'<div><button class="btn small" data-goview="flow" style="margin-bottom:10px">← Оборот</button> <b>Запасы подробно</b></div>':''}`;
 /* праздники и выходные Казахстана (2026 — по производственному календарю с изменениями от 29.06.2026) */
 const KZ_EXACT = {
   2026: { '01-01':'Новый год','01-02':'Новый год','01-07':'Православное Рождество','03-08':'Международный женский день','03-09':'Выходной за 8 Марта',
@@ -1935,7 +1940,7 @@ async function loadNom(){
 function renderNom(){
   const f = S.nm, D = f.data, e = f.ed, cats = f.cats || [];
   const inp = (k, label, extra='') => `<label class="stack" style="gap:4px"><span class="label">${label}</span><input data-nf="${k}" value="${esc(e[k]??'')}" ${extra}></label>`;
-  $('#main').innerHTML = `<div class="row"><h2>Номенклатура</h2>${f.sort?'':'<span class="meta" style="flex:1">сначала самые дорогие залежи</span>'}<button class="btn primary" id="nm-new">+ Новый товар</button></div>
+  $('#main').innerHTML = `<div class="row"><h2>Номенклатура</h2>${f.sort?'':'<span class="meta" style="flex:1">сначала самые дорогие залежи</span>'}${tabHas('photo')?'<button class="btn" data-goview="photo">📷 Снять товары без фото</button>':''}<button class="btn primary" id="nm-new">+ Новый товар</button></div>
     <div class="filters"><input id="nm-q" placeholder="Штрихкод, артикул или название" value="${esc(f.q)}" style="flex:1;min-width:180px">
       <select id="nm-cat"><option value="">Все категории</option><option value="-1" ${String(f.cat)==='-1'?'selected':''}>⚠ Без категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
 </div>
@@ -2471,7 +2476,7 @@ function renderChain(){
       : `<button class="btn small" style="margin-top:2px" data-pmsfind="${p.id}" data-name="${esc(p.name)}">🔍 Найти на сайте</button>`;
     return (A + S2 || '<span class="chip warn">нет на сайте</span><br>') + find; };
   const mats = ['Нержавейка','Мед сплав','Серебро 925','Пластик','мельхиор','Жемчуг','Кожа','другой'];
-  $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap"><h2>Цепочка товара</h2><span class="meta" style="flex:1">слева закуп 1688 → в центре товар → справа сайт. Где звена нет — его и добавляем.</span></div>
+  $('#main').innerHTML = `${tabChild('site')?'<div class="seg" style="display:inline-flex;margin-bottom:10px"><button data-goview="po" aria-pressed="false">← Закуп: заказы</button><button aria-pressed="true">🔗 Связи: закуп → товар → сайт</button></div>':''}<div class="row" style="flex-wrap:wrap"><h2>Цепочка товара</h2><span class="meta" style="flex:1">слева закуп 1688 → в центре товар → справа сайт. Где звена нет — его и добавляем.</span></div>
   <div class="filters"><select id="ch-cat"><option value="">Все категории</option>${(F.cats||[]).map(c=>`<option value="${c.id}" ${String(F.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
     <select id="ch-mat"><option value="">Все материалы</option>${mats.map(m=>`<option ${F.mat===m?'selected':''}>${esc(m)}</option>`).join('')}</select>
     <input id="ch-q" placeholder="Поиск: название или штрихкод" value="${esc(F.q)}" style="flex:1;min-width:180px"></div>
@@ -3518,7 +3523,7 @@ const PH = { store:null, q:'', data:null, i:0, busy:false, done:0 };
 async function loadPhoto(){ if(PH.store===null) PH.store = S.store || ''; const { data, error } = await sb.rpc('photo_queue', { p_store: PH.store ? +PH.store : null, p_q: PH.q || null, p_limit: 60 }); if(error) toast(errText(error)); PH.data = data || { total:0, rows:[] }; PH.i = 0; }
 function renderPhoto(){
   const D = PH.data, R = (D&&D.rows)||[], p = R[PH.i];
-  $('#main').innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">📷 Фотосессия</h2>${D?`<span class="meta">без фото в наличии: <b>${D.total.toLocaleString('ru-RU')}</b>${PH.done?` · снято сегодня: <b>${PH.done}</b>`:''}</span>`:''}</div>
+  $('#main').innerHTML = `${tabChild('photo')?'<button class="btn small" data-goview="nom" style="margin-bottom:8px">← Номенклатура</button>':''}<div class="row" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">📷 Фотосессия</h2>${D?`<span class="meta">без фото в наличии: <b>${D.total.toLocaleString('ru-RU')}</b>${PH.done?` · снято сегодня: <b>${PH.done}</b>`:''}</span>`:''}</div>
   <p class="meta" style="margin:4px 0 10px">Сначала идут товары, которые чаще продаются. Снимайте на светлом фоне, украшение крупно. Можно отсканировать штрихкод — откроется именно этот товар.</p>
   <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px;margin-bottom:10px">
     <select id="ph-store"><option value="">Все магазины</option>${S.stores.map(x=>`<option value="${x.id}" ${String(PH.store)===String(x.id)?'selected':''}>${esc(BRAND[x.brand]+' · '+x.address)}</option>`).join('')}</select>
@@ -3799,7 +3804,7 @@ function renderPo(){
   const modes = [['orders','Заказы'],['new','Новый заказ'],['suggest','Что дозаказать'],['all','Все остатки'],['ideas','✨ Идеи и тренды'],['sup','Поставщики'],['an','Аналитика закупа']].filter(([k])=>poEdit() || k!=='new');
   const head = `<div class="row" style="flex-wrap:wrap"><h2>Закуп</h2><span class="row" style="gap:6px">${(PO.list||[]).some(o=>(o.supplier&&/[\u4e00-\u9fff]/.test(o.supplier)&&!o.supplier_ru)||(o.items||[]).some(i=>i.supplier_title&&!i.title_ru))?`<button class="btn small" id="po-tr">🌐 Перевести названия на русский</button>`:''}${poEdit()?`<label class="btn small" style="cursor:pointer">⬆ Загрузить заказы: 1688 или Alibaba (Excel)<input type="file" id="po-1688" accept=".xlsx,.xls,.csv" hidden></label>`:''}</span></div>
   ${PO.imp?`<div class="card meta" style="margin-bottom:8px">${esc(PO.imp)}</div>`:''}
-  <div class="seg" style="display:inline-flex;margin-bottom:10px">${modes.map(([k,v])=>`<button data-pomode="${k}" aria-pressed="${PO.mode===k}">${v}</button>`).join('')}</div>`;
+  <div class="seg" style="display:inline-flex;margin-bottom:10px;flex-wrap:wrap">${modes.map(([k,v])=>`<button data-pomode="${k}" aria-pressed="${PO.mode===k}">${v}</button>`).join('')}${tabHas('site')?'<button data-goview="site" aria-pressed="false">🔗 Связи: закуп → товар → сайт</button>':''}</div>`;
   let body = '';
   if(PO.mode==='orders'){
     const q = (PO.oq||'').trim().toLowerCase(), all = PO.list;
@@ -4756,7 +4761,7 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('nav.tabs button, nav.subtabs button'); if(!b) return;
   if(b.dataset.more){ S.moreOpen = !S.moreOpen; renderNav(); return; }
   S.moreOpen = false;
-  if(b.dataset.group){ const g = GROUPS.find(x=>x[0]===b.dataset.group), av = g[3].filter(v => (S.tabs||[]).some(t=>t[0]===v)); const last = (S.lastView||{})[g[0]]; S.view = av.includes(last) ? last : av[0]; }
+  if(b.dataset.group){ const g = GROUPS.find(x=>x[0]===b.dataset.group), av = g[3].filter(v => (S.tabs||[]).some(t=>t[0]===v)).filter(v => !tabChild(v) || (S.lastView||{})[g[0]]===v); const last = (S.lastView||{})[g[0]]; S.view = av.includes(last) ? last : av[0]; }
   else S.view = b.dataset.view;
   render(); scrollTo(0,0); await loadView();
 });
@@ -5229,7 +5234,8 @@ function turnHtml(){
   const N = (T.stores||[]).find(x=>x.id===0) || {};
   return `<div class="card" style="margin-top:10px"><div class="row" style="flex-wrap:wrap;gap:8px"><b style="font-size:17px">Оборот товара</b><span class="meta" style="flex:1">сейчас сеть оборачивается за <b style="${col(N.days)}">${N.days!=null?nf(N.days):'—'} дн.</b></span>
       <label class="meta">Цель: <select id="tb-target">${[60,90,120,150,180].map(d=>`<option value="${d}" ${FL.target===d?'selected':''}>${d} дней</option>`).join('')}</select></label></div>
-    <div class="scroll" style="margin-top:8px"><table class="mc" style="width:100%"><thead><tr><th style="text-align:left">Магазин</th><th>Товара, ₸</th><th>Продаётся в мес., ₸</th><th>Оборот</th><th>Раз в год</th><th>Выручка в мес.</th><th>Нужно выручки в мес.</th><th>Или убрать товара</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="scroll" style="margin-top:8px"><table class="mc" style="width:100%"><thead><tr><th style="text-align:left">Магазин</th><th>Товара, ₸</th><th>Продаётся в мес., ₸</th><th>Оборот</th><th>Раз в год</th><th>Выручка в мес. сейчас</th><th title="Сколько надо продавать в месяц в розничных ценах, чтобы весь нынешний запас уходил за выбранное число дней">Чтобы успеть к цели: выручка в мес.</th><th title="На сколько (по себестоимости) запас больше, чем нужно при нынешних продажах">Лишний запас, ₸</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${tabHas('analytics')?'<button class="btn small" data-goview="analytics" data-an="inv" style="margin-top:8px">Запасы подробно: ABC, упущенные продажи, уценка</button>':''}
     <div class="meta" style="margin-top:6px">«Товара» и «продаётся» — по себестоимости, среднее за 3 месяца. «Нужно выручки» — сколько продавать в месяц, чтобы при нынешнем запасе товар оборачивался за ${T.target} дней. «Или убрать» — на сколько сократить запас при нынешних продажах.</div></div>
   ${sec('reorder','🛒','Дозаказать', T.reorder_n, 'ходовые, запаса меньше месяца, в пути ничего нет', T.reorder, p => p.has_buy ? (p.purchase_url?`<a class="btn small primary" href="${esc(p.purchase_url)}" target="_blank" rel="noopener" style="text-decoration:none">К поставщику</a>`:`<span class="chip ok">${esc(p.sup||'есть в заказах')}</span>`) : '<span class="chip warn">нет закупа</span>')}
   ${sec('over','🧊','Не дозаказывать, распродать', T.over_n, `запас больше чем на 6 месяцев · лишнего на ${mm(T.over_sum)} ₸`, T.over, p => `<b class="num">${mm(p.extra)} ₸</b><br><span class="meta">лишнего</span>`)}
