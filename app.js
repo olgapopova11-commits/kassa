@@ -5212,8 +5212,32 @@ function applyTheme(){
 applyTheme(); setInterval(applyTheme, 600000);
 document.addEventListener('visibilitychange', () => { if(!document.hidden) applyTheme(); });
 
-const FL = { days:30, data:null, mc:null };
-async function loadFlow(){ FL.data = null; const [a, b] = await Promise.all([sb.rpc('product_flow', { p_days:FL.days, p_stores:selStores() }), sb.rpc('money_cycle', { p_stores:selStores() })]);
+const FL = { days:30, data:null, mc:null, tb:null, target:90, open:'' };
+/* «Оборот»: за сколько дней оборачивается товар в каждом магазине, сколько нужно продавать и что сделать */
+async function loadTurn(){ const { data, error } = await sb.rpc('turnover_board', { p_target:FL.target }); if(error){ FL.tb = { err:errText(error) }; return; } FL.tb = data || { err:'нет доступа' }; }
+function turnHtml(){
+  const T = FL.tb; if(!T) return '<div class="card" style="margin-top:10px"><div class="meta">Считаем оборот…</div></div>'; if(T.err) return '';
+  const mm = v => (+v||0) >= 1e6 ? ((+v)/1e6).toLocaleString('ru-RU',{maximumFractionDigits:1})+' млн' : nf(v);
+  const col = d => d==null ? '' : d <= T.target ? 'color:var(--ok,#2f855a)' : d <= T.target*2 ? 'color:var(--warn,#b7791f)' : 'color:var(--bad,#c0392b)';
+  const rows = (T.stores||[]).map(x => `<tr style="${x.id===0?'font-weight:700;background:var(--soft,rgba(127,127,127,.08))':''}"><td style="text-align:left">${esc(x.name)}</td><td class="num">${mm(x.stock)}</td><td class="num">${mm(x.cogs_m)}</td>
+      <td class="num" style="${col(x.days)}"><b>${x.days!=null?nf(x.days)+' дн.':'—'}</b></td><td class="num">${x.days?(365/x.days).toLocaleString('ru-RU',{maximumFractionDigits:1}):'—'}</td>
+      <td class="num">${mm(x.rev_m)}</td><td class="num"><b>${x.need_rev!=null?mm(x.need_rev):'—'}</b>${x.need_rev&&x.rev_m?` <span class="meta">×${(x.need_rev/x.rev_m).toLocaleString('ru-RU',{maximumFractionDigits:1})}</span>`:''}</td>
+      <td class="num">${x.stock>x.need_stock?'−'+mm(x.stock-x.need_stock):'в норме'}</td></tr>`).join('');
+  const item = (p, extra) => `<div class="prod" style="grid-template-columns:44px minmax(0,1fr) auto">${thumb(p)}<span><b>${pcl(p.id, esc(p.name))}</b><br><span class="meta num">в наличии ${nf(p.bal)} · продано за 30 дн. ${nf(p.sold30)}${p.cover!=null?' · запаса на '+nf(p.cover)+' дн.':''}${p.idle>=90?' · без продаж '+nf(p.idle)+' дн.':''}${p.sup?' · '+esc(p.sup):''}</span></span><span style="text-align:right">${extra(p)}</span></div>`;
+  const sec = (k, ico, title, n, sub, L, extra) => `<details class="card" style="margin-top:8px" ${FL.open===k?'open':''} data-tbopen="${k}"><summary style="cursor:pointer"><b>${ico} ${title}: ${nf(n)}</b> <span class="meta">${sub}</span></summary>
+      <div class="list" style="margin-top:8px;max-height:520px;overflow:auto">${(L||[]).map(p=>item(p, extra)).join('') || '<div class="meta">Нет</div>'}</div>${n>(L||[]).length?`<div class="meta" style="margin-top:6px">Показаны первые ${(L||[]).length} — самые важные.</div>`:''}</details>`;
+  const N = (T.stores||[]).find(x=>x.id===0) || {};
+  return `<div class="card" style="margin-top:10px"><div class="row" style="flex-wrap:wrap;gap:8px"><b style="font-size:17px">Оборот товара</b><span class="meta" style="flex:1">сейчас сеть оборачивается за <b style="${col(N.days)}">${N.days!=null?nf(N.days):'—'} дн.</b></span>
+      <label class="meta">Цель: <select id="tb-target">${[60,90,120,150,180].map(d=>`<option value="${d}" ${FL.target===d?'selected':''}>${d} дней</option>`).join('')}</select></label></div>
+    <div class="scroll" style="margin-top:8px"><table class="mc" style="width:100%"><thead><tr><th style="text-align:left">Магазин</th><th>Товара, ₸</th><th>Продаётся в мес., ₸</th><th>Оборот</th><th>Раз в год</th><th>Выручка в мес.</th><th>Нужно выручки в мес.</th><th>Или убрать товара</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="meta" style="margin-top:6px">«Товара» и «продаётся» — по себестоимости, среднее за 3 месяца. «Нужно выручки» — сколько продавать в месяц, чтобы при нынешнем запасе товар оборачивался за ${T.target} дней. «Или убрать» — на сколько сократить запас при нынешних продажах.</div></div>
+  ${sec('reorder','🛒','Дозаказать', T.reorder_n, 'ходовые, запаса меньше месяца, в пути ничего нет', T.reorder, p => p.has_buy ? (p.purchase_url?`<a class="btn small primary" href="${esc(p.purchase_url)}" target="_blank" rel="noopener" style="text-decoration:none">К поставщику</a>`:`<span class="chip ok">${esc(p.sup||'есть в заказах')}</span>`) : '<span class="chip warn">нет закупа</span>')}
+  ${sec('over','🧊','Не дозаказывать, распродать', T.over_n, `запас больше чем на 6 месяцев · лишнего на ${mm(T.over_sum)} ₸`, T.over, p => `<b class="num">${mm(p.extra)} ₸</b><br><span class="meta">лишнего</span>`)}
+  ${sec('stale','🕸','Залежи', T.stale_n, `не продавались 90 дней · ${mm(T.stale_sum)} ₸`, T.stale, p => `<b class="num">${mm(p.extra)} ₸</b><br><span class="meta">лежит</span>`)}`;
+}
+document.addEventListener('change', async e => { if(S.view!=='flow' || e.target.id!=='tb-target') return; FL.target = +e.target.value; await loadTurn(); render(); });
+document.addEventListener('toggle', e => { const d = e.target; if(S.view==='flow' && d.dataset && d.dataset.tbopen){ if(d.open) FL.open = d.dataset.tbopen; else if(FL.open===d.dataset.tbopen) FL.open = ''; } }, true);
+async function loadFlow(){ FL.data = null; loadTurn().then(() => { if(S.view==='flow') render(); }); const [a, b] = await Promise.all([sb.rpc('product_flow', { p_days:FL.days, p_stores:selStores() }), sb.rpc('money_cycle', { p_stores:selStores() })]);
   if(a.error) toast(errText(a.error)); FL.data = a.data || null; FL.mc = b.error ? null : (b.data || null); }
 function cycleHtml(M){
   if(!M) return '';
@@ -5270,6 +5294,7 @@ function renderFlow(){
   const list = (L, cols) => `<div class="list" style="margin-top:6px">${L.map(p=>`<div class="prod" style="grid-template-columns:44px minmax(0,1fr) auto">${thumb(p)}<span><b>${pcl(p.id||p.product_id, esc(p.name))}</b><br><span class="meta num">${esc(p.barcode||'')} · в наличии ${nf(p.qty)}${p.units?' · продано '+nf(p.units):''}</span><br>${p.no_photo?'<span class="chip zero">нет фото</span>':''}${p.no_card?'<span class="chip warn">карточка</span>':''}${p.no_site?'<span class="chip warn">нет на сайте</span>':''}</span><span class="price num">${cols==='retail'?fmt(p.retail):fmt(p.price)}</span></div>`).join('')}</div>`;
   $('#main').innerHTML = `<div class="row"><h2>Путь товара</h2><div class="seg">${[30,90].map(d=>`<button data-fldays="${d}" aria-pressed="${FL.days===d}">${d} дней</button>`).join('')}</div></div>
   ${!D?'<div class="empty">Считаем…</div>':`
+  ${turnHtml()}
   ${cycleHtml(FL.mc)}
   <details style="margin-top:16px"><summary class="label" style="cursor:pointer;padding:6px 0">Подробно: приёмки, фото, сайт и списки товаров</summary>
   <p class="meta" style="margin:6px 0 4px">Наведите на карточку (или нажмите на телефоне) — появится объяснение. Клик по карточке открывает нужную вкладку.</p>
