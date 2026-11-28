@@ -1905,6 +1905,7 @@ const NM_FX = [['status','Статус',[['ходовой','Ходовой'],['�
   ['stock','Наличие',[['in','В наличии'],['out','Нет в наличии']]], ['photo','Фото',[['y','С фото'],['n','Без фото']]],
   ['brand','Бренд',[['moon','MOON'],['sunshine','Sunshine'],['both','MOON и Sunshine']]], ['site','Сайт',[['y','На сайте'],['n','Не на сайте']]],
   ['miss','Не хватает',[['price','Без цены'],['cost','Без себестоимости'],['url','Без ссылки на закуп'],['supplier','Без поставщика']]],
+  ['path','Путь товара',[['full','Полный путь: закуп и сайт'],['nosite','Нет на сайте'],['nobuy','Нет закупа'],['none','Нет ни сайта, ни закупа']]],
   ['arch','Архив',[['all','С архивными'],['only','Только архив']]]];
 // путь товара: закуп (1688) → база → сайт. Считаем по товарам, которые продавались за 60 дней
 function nmPathHtml(f){ const C = S.nmPath, cur = (f.fx||{}).path || '';
@@ -1938,7 +1939,6 @@ function renderNom(){
     <div class="filters"><input id="nm-q" placeholder="Штрихкод, артикул или название" value="${esc(f.q)}" style="flex:1;min-width:180px">
       <select id="nm-cat"><option value="">Все категории</option><option value="-1" ${String(f.cat)==='-1'?'selected':''}>⚠ Без категории</option>${cats.map(c=>`<option value="${c.id}" ${String(f.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
 </div>
-    ${nmPathHtml(f)}
     ${nmFxHtml(f)}
     ${f.flag&&f.flag!=='photo'?`<div class="row" style="justify-content:flex-start;gap:8px;margin:8px 0"><span class="chip warn">Показаны только товары в наличии: ${NM_FLAG[f.flag]||f.flag}</span><button class="btn small" id="nm-flag-x">✕ Снять фильтр</button></div>`:''}
     ${!D?'<div class="empty">Загружаем…</div>':`<p class="meta">Найдено: ${D.total.toLocaleString('ru-RU')}. Нажмите на название, чтобы открыть карточку. Категорию можно менять прямо в таблице.</p>
@@ -2421,7 +2421,8 @@ function poScopeRow(){ if(S.view!=='site') return `<div class="filters">${[['pro
   if(CH.tab!=='china') return ''; return `<div class="filters">${[['transit','в пути'],['received','получены'],['all','все заказы']].map(([k,v])=>`<button class="btn small ${PO.mscope===k?'primary':''}" data-pomscope="${k}">${v}</button>`).join('')}</div>`; }
 function chSync(){ if(chIsPo()){ PO.mode = 'match'; const want = CH_PO[CH.tab]; if(CH.tab==='china'){ if(!['transit','received','all'].includes(PO.mscope)) PO.mscope = 'transit'; } else PO.mscope = want; } else if(S.st) S.st.status = CH.tab; }
 /* «Цепочка товара» — одна страница: слева закуп 1688, в центре товар базы, справа сайт. Где звена нет — там и дописываем связь. */
-const CHN2 = { need:'all', cat:'', mat:'', q:'', off:0, data:null, rows:null };
+const CHN2 = { need:'sug', cat:'', mat:'', q:'', off:0, data:null, rows:null };
+const CH_STEPS = [['sug','Подтвердить подсказки'],['check','Проверить связи с сайтом'],['grp','Общие товары: закуп по моделям']];
 const CH_NEED = [['all','Все'],['buy','Нет закупа'],['site','Нет на сайте'],['sug','💡 Есть подсказки'],['check','Сайт: подтвердить'],['warn','⚠️ Не совпадает цвет/категория'],['full','✅ Полная цепочка'],['grp','📦 Общие товары (в асс)'],['moonsite','🌙 Предложение на сайт MOON'],['charms','🌐 На сайте есть, в базе нет: сайт ↔ закуп']];
 /* общий товар: один штрихкод на много моделей. Раскрываем — каждая модель (карточка сайта) со своим закупом */
 async function loadGroup(id){ const { data, error } = await sb.rpc('chain_group', { p_id:id }); if(error){ toast(errText(error)); return; } (CHN2.grp ||= {})[id] = data || []; }
@@ -2473,7 +2474,10 @@ function renderChain(){
   <div class="filters"><select id="ch-cat"><option value="">Все категории</option>${(F.cats||[]).map(c=>`<option value="${c.id}" ${String(F.cat)===String(c.id)?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
     <select id="ch-mat"><option value="">Все материалы</option>${mats.map(m=>`<option ${F.mat===m?'selected':''}>${esc(m)}</option>`).join('')}</select>
     <input id="ch-q" placeholder="Поиск: название или штрихкод" value="${esc(F.q)}" style="flex:1;min-width:180px"></div>
-  <div class="filters">${CH_NEED.map(([k,v])=>{ const n = k==='charms' ? PO.cn : N[k]; return `<button class="btn small ${F.need===k?'primary':''}" data-chneed="${k}">${v}${n!=null?` (${n})`:''}</button>`; }).join('')}</div>
+  <div class="card" style="margin:8px 0;padding:10px 12px"><div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;align-items:center"><b>С чего начать:</b>
+    ${CH_STEPS.map(([k,v],i)=>`<button class="btn small ${F.need===k?'primary':''}" data-chneed="${k}">${i+1}. ${v}${N[k]!=null?` (${N[k]})`:''}</button>`).join('')}
+    <span style="flex:1"></span><select id="ch-other" ${CH_STEPS.some(x=>x[0]===F.need)?'':'style="border-color:var(--accent);font-weight:600"'}><option value="">Другие списки…</option>${CH_NEED.filter(([k])=>!CH_STEPS.some(x=>x[0]===k)).map(([k,v])=>{ const n = k==='charms' ? PO.cn : N[k]; return `<option value="${k}" ${F.need===k?'selected':''}>${v}${n!=null?` (${n})`:''}</option>`; }).join('')}</select></div>
+    <div class="meta" style="margin-top:6px">${({sug:'Silver нашёл похожее по фото. Нажми «Связать», если это тот же товар, или «Не он».',check:'Эти карточки сайта связаны автоматически. Нажми «Верно» или «Отвязать».',grp:'Один штрихкод на много моделей. Раскрой товар и выбери закуп для каждой модели.'})[F.need]||''}</div></div>
   ${F.need==='moonsite'&&D?`<div class="card meta" style="margin:6px 0">Кандидаты на сайт MOON: в магазинах MOON от 3 шт., за 60 дней продано от 3, есть фото, карточки на сайте нет (и нет второго цвета или похожего названия). Всего: <b>${D.total}</b>. Сверху самые продаваемые. Ничего не загружено — сначала посмотри список.</div>`:''}
   ${F.need==='charms' ? charmTable((u,w)=>pic(u,w||80)) : !L ? '<div class="empty">Загружаем…</div>' : !L.length ? '<div class="empty">Ничего не нашлось</div>' :
   `${(()=>{ const ids = Object.keys(CHN2.sel||{}).filter(k=>CHN2.sel[k]); const noBuy = L.filter(p=>!p.has_buy); return noBuy.length ? `<div class="card row" style="flex-wrap:wrap;justify-content:flex-start;gap:8px;margin:8px 0;padding:8px 12px">
@@ -2502,7 +2506,7 @@ document.addEventListener('change', async e => { if(S.view!=='site') return; con
   if(t.dataset && t.dataset.chsel){ (CHN2.sel ||= {})[t.dataset.chsel] = t.checked; return render(); }
   if(t.id==='ch-selall'){ CHN2.sel ||= {}; (CHN2.rows||[]).filter(p=>!p.has_buy).forEach(p=>{ CHN2.sel[p.id] = t.checked; }); return render(); }
   if(t.dataset && t.dataset.chsup){ if(!t.value) return; const { error } = await sb.rpc('product_set_supplier', { p_id:t.dataset.chsup, p_sup:+t.value }); if(error) return toast(errText(error)); toast('Поставщик сохранён'); const r = (CHN2.rows||[]).find(x=>x.id===t.dataset.chsup); if(r){ r.sup = t.options[t.selectedIndex].text; r.has_buy = true; } return render(); }
-  if(t.id==='ch-cat'){ CHN2.cat = t.value; } else if(t.id==='ch-mat'){ CHN2.mat = t.value; } else return; CHN2.rows = null; render(); await loadChain(); render(); });
+  if(t.id==='ch-cat'){ CHN2.cat = t.value; } else if(t.id==='ch-mat'){ CHN2.mat = t.value; } else if(t.id==='ch-other'){ if(!t.value) return; CHN2.need = t.value; CHN2.open = null; } else return; CHN2.rows = null; render(); await loadChain(); render(); });
 document.addEventListener('input', e => { if(S.view!=='site' || e.target.id!=='ch-q') return; CHN2.q = e.target.value; clearTimeout(CHN2.qT); CHN2.qT = setTimeout(async()=>{ CHN2.rows = null; await loadChain(); render(); }, 400); });
 async function loadSite(){
   const f = S.st; f.data = null;
