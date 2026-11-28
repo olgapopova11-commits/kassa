@@ -4387,7 +4387,7 @@ document.addEventListener('change', async e => { if(S.view==='day' && e.target.i
 
 /* ---------- доступ к вкладкам по ролям ---------- */
 const ALL_TABS = [['pos','Продажа'],['analytics','Аналитика'],['shifts','Смены'],['cash','Расходы'],['sales','Чеки и возвраты'],['stock','Остатки (в «Складе»)'],['wh','Склад'],['certs','Сертификаты'],['bonus','Бонусные карты'],['nom','Номенклатура'],['site','Сайт'],['emps','Сотрудники']];
-const EXTRA_TABS = [['day','Мой день'],['attn','Требует внимания (в «Моём дне»)'],['photo','Фотосессия'],['pay','Зарплата'],['cons','Консультанты'],['po','Закуп'],['promo','Акции'],['content','Контент'],['flow','Путь товара'],['profit','Рентабельность'],['bot','Бот']];
+const EXTRA_TABS = [['day','Мой день'],['attn','Требует внимания (в «Моём дне»)'],['photo','Фотосессия'],['pay','Зарплата'],['cons','Консультанты'],['po','Закуп'],['promo','Акции'],['content','Контент'],['flow','Оборот'],['profit','Рентабельность'],['bot','Бот']];
 const EXTRA_DEF = { day:['manager','purchaser','consultant','viewer','accountant'], attn:['manager','purchaser','viewer','accountant'], photo:['manager','purchaser'], pay:['manager','purchaser','viewer','accountant'], cons:['manager'], po:['manager','purchaser','viewer','accountant'], promo:['manager','purchaser','viewer','accountant'], content:['manager','purchaser','viewer'], flow:['manager','viewer','accountant'], profit:['viewer'], bot:['manager'] };
 ALL_TABS.push(...EXTRA_TABS);
 const BOSS_ONLY = ['analytics','bonus','nom','site','emps'];
@@ -5247,9 +5247,7 @@ function cycleHtml(M){
   const box = (t, v, sub, hot) => `<div class="card" style="padding:12px;${hot?'border:2px solid var(--warn)':''}"><div class="label">${t}</div><div class="total num" style="font-size:20px">${v}</div><div class="meta">${sub}</div></div>`;
   const act = (n, t, why, go, btn, an) => `<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--line)"><div style="min-width:0;flex:1 1 240px"><b>${n}. ${t}</b><div class="meta">${why}</div></div>${can(go)?`<button class="btn small" data-flgo="${go}"${an?` data-flan="${an}"`:''}>${btn}</button>`:''}</div>`;
   const A = []; let i = 1;
-  if(+T.excess > 0) A.push(act(i++, 'Не дозаказывать и распродать лишнее', `${mm(T.excess)} лежит сверх запаса на 3 месяца продаж — в ${nf(T.excess_n)} товарах. Самые дорогие идут первыми.`, 'nom', 'Открыть список'));
   if(+M.move_n > 0) A.push(act(i++, 'Переместить между магазинами', `${nf(M.move_n)} товаров в одном магазине лежат без движения, а в другом закончились.`, 'wh', 'К перемещениям'));
-  if(+L.sum > 0) A.push(act(i++, 'Дозаказать ходовое', `За 30 дней упущено около ${mm(L.sum)}: ${nf(L.n)} товаров были в нуле, хотя продаются.`, 'analytics', 'Что дозаказать', 'inv'));
   if(+O.old_n > 0) A.push(act(i++, 'Закрыть старые заказы', `${nf(O.old_n)} заказов на ${mm(O.old_c)} числятся «в пути» больше 30 дней. Принять, если уже пришли.`, 'po', 'К закупу'));
   return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:10px">
     ${box('1. Заказ в пути', mm(O.cost), O.n ? `в среднем ${nf(O.days)} дн. · ${nf(O.n)} заказов` : 'заказов нет')}
@@ -5292,7 +5290,7 @@ function renderFlow(){
   const bar = (ok, no) => { const p = ok+no ? Math.round(ok/(ok+no)*100) : 0; return `<div class="fl-bar"><span style="width:${p}%"></span></div><div class="meta">${p}% готово · не хватает у ${nf(no)}</div>`; };
   const st = (ok,no) => { const p = ok+no ? ok/(ok+no) : 1; return p>=.85?'ok':p>=.5?'warn':'bad'; };
   const list = (L, cols) => `<div class="list" style="margin-top:6px">${L.map(p=>`<div class="prod" style="grid-template-columns:44px minmax(0,1fr) auto">${thumb(p)}<span><b>${pcl(p.id||p.product_id, esc(p.name))}</b><br><span class="meta num">${esc(p.barcode||'')} · в наличии ${nf(p.qty)}${p.units?' · продано '+nf(p.units):''}</span><br>${p.no_photo?'<span class="chip zero">нет фото</span>':''}${p.no_card?'<span class="chip warn">карточка</span>':''}${p.no_site?'<span class="chip warn">нет на сайте</span>':''}</span><span class="price num">${cols==='retail'?fmt(p.retail):fmt(p.price)}</span></div>`).join('')}</div>`;
-  $('#main').innerHTML = `<div class="row"><h2>Путь товара</h2><div class="seg">${[30,90].map(d=>`<button data-fldays="${d}" aria-pressed="${FL.days===d}">${d} дней</button>`).join('')}</div></div>
+  $('#main').innerHTML = `<div class="row"><h2>Оборот</h2><div class="seg">${[30,90].map(d=>`<button data-fldays="${d}" aria-pressed="${FL.days===d}">${d} дней</button>`).join('')}</div></div>
   ${!D?'<div class="empty">Считаем…</div>':`
   ${turnHtml()}
   ${cycleHtml(FL.mc)}
