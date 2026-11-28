@@ -64,7 +64,7 @@ async function onSelChange(){
 function normPhone(v){ let d=String(v||'').replace(/\D/g,''); if(d.length===11&&(d[0]==='7'||d[0]==='8')) d=d.slice(1); if(d.length===10) return '+7'+d; return null; }
 function toast(t){ const el=document.createElement('div'); el.className='toast'; el.textContent=t; document.body.append(el); setTimeout(()=>el.remove(),3200); }
 const ls = { get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d }catch(e){ return d } }, set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)) }catch(e){} } };
-const thumbUrl = u => /alicdn\.com/.test(u) ? u.replace(/(_\d+x\d+.*)?$/,'_160x160.jpg') : u.replace('static.tildacdn.pro/','thumb.tildacdn.pro/').replace(/\/([^/]+)$/,'/-/resize/120x/$1');
+const thumbUrl = u => /\/product-photos\/base\//.test(u) ? u.replace('/product-photos/base/','/product-photos/thumb/base/') : /alicdn\.com/.test(u) ? u.replace(/(_\d+x\d+.*)?$/,'_160x160.jpg') : u.replace('static.tildacdn.pro/','thumb.tildacdn.pro/').replace(/\/([^/]+)$/,'/-/resize/120x/$1');
 // увеличенное фото при наведении на миниатюру (на телефоне — по касанию и удержанию)
 (() => {
   let box;
@@ -2447,7 +2447,7 @@ async function loadChain(more){
 }
 function renderChain(){
   const F = CHN2, D = F.data, N = (D&&D.n)||{}, L = F.rows;
-  const pic = (u, w=80) => u?`<img referrerpolicy="no-referrer" src="${esc(/cbu\d*\.alicdn\.com\/img\/ibank/.test(u)&&!/_\d+x\d+/.test(u)?u+'_400x400.jpg':u)}" data-full="${esc(u)}" onerror="if(this.src!==this.dataset.full)this.src=this.dataset.full" loading="lazy" style="width:${w}px;height:${w}px;object-fit:cover;border-radius:10px;background:#eee;flex:none">`:`<span style="width:${w}px;height:${w}px;border-radius:10px;background:#eee;display:inline-block;flex:none"></span>`;
+  const pic = (u, w=80) => u?`<img referrerpolicy="no-referrer" src="${esc(/\/product-photos\/base\//.test(u)?u.replace('/product-photos/base/','/product-photos/thumb/base/'):/cbu\d*\.alicdn\.com\/img\/ibank/.test(u)&&!/_\d+x\d+/.test(u)?u+'_400x400.jpg':u)}" data-full="${esc(u)}" onerror="if(this.src!==this.dataset.full)this.src=this.dataset.full" loading="lazy" style="width:${w}px;height:${w}px;object-fit:cover;border-radius:10px;background:#eee;flex:none">`:`<span style="width:${w}px;height:${w}px;border-radius:10px;background:#eee;display:inline-block;flex:none"></span>`;
   const box = (ph, html) => `<div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start;margin-bottom:8px">${pic(ph)}<div style="min-width:0;font-size:13px">${html}</div></div>`;
   const sug = (kind, x, pid) => box(x.photo, `<div class="meta">💡 похоже</div><div style="max-height:2.6em;overflow:hidden">${esc(noZh(x.title)||'')}</div>
       <div class="meta">${kind==='s'?(x.site==='moon'?'MOON':'Sunshine'):(x.refs>1?x.refs+' позиции · заказы №':'заказ №')+x.order_no}${x.url?` · <a href="${esc(x.url)}" target="_blank" rel="noopener">открыть</a>`:''}</div>
@@ -3851,7 +3851,7 @@ function renderPo(){
         <button class="btn primary" id="po-save" ${d.items.length?'':'disabled'}>Оформить заказ</button></div></div>`;
   }
   if(PO.mode==='match' && (PO.mscope||'prod')==='prod'){ const L = PO.plist;
-    const pic = (u, w=96) => u?`<img referrerpolicy="no-referrer" src="${esc(/cbu\d*\.alicdn\.com\/img\/ibank/.test(u)&&!/_\d+x\d+/.test(u)?u+'_400x400.jpg':u)}" data-full="${esc(u)}" onerror="if(this.src!==this.dataset.full)this.src=this.dataset.full" loading="lazy" style="width:${w}px;height:${w}px;object-fit:cover;border-radius:10px;background:#eee">`:`<span style="width:${w}px;height:${w}px;border-radius:10px;background:#eee;display:inline-block"></span>`;
+    const pic = (u, w=96) => u?`<img referrerpolicy="no-referrer" src="${esc(/\/product-photos\/base\//.test(u)?u.replace('/product-photos/base/','/product-photos/thumb/base/'):/cbu\d*\.alicdn\.com\/img\/ibank/.test(u)&&!/_\d+x\d+/.test(u)?u+'_400x400.jpg':u)}" data-full="${esc(u)}" onerror="if(this.src!==this.dataset.full)this.src=this.dataset.full" loading="lazy" style="width:${w}px;height:${w}px;object-fit:cover;border-radius:10px;background:#eee">`:`<span style="width:${w}px;height:${w}px;border-radius:10px;background:#eee;display:inline-block"></span>`;
     const sug = (kind, x, pid) => `<div class="row" style="justify-content:flex-start;gap:8px;align-items:flex-start;margin-bottom:6px">${pic(x.photo,72)}<div style="min-width:0"><div class="meta" style="max-height:3.6em;overflow:hidden">${esc(noZh(x.title)||'')}</div>
       <div class="meta">${kind==='s'?(x.site==='moon'?'mooncollection.kz':'sunshinejewelry.kz'):(x.refs>1?x.refs+' позиции · заказы №':'заказ №')+x.order_no+' · '+x.qty+' шт.'}${x.url?` · <a href="${esc(x.url)}" target="_blank" rel="noopener">открыть</a>`:''}</div>
       <span class="row" style="gap:4px;justify-content:flex-start;margin-top:4px"><button class="btn small primary" data-pmok="${kind}:${x.ref}:${pid}">✅ Связать</button><button class="btn small" data-pmno="${kind}:${x.ref}">✖ Не он</button></span></div></div>`;
